@@ -34,6 +34,16 @@ Run lint and typecheck before declaring any task done.
 Use EAS to build, sign, and submit the app in the cloud (`eas build`, `eas submit`) and to ship over-the-air updates (`eas update`) — no local Xcode or Android Studio required. Run EAS CLI as `bunx eas-cli <command>` in Bun projects, or `npx eas-cli@latest <command>` otherwise; substitute that for bare `eas` in docs examples.
 Docs: https://docs.expo.dev/eas/index.md
 
+## Reviewing other people's pull requests
+
+Use the GitHub CLI (`gh`) — installed at `C:\ghcli\gh.exe`, also on PATH.
+
+- `gh auth login` once, then `gh pr list` to find PR numbers.
+- `gh pr checkout <n>` to get the PR branch locally. Never push to it.
+- Detect merge conflicts: `git fetch origin main; git merge --no-commit --no-ff origin/main`. Report the conflicting files with `git status` / `git diff --name-only --diff-filter=U`, then always clean up with `git merge --abort` before switching away.
+- Run checks on the PR branch: `npx tsc --noEmit` and `npx expo lint`. Report failures as `file:line` with the command that produced them; do not auto-fix or commit unless asked.
+- Return to the starting branch when finished (`git checkout -`) and reinstall dependencies only if `package.json`/lockfile changed (`npm ci`).
+
 ## Rules
 
 - If `ios/` and `android/` directories do not exist, they are generated (Continuous Native Generation). Never create or edit them by hand — configure native behavior in `app.json` and config plugins.
