@@ -175,10 +175,8 @@ Satu FR memiliki **satu PIC** yang bertanggung jawab menyelesaikan perilaku dan 
 |---|---|---|---|
 | P1 | **Olivia Oktaviani — 24060124120050** | Fondasi proyek, navigasi, identitas demo, data dummy, state bersama | FR-01, FR-11, FR-12 |
 | P2 | **Husni Ulyaa Khanifah — 24060124120021** | Daftar jadwal, detail sesi, keadaan kosong, konsistensi tampilan | FR-02, FR-03, FR-10 |
-| P3 | **Nabila Kayla Rafa — 2406012412002** | Buka/tutup sesi dan rekap asisten | FR-04, FR-05, FR-08 |
+| P3 | **Nabila Kayla Rafa — 24060124120022** | Buka/tutup sesi dan rekap asisten | FR-04, FR-05, FR-08 |
 | P4 | **Nadia Azura Nurhaniya — 24060124120019** | Presensi dan riwayat praktikan | FR-06, FR-07, FR-09 |
-
-**Catatan administrasi:** NIM Nabila tercatat `2406012412002` sesuai pesan PM. Jumlah digitnya berbeda dari tiga NIM lain; PM perlu memeriksanya sebelum dokumen diserahkan secara resmi.
 
 ## 12. Matriks pekerjaan rinci per kebutuhan SRS
 
