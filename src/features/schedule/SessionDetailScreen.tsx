@@ -109,9 +109,14 @@ export default function SessionDetailScreen() {
     const attendance = attendanceByPraktikan.get(praktikan.id);
     return attendance !== undefined && attendance.status !== 'izin';
   });
-  const excusedPraktikans = enrolledPraktikans.filter(
-    (praktikan) => attendanceByPraktikan.get(praktikan.id)?.status === 'izin',
-  );
+  const sickPraktikans = enrolledPraktikans.filter((praktikan) => {
+    const attendance = attendanceByPraktikan.get(praktikan.id);
+    return attendance?.status === 'izin' && attendance.excuseReason === 'sakit';
+  });
+  const excusedPraktikans = enrolledPraktikans.filter((praktikan) => {
+    const attendance = attendanceByPraktikan.get(praktikan.id);
+    return attendance?.status === 'izin' && attendance.excuseReason !== 'sakit';
+  });
   const notRecordedPraktikans = enrolledPraktikans.filter(
     (praktikan) => !attendanceByPraktikan.has(praktikan.id),
   );
@@ -222,6 +227,48 @@ export default function SessionDetailScreen() {
         { text: 'Batal', style: 'cancel' },
         { text: 'Sakit', onPress: () => confirmExcused('sakit') },
         { text: 'Izin lainnya', onPress: () => confirmExcused('izin-lainnya') },
+      ],
+    );
+  };
+
+  const handleManualAttendance = (praktikan: Praktikan) => {
+    if (!session || session.status !== 'dibuka' || attendanceByPraktikan.has(praktikan.id)) return;
+
+    const saveExcusedStatus = (reason: ExcuseReason) => {
+      const result = markExcused(session.id, praktikan.id, reason);
+      Alert.alert(
+        result.ok ? 'Status presensi dicatat' : 'Status presensi tidak berhasil',
+        result.ok
+          ? `${praktikan.name} dicatat ${reason === 'sakit' ? 'sakit' : 'izin lainnya'}.`
+          : result.reason ?? 'Silakan coba lagi.',
+      );
+    };
+
+    Alert.alert(
+      'Presensi Manual',
+      `Pilih keterangan presensi untuk ${praktikan.name}.`,
+      [
+        { text: 'Batal', style: 'cancel' },
+        {
+          text: 'Hadir',
+          onPress: () => showMutationResult(
+            'Presensi berhasil dicatat',
+            `${praktikan.name} dicatat hadir.`,
+            checkIn(session.id, praktikan.id),
+          ),
+        },
+        {
+          text: 'Izin / Sakit',
+          onPress: () => Alert.alert(
+            'Pilih Keterangan',
+            `Pilih keterangan untuk ${praktikan.name}.`,
+            [
+              { text: 'Batal', style: 'cancel' },
+              { text: 'Sakit', onPress: () => saveExcusedStatus('sakit') },
+              { text: 'Izin lainnya', onPress: () => saveExcusedStatus('izin-lainnya') },
+            ],
+          ),
+        },
       ],
     );
   };
@@ -388,22 +435,17 @@ export default function SessionDetailScreen() {
               <View style={styles.divider} />
 
               <View style={styles.infoGrid}>
-                <InfoRow
-                  icon="calendar"
-                  label="TANGGAL"
-                  value={formatDateLong(session.startsAt)}
-                />
+                <InfoRow icon="calendar" label="TANGGAL" value={formatDateLong(session.startsAt)} />
                 <InfoRow
                   icon="time"
                   label="WAKTU"
                   value={`${formatTime(session.startsAt)}–${formatTime(session.endsAt)} WIB`}
                 />
-              </View>
-
-              <View style={styles.locationRow}>
-                <InfoRow icon="business" label="LOKASI LABORATORIUM" value={getLabLabel(session)} />
-              </View>
-              <View style={styles.classRow}>
+                <InfoRow
+                  icon="business"
+                  label="LOKASI LABORATORIUM"
+                  value={getLabLabel(session)}
+                />
                 <InfoRow
                   icon="people"
                   label="KELAS"
@@ -437,8 +479,13 @@ export default function SessionDetailScreen() {
 
                   <View style={styles.statsGrid}>
                     <AttendanceStat label="Hadir" value={presentPraktikans.length} tone="success" />
-                    <AttendanceStat label="Belum Presensi" value={notRecordedPraktikans.length} tone="warning" />
                     <AttendanceStat label="Izin" value={excusedPraktikans.length} tone="info" />
+                    <AttendanceStat label="Sakit" value={sickPraktikans.length} tone="info" />
+                    <AttendanceStat
+                      label={session.status === 'ditutup' ? 'Alpha' : 'Belum Presensi'}
+                      value={notRecordedPraktikans.length}
+                      tone="warning"
+                    />
                     <AttendanceStat label="Total" value={enrolledPraktikans.length} />
                   </View>
 
@@ -447,7 +494,7 @@ export default function SessionDetailScreen() {
                     <Text style={styles.percentageValue}>{presentPercentage.toFixed(1)}%</Text>
                   </View>
                   <View style={styles.percentageRow}>
-                    <Text style={styles.percentageLabel}>Presensi Tercatat (Hadir + Izin)</Text>
+                    <Text style={styles.percentageLabel}>Presensi Tercatat (Hadir + Izin + Sakit)</Text>
                     <Text style={styles.percentageValue}>{recordedPercentage.toFixed(1)}%</Text>
                   </View>
                   <View style={styles.progressTrack}>
@@ -486,10 +533,10 @@ export default function SessionDetailScreen() {
                     const isExcused = attendance?.status === 'izin';
                     const hasAttended = attendance !== undefined && !isExcused;
                     const statusLabel = isExcused
-                      ? `Izin · ${attendance.excuseReason === 'sakit' ? 'Sakit' : 'Izin lainnya'}`
+                      ? attendance.excuseReason === 'sakit' ? 'Sakit' : 'Izin lainnya'
                       : hasAttended
                         ? `Hadir · ${formatTime(attendance.attendedAt)} WIB`
-                        : 'Belum melakukan presensi';
+                        : session.status === 'ditutup' ? 'Alpha' : 'Belum melakukan presensi';
 
                     return (
                       <View key={praktikan.id} style={styles.personRow}>
@@ -507,14 +554,25 @@ export default function SessionDetailScreen() {
                           size={20}
                           color={isExcused ? colors.primary : hasAttended ? colors.success : colors.warning}
                         />
-                        <Pressable
-                          accessibilityRole="button"
-                          accessibilityLabel={`${isExcused ? 'Ubah alasan izin' : 'Tetapkan izin'} untuk ${praktikan.name}`}
-                          onPress={() => handleMarkExcused(praktikan)}
-                          style={styles.excuseButton}
-                        >
-                          <Text style={styles.excuseButtonText}>{isExcused ? 'Ubah' : 'Izin'}</Text>
-                        </Pressable>
+                        {session.status === 'dibuka' && (isExcused ? (
+                          <Pressable
+                            accessibilityRole="button"
+                            accessibilityLabel={`Ubah alasan izin untuk ${praktikan.name}`}
+                            onPress={() => handleMarkExcused(praktikan)}
+                            style={styles.excuseButton}
+                          >
+                            <Text style={styles.excuseButtonText}>Ubah</Text>
+                          </Pressable>
+                        ) : !hasAttended ? (
+                          <Pressable
+                            accessibilityRole="button"
+                            accessibilityLabel={`Catat presensi manual untuk ${praktikan.name}`}
+                            onPress={() => handleManualAttendance(praktikan)}
+                            style={styles.excuseButton}
+                          >
+                            <Text style={styles.excuseButtonText}>Catat</Text>
+                          </Pressable>
+                        ) : null)}
                       </View>
                     );
                   })}
@@ -712,15 +770,6 @@ const styles = StyleSheet.create({
     fontFamily: fonts.semiBold,
     fontSize: 12,
     lineHeight: 17,
-  },
-  locationRow: {
-    marginTop: spacing.lg,
-    padding: spacing.sm,
-    borderRadius: radius.md,
-    backgroundColor: colors.backgroundAlt,
-  },
-  classRow: {
-    marginTop: spacing.md,
   },
   contactCard: {
     marginHorizontal: spacing.xl,

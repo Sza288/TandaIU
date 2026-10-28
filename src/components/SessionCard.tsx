@@ -9,9 +9,8 @@ import { formatDateShort, formatTime, formatTimeRange } from '../utils/format';
 import { getCourseById } from '../utils/academic';
 import { getLabLabel, getMeetingNumber } from '../utils/session';
 
-function detailLabelFor(session: PracticumSession, role: Role | null) {
-  if (session.status === 'ditutup') return 'Lihat Detail';
-  if (role === 'assistant') return 'Detail Asisten';
+function detailLabelFor(role: Role | null) {
+  if (role === 'assistant') return 'Lihat Detail';
   if (role === 'praktikan') return 'Sesi Praktikan';
   return 'Lihat Detail';
 }
@@ -68,7 +67,7 @@ export default function SessionCard({ session, role }: Props) {
       <View style={styles.divider} />
 
       <View style={styles.footer}>
-        <Text style={styles.link}>{detailLabelFor(session, role)}</Text>
+        <Text style={styles.link}>{detailLabelFor(role)}</Text>
         <Ionicons name="arrow-forward" size={15} color={colors.primary} />
       </View>
     </TouchableOpacity>

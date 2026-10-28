@@ -28,4 +28,21 @@ export const initialAttendances: Attendance[] = [
   { sessionId: 's4', praktikanId: 'p5', attendedAt: '2026-10-26T08:05:00+07:00' },
   { sessionId: 's4', praktikanId: 'p11', attendedAt: '2026-10-26T08:12:00+07:00' },
   { sessionId: 's4', praktikanId: 'p23', attendedAt: '2026-10-26T08:19:00+07:00' },
+
+  { sessionId: 's5', praktikanId: 'p1', attendedAt: '2026-10-27T08:09:00+07:00', status: 'hadir' },
+  { sessionId: 's5', praktikanId: 'p8', attendedAt: '2026-10-27T08:16:00+07:00', status: 'hadir' },
+  {
+    sessionId: 's5',
+    praktikanId: 'p5',
+    attendedAt: '2026-10-27T08:21:00+07:00',
+    status: 'izin',
+    excuseReason: 'sakit',
+  },
+  {
+    sessionId: 's5',
+    praktikanId: 'p11',
+    attendedAt: '2026-10-27T08:25:00+07:00',
+    status: 'izin',
+    excuseReason: 'izin-lainnya',
+  },
 ];
