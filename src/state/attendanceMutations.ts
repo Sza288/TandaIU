@@ -26,6 +26,15 @@ export function applyOpenSession(
       sessions,
     };
   }
+  if (sessions.some((item) => item.id !== sessionId && item.status === 'dibuka')) {
+    return {
+      result: {
+        ok: false,
+        reason: 'Tutup sesi yang sedang berlangsung sebelum membuka sesi lain.',
+      },
+      sessions,
+    };
+  }
   const nextSessions = sessions.map((item) =>
     item.id === sessionId ? { ...item, status: 'dibuka' as const } : item
   );
