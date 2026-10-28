@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { router, useLocalSearchParams } from 'expo-router';
+import { router, useLocalSearchParams, usePathname } from 'expo-router';
 import BottomNav from '../../components/BottomNav';
 import PraktikanIdentityModal from '../../components/PraktikanIdentityModal';
 import ScreenHeader from '../../components/ScreenHeader';
@@ -39,6 +39,7 @@ const ROLE_OPTIONS: {
 
 export default function RoleSelectionScreen() {
   const { from } = useLocalSearchParams<{ from?: string }>();
+  const pathname = usePathname();
   const insets = useSafeAreaInsets();
   const isSwitching = from === 'switch';
 
@@ -76,7 +77,7 @@ export default function RoleSelectionScreen() {
       router.replace('/');
       return;
     }
-    router.replace('/home');
+    router.replace('/');
   };
 
   const navigateToRoleHome = (href: '/assistant' | '/praktikan') => {
@@ -109,7 +110,10 @@ export default function RoleSelectionScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
+    <SafeAreaView
+      style={styles.container}
+      edges={pathname === '/role' ? ['top', 'left', 'right', 'bottom'] : ['top', 'left', 'right']}
+    >
       <ScreenHeader
         title={isSwitching ? 'Ganti Peran' : 'Profil'}
         eyebrow={isSwitching ? 'Pilih tampilan' : 'Akun demo'}
@@ -174,7 +178,7 @@ export default function RoleSelectionScreen() {
                 <Ionicons
                   name={option.icon}
                   size={20}
-                  color={isActive ? colors.textOnPrimary : colors.primary}
+                  color={colors.primaryDark}
                 />
               </View>
               <View style={styles.roleText}>
@@ -196,7 +200,7 @@ export default function RoleSelectionScreen() {
         </Text>
       </ScrollView>
 
-      {!isSwitching ? <BottomNav active="profil" /> : null}
+      {pathname === '/profile' && !isSwitching ? <BottomNav /> : null}
 
       <PraktikanIdentityModal
         visible={showPraktikanModal}
@@ -309,7 +313,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   roleIconActive: {
-    backgroundColor: colors.primary,
+    backgroundColor: colors.primarySoft,
   },
   roleText: {
     flex: 1,
