@@ -84,7 +84,7 @@ export const initialSessions: PracticumSession[] = [
     className: 'D1',
     startsAt: '2026-10-29T08:00:00+07:00',
     endsAt: '2026-10-29T10:00:00+07:00',
-    status: 'dibuka',
+    status: 'terjadwal',
   },
   {
     id: 's10',
