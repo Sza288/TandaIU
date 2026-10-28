@@ -1,19 +1,21 @@
-const DEMO_CLASS_ROSTER = Array.from({ length: 27 }, (_, index) => `p${index + 1}`);
+import { courses } from './courses';
+import { praktikans } from './praktikans';
+import { initialSessions } from './sessions';
 
-const SESSION_ENROLLMENTS: Record<string, readonly string[]> = {
-  s1: DEMO_CLASS_ROSTER,
-  s2: DEMO_CLASS_ROSTER,
-  s3: DEMO_CLASS_ROSTER,
-  s4: DEMO_CLASS_ROSTER,
-  s5: DEMO_CLASS_ROSTER,
-  s6: DEMO_CLASS_ROSTER,
-  s7: DEMO_CLASS_ROSTER,
-  s8: DEMO_CLASS_ROSTER,
-  s9: DEMO_CLASS_ROSTER,
-  s10: DEMO_CLASS_ROSTER,
-  s11: DEMO_CLASS_ROSTER,
-  s12: DEMO_CLASS_ROSTER,
-};
+const courseSemesters = new Map(courses.map((course) => [course.id, course.semester]));
+
+const SESSION_ENROLLMENTS: Record<string, string[]> = Object.fromEntries(
+  initialSessions.map((session) => {
+    const semester = courseSemesters.get(session.courseId);
+    const praktikanIds = semester === undefined
+      ? []
+      : praktikans
+        .filter((praktikan) => praktikan.semester === semester)
+        .map((praktikan) => praktikan.id);
+
+    return [session.id, praktikanIds];
+  }),
+);
 
 export function getSessionIdsForPraktikan(praktikanId: string): string[] {
   return Object.entries(SESSION_ENROLLMENTS)

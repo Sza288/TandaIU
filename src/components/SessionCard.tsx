@@ -6,6 +6,7 @@ import StatusBadge from './StatusBadge';
 import { PracticumSession, Role } from '../types';
 import { colors, fonts, radius, shadows, spacing } from '../theme';
 import { formatDateShort, formatTime, formatTimeRange } from '../utils/format';
+import { getCourseById } from '../utils/academic';
 import { getLabLabel, getMeetingNumber } from '../utils/session';
 
 function detailLabelFor(session: PracticumSession, role: Role | null) {
@@ -22,6 +23,7 @@ type Props = {
 
 export default function SessionCard({ session, role }: Props) {
   const isClosed = session.status === 'ditutup';
+  const course = getCourseById(session.courseId);
 
   return (
     <TouchableOpacity
@@ -42,7 +44,9 @@ export default function SessionCard({ session, role }: Props) {
         <StatusBadge status={session.status} />
       </View>
 
-      <Text style={styles.meeting}>Pertemuan {getMeetingNumber(session)}</Text>
+      <Text style={styles.meeting}>
+        {course ? `Semester ${course.semester} · ` : ''}Pertemuan {getMeetingNumber(session)}
+      </Text>
 
       <View style={styles.dateTimeRow}>
         <View style={styles.dateTimeItem}>

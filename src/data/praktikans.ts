@@ -32,4 +32,8 @@ export const praktikans: Praktikan[] = [
   { id: 'p25', name: 'Zahra Amelia', studentCode: '24060124120025', semester: 1 },
   { id: 'p26', name: 'Aldi Firmansyah', studentCode: '24060124120026', semester: 3 },
   { id: 'p27', name: 'Bella Anjani', studentCode: '24060124120027', semester: 5 },
+  { id: 'p28', name: 'Candra Wibowo', studentCode: '24060124120028', semester: 2 },
+  { id: 'p29', name: 'Dinda Pertiwi', studentCode: '24060124120029', semester: 2 },
+  { id: 'p30', name: 'Evan Maulana', studentCode: '24060124120030', semester: 4 },
+  { id: 'p31', name: 'Farah Nabila', studentCode: '24060124120031', semester: 4 },
 ];
