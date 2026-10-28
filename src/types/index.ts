@@ -12,6 +12,7 @@ export type PracticumCourse = {
 
 export type PracticumSession = {
   id: string;
+  courseId: string;
   practicumName: string;
   className: string;
   startsAt: string; // ISO 8601
@@ -26,10 +27,14 @@ export type Praktikan = {
   semester: Semester;
 };
 
+export type ExcuseReason = 'sakit' | 'izin-lainnya';
+
 export type Attendance = {
   sessionId: string;
   praktikanId: string;
   attendedAt: string; // ISO 8601
+  status?: 'hadir' | 'izin';
+  excuseReason?: ExcuseReason;
 };
 
 export type Role = 'assistant' | 'praktikan';
