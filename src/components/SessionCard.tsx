@@ -1,10 +1,11 @@
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
+import PracticumIcon from './PracticumIcon';
 import StatusBadge from './StatusBadge';
 import { PracticumSession, Role } from '../types';
 import { colors, fonts, radius, shadows, spacing } from '../theme';
-import { formatTime, formatTimeRange } from '../utils/format';
+import { formatDateShort, formatTime, formatTimeRange } from '../utils/format';
 import { getLabLabel, getMeetingNumber } from '../utils/session';
 
 function detailLabelFor(session: PracticumSession, role: Role | null) {
@@ -25,14 +26,14 @@ export default function SessionCard({ session, role }: Props) {
   return (
     <TouchableOpacity
       style={styles.card}
-      onPress={() => router.push(`/schedule/${session.id}`)}
+      onPress={() => router.push({ pathname: '/schedule/[id]', params: { id: session.id } })}
       activeOpacity={0.85}
       accessibilityRole="button"
       accessibilityLabel={`Buka detail ${session.practicumName}`}
     >
       <View style={styles.topRow}>
         <View style={styles.iconWrap}>
-          <Ionicons name={isClosed ? 'person' : 'book'} size={18} color={colors.primary} />
+          <PracticumIcon practicumName={session.practicumName} size={22} />
         </View>
         <View style={styles.heading}>
           <Text style={styles.lab}>{getLabLabel(session)}</Text>
@@ -43,18 +44,28 @@ export default function SessionCard({ session, role }: Props) {
 
       <Text style={styles.meeting}>Pertemuan {getMeetingNumber(session)}</Text>
 
-      <View style={styles.divider} />
-
-      <View style={styles.footer}>
-        <View style={styles.meta}>
-          <Ionicons name="time" size={13} color={colors.primary} />
-          <Text style={styles.metaText}>
+      <View style={styles.dateTimeRow}>
+        <View style={styles.dateTimeItem}>
+          <Ionicons name="calendar-outline" size={15} color={colors.primary} />
+          <Text style={styles.dateTimeText} numberOfLines={1}>
+            {formatDateShort(session.startsAt)}
+          </Text>
+        </View>
+        <View style={styles.dateTimeItem}>
+          <Ionicons name="time-outline" size={15} color={colors.primary} />
+          <Text style={styles.dateTimeText} numberOfLines={1}>
             {isClosed
               ? `Selesai pukul ${formatTime(session.endsAt)} WIB`
               : formatTimeRange(session.startsAt, session.endsAt)}
           </Text>
         </View>
+      </View>
+
+      <View style={styles.divider} />
+
+      <View style={styles.footer}>
         <Text style={styles.link}>{detailLabelFor(session, role)}</Text>
+        <Ionicons name="arrow-forward" size={15} color={colors.primary} />
       </View>
     </TouchableOpacity>
   );
@@ -76,8 +87,8 @@ const styles = StyleSheet.create({
     gap: spacing.md,
   },
   iconWrap: {
-    width: 38,
-    height: 38,
+    width: 42,
+    height: 42,
     borderRadius: radius.md,
     backgroundColor: colors.primarySofter,
     alignItems: 'center',
@@ -103,6 +114,23 @@ const styles = StyleSheet.create({
     fontFamily: fonts.regular,
     fontSize: 12,
   },
+  dateTimeRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  dateTimeItem: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  dateTimeText: {
+    flex: 1,
+    color: colors.textSecondary,
+    fontFamily: fonts.regular,
+    fontSize: 11,
+  },
   divider: {
     height: 1,
     backgroundColor: colors.border,
@@ -111,19 +139,8 @@ const styles = StyleSheet.create({
   footer: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    justifyContent: 'flex-end',
     gap: spacing.sm,
-  },
-  meta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
-    flexShrink: 1,
-  },
-  metaText: {
-    color: colors.textSecondary,
-    fontFamily: fonts.regular,
-    fontSize: 12,
   },
   link: {
     color: colors.primary,
