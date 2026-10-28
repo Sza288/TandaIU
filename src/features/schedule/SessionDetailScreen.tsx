@@ -23,7 +23,7 @@ import { praktikans } from '../../data/praktikans';
 import { useAttendance } from '../../state/AttendanceContext';
 import { formatDateLong, formatTime } from '../../utils/format';
 import { getLabLabel, getMeetingNumber } from '../../utils/session';
-import { getPraktikanById } from '../../utils/academic';
+import { getCourseById, getPraktikanById } from '../../utils/academic';
 import { colors, fonts, radius, shadows, spacing } from '../../theme';
 import { Attendance, ExcuseReason, Praktikan } from '../../types';
 
@@ -82,6 +82,7 @@ export default function SessionDetailScreen() {
     markExcused,
   } = useAttendance();
   const session = sessions.find((item) => item.id === sessionId);
+  const sessionCourse = session ? getCourseById(session.courseId) : undefined;
   const linkedRole = Array.isArray(params.role) ? params.role[0] : params.role;
   const activePraktikan = getPraktikanById(activePraktikanId);
   const isAssistant = activeRole === 'assistant';
@@ -375,6 +376,7 @@ export default function SessionDetailScreen() {
                   <Text style={styles.sectionEyebrow}>PRAKTIKUM</Text>
                   <Text style={styles.sessionTitle}>{session.practicumName}</Text>
                   <Text style={styles.sessionSubtitle}>
+                    {sessionCourse ? `Semester ${sessionCourse.semester} · ` : ''}
                     {getLabLabel(session)} · Pertemuan {getMeetingNumber(session)}
                   </Text>
                 </View>
@@ -496,7 +498,9 @@ export default function SessionDetailScreen() {
                         </View>
                         <View style={styles.personCopy}>
                           <Text style={styles.personName}>{praktikan.name}</Text>
-                          <Text style={styles.personDetail}>{statusLabel}</Text>
+                          <Text style={styles.personDetail}>
+                            Semester {praktikan.semester} · {statusLabel}
+                          </Text>
                         </View>
                         <Ionicons
                           name={isExcused ? 'document-text-outline' : hasAttended ? 'checkmark-circle' : 'time-outline'}

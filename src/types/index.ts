@@ -12,6 +12,7 @@ export type PracticumCourse = {
 
 export type PracticumSession = {
   id: string;
+  courseId: string;
   practicumName: string;
   className: string;
   startsAt: string; // ISO 8601
