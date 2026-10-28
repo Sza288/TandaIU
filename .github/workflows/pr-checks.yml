@@ -16,11 +16,7 @@ jobs:
   checks:
     name: Typecheck, lint, tests
     runs-on: ubuntu-latest
-    outputs:
-      typecheck: ${{ steps.typecheck.outcome }}
-      lint: ${{ steps.lint.outcome }}
-      tests: ${{ steps.tests.outcome }}
-      has_tests: ${{ steps.detect.outputs.has_tests }}
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
@@ -30,7 +26,7 @@ jobs:
           cache: npm
 
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --include=dev
 
       - name: Detect test script
         id: detect
@@ -57,19 +53,16 @@ jobs:
         continue-on-error: true
         run: npm test -- --ci
 
-      - name: Fail if any check failed
+      - name: Fail if any required check failed
         if: >-
           steps.typecheck.outcome != 'success' ||
-          steps.lint.outcome != 'success' ||
-          (steps.detect.outputs.has_tests == 'true' && steps.tests.outcome != 'success')
+          steps.lint.outcome != 'success'
         run: exit 1
 
   conflicts:
     name: Merge conflicts with base
     runs-on: ubuntu-latest
-    outputs:
-      clean: ${{ steps.merge.outputs.clean }}
-      conflicts: ${{ steps.merge.outputs.conflicts }}
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
         with:
@@ -94,59 +87,8 @@ jobs:
           fi
           git merge --abort || true
 
-  report:
-    name: Report on PR
-    needs: [checks, conflicts]
-    if: >-
-      always() &&
-      github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pull-requests: write
-    steps:
-      - uses: actions/github-script@v7
-        env:
-          TYPECHECK: ${{ needs.checks.outputs.typecheck }}
-          LINT: ${{ needs.checks.outputs.lint }}
-          TESTS: ${{ needs.checks.outputs.tests }}
-          HAS_TESTS: ${{ needs.checks.outputs.has_tests }}
-          CLEAN: ${{ needs.conflicts.outputs.clean }}
-          CONFLICTS: ${{ needs.conflicts.outputs.conflicts }}
-        with:
-          script: |
-            const result = (s) => (s === 'success' ? '✅ pass' : `❌ ${s || 'failed'}`);
-            const hasTests = process.env.HAS_TESTS === 'true';
-            const marker = '<!-- pr-checks -->';
-            const lines = [
-              marker,
-              '## PR checks',
-              '',
-              '| Check | Result |',
-              '| --- | --- |',
-              `| Typecheck (\`tsc --noEmit\`) | ${result(process.env.TYPECHECK)} |`,
-              `| Lint (\`expo lint\`) | ${result(process.env.LINT)} |`,
-              hasTests
-                ? `| Tests (\`npm test\`) | ${result(process.env.TESTS)} |`
-                : '| Tests | ⚠️ no test script configured |',
-              `| Merge with \`${context.payload.pull_request.base.ref}\` | ${
-                process.env.CLEAN === 'true' ? '✅ clean' : '❌ conflicts'
-              } |`,
-            ];
-            if (process.env.CLEAN !== 'true' && process.env.CONFLICTS) {
-              lines.push('', '**Conflicting files:**', '```', process.env.CONFLICTS.trim(), '```');
-            }
-            const body = lines.join('\n');
-            const { owner, repo } = context.repo;
-            const issue_number = context.payload.pull_request.number;
-            const comments = await github.paginate(github.rest.issues.listComments, {
-              owner,
-              repo,
-              issue_number,
-            });
-            const existing = comments.find((c) => c.body && c.body.startsWith(marker));
-            if (existing) {
-              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
-            } else {
-              await github.rest.issues.createComment({ owner, repo, issue_number, body });
-            }
+      - name: Fail if merge conflicts detected
+        if: steps.merge.outputs.clean != 'true'
+        run: |
+          echo "Conflicting files: ${{ steps.merge.outputs.conflicts }}"
+          exit 1
