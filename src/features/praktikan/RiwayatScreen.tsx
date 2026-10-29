@@ -1,6 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, Stack } from 'expo-router';
-import { useMemo } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import BottomNav from '../../components/BottomNav';
@@ -16,10 +15,7 @@ export default function RiwayatScreen() {
   const { activePraktikanId, attendances, sessions } = useAttendance();
   const activePraktikan = getPraktikanById(activePraktikanId);
 
-  const records = useMemo(
-    () => deriveRiwayat(attendances, sessions, activePraktikanId),
-    [activePraktikanId, attendances, sessions],
-  );
+  const records = deriveRiwayat(attendances, sessions, activePraktikanId);
 
   const handleBack = () => {
     if (router.canGoBack()) {
