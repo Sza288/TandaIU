@@ -2,10 +2,12 @@ import { useState } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { router, useLocalSearchParams } from 'expo-router';
+import { router, useLocalSearchParams, usePathname } from 'expo-router';
 import BottomNav from '../../components/BottomNav';
 import PraktikanIdentityModal from '../../components/PraktikanIdentityModal';
 import ScreenHeader from '../../components/ScreenHeader';
+import AssistantIllustration from './illustrations/AssistantIllustration';
+import PraktikanIllustration from './illustrations/PraktikanIllustration';
 import { useAttendance } from '../../state/AttendanceContext';
 import { colors, fonts, radius, shadows, spacing } from '../../theme';
 import {
@@ -39,8 +41,10 @@ const ROLE_OPTIONS: {
 
 export default function RoleSelectionScreen() {
   const { from } = useLocalSearchParams<{ from?: string }>();
+  const pathname = usePathname();
   const insets = useSafeAreaInsets();
   const isSwitching = from === 'switch';
+  const isRoleLanding = pathname === '/role' && !isSwitching;
 
   const {
     setActiveRole,
@@ -76,7 +80,7 @@ export default function RoleSelectionScreen() {
       router.replace('/');
       return;
     }
-    router.replace('/home');
+    router.replace('/');
   };
 
   const navigateToRoleHome = (href: '/assistant' | '/praktikan') => {
@@ -109,94 +113,141 @@ export default function RoleSelectionScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
-      <ScreenHeader
-        title={isSwitching ? 'Ganti Peran' : 'Profil'}
-        eyebrow={isSwitching ? 'Pilih tampilan' : 'Akun demo'}
-        onBack={handleBack}
-        right={
-          <View style={styles.headerBadge}>
-            <Ionicons
-              name={isSwitching ? 'swap-horizontal' : 'person'}
-              size={16}
-              color={colors.primary}
-            />
-          </View>
-        }
-      />
+    <SafeAreaView
+      style={styles.container}
+      edges={pathname === '/role' ? ['top', 'left', 'right', 'bottom'] : ['top', 'left', 'right']}
+    >
+      {!isRoleLanding ? (
+        <ScreenHeader
+          title={isSwitching ? 'Ganti Peran' : 'Profil'}
+          eyebrow={isSwitching ? 'Pilih tampilan' : 'Akun demo'}
+          onBack={handleBack}
+          right={
+            <View style={styles.headerBadge}>
+              <Ionicons
+                name={isSwitching ? 'swap-horizontal' : 'person'}
+                size={16}
+                color={colors.primary}
+              />
+            </View>
+          }
+        />
+      ) : null}
 
       <ScrollView
         contentContainerStyle={[
           styles.content,
+          isRoleLanding && styles.landingContent,
           isSwitching && { paddingBottom: Math.max(insets.bottom, spacing.xxl) },
         ]}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
-        <View style={styles.identityCard}>
-          <View style={styles.avatar}>
-            <Text style={styles.avatarText}>
-              {activePraktikan ? getInitials(activePraktikan.name) : '?'}
-            </Text>
-          </View>
-          <View style={styles.identityText}>
-            <Text style={styles.identityName} numberOfLines={1}>
-              {identityTitle}
-            </Text>
-            <Text style={styles.identitySubtitle} numberOfLines={2}>
-              {identitySubtitle}
-            </Text>
-          </View>
-        </View>
-
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Pilih Peran</Text>
-          <Text style={styles.sectionHint}>
-            {isSwitching ? 'Data presensi tetap tersimpan' : 'Bisa diganti kapan saja'}
-          </Text>
-        </View>
-
-        {ROLE_OPTIONS.map((option) => {
-          const isActive = activeRole === option.role;
-          return (
-            <TouchableOpacity
-              key={option.role}
-              style={[styles.roleCard, isActive && styles.roleCardActive]}
-              activeOpacity={0.85}
-              onPress={
-                option.role === 'assistant' ? handleSelectAssistant : handleOpenPraktikanModal
-              }
-              accessibilityRole="button"
-              accessibilityState={{ selected: isActive }}
-              accessibilityLabel={option.title}
-            >
-              <View style={[styles.roleIcon, isActive && styles.roleIconActive]}>
-                <Ionicons
-                  name={option.icon}
-                  size={20}
-                  color={isActive ? colors.textOnPrimary : colors.primary}
-                />
+        {isRoleLanding ? (
+          <>
+            <Text style={styles.landingBrand}>TandaIU</Text>
+            <Text style={styles.landingTitle}>Masuk sebagai siapa?</Text>
+            <View style={styles.roleChoiceList}>
+              <TouchableOpacity
+                style={styles.roleChoiceCard}
+                activeOpacity={0.85}
+                onPress={handleSelectAssistant}
+                accessibilityRole="button"
+                accessibilityLabel="Masuk sebagai Asisten"
+              >
+                <View style={styles.roleIllustration}>
+                  <AssistantIllustration size={82} />
+                </View>
+                <Text style={styles.roleChoiceTitle}>Asisten</Text>
+                <View style={styles.roleArrow}>
+                  <Ionicons name="arrow-forward" size={24} color={colors.textOnPrimary} />
+                </View>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.roleChoiceCard}
+                activeOpacity={0.85}
+                onPress={handleOpenPraktikanModal}
+                accessibilityRole="button"
+                accessibilityLabel="Masuk sebagai Praktikan"
+              >
+                <View style={styles.roleIllustration}>
+                  <PraktikanIllustration size={82} />
+                </View>
+                <Text style={styles.roleChoiceTitle}>Praktikan</Text>
+                <View style={styles.roleArrow}>
+                  <Ionicons name="arrow-forward" size={24} color={colors.textOnPrimary} />
+                </View>
+              </TouchableOpacity>
+            </View>
+          </>
+        ) : (
+          <>
+            <View style={styles.identityCard}>
+              <View style={styles.avatar}>
+                <Text style={styles.avatarText}>
+                  {activePraktikan ? getInitials(activePraktikan.name) : '?'}
+                </Text>
               </View>
-              <View style={styles.roleText}>
-                <Text style={styles.roleTitle}>{option.title}</Text>
-                <Text style={styles.roleDescription}>{option.description}</Text>
+              <View style={styles.identityText}>
+                <Text style={styles.identityName} numberOfLines={1}>
+                  {identityTitle}
+                </Text>
+                <Text style={styles.identitySubtitle} numberOfLines={2}>
+                  {identitySubtitle}
+                </Text>
               </View>
-              <Ionicons
-                name={isActive ? 'checkmark-circle' : 'chevron-forward'}
-                size={20}
-                color={isActive ? colors.primary : colors.textMuted}
-              />
-            </TouchableOpacity>
-          );
-        })}
+            </View>
 
-        <Text style={styles.note}>
-          Pemilihan peran hanya untuk demo. Data sesi dan presensi tetap tersimpan saat
-          kamu berpindah peran.
-        </Text>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Pilih Peran</Text>
+              <Text style={styles.sectionHint}>
+                Data presensi tetap tersimpan
+              </Text>
+            </View>
+
+            {ROLE_OPTIONS.map((option) => {
+              const isActive = activeRole === option.role;
+              return (
+                <TouchableOpacity
+                  key={option.role}
+                  style={[styles.roleCard, isActive && styles.roleCardActive]}
+                  activeOpacity={0.85}
+                  onPress={
+                    option.role === 'assistant' ? handleSelectAssistant : handleOpenPraktikanModal
+                  }
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: isActive }}
+                  accessibilityLabel={option.title}
+                >
+                  <View style={[styles.roleIcon, isActive && styles.roleIconActive]}>
+                    <Ionicons
+                      name={option.icon}
+                      size={20}
+                      color={colors.primaryDark}
+                    />
+                  </View>
+                  <View style={styles.roleText}>
+                    <Text style={styles.roleTitle}>{option.title}</Text>
+                    <Text style={styles.roleDescription}>{option.description}</Text>
+                  </View>
+                  <Ionicons
+                    name={isActive ? 'checkmark-circle' : 'chevron-forward'}
+                    size={20}
+                    color={isActive ? colors.primary : colors.textMuted}
+                  />
+                </TouchableOpacity>
+              );
+            })}
+
+            <Text style={styles.note}>
+              Pemilihan peran hanya untuk demo. Data sesi dan presensi tetap tersimpan saat
+              kamu berpindah peran.
+            </Text>
+          </>
+        )}
       </ScrollView>
 
-      {!isSwitching ? <BottomNav active="profil" /> : null}
+      {pathname === '/profile' && !isSwitching ? <BottomNav /> : null}
 
       <PraktikanIdentityModal
         visible={showPraktikanModal}
@@ -226,10 +277,70 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   content: {
+    flexGrow: 1,
     paddingHorizontal: spacing.xl,
     paddingTop: spacing.sm,
     paddingBottom: spacing.xxl,
     gap: spacing.lg,
+  },
+  landingContent: {
+    paddingTop: spacing.xxxl,
+  },
+  landingBrand: {
+    marginTop: spacing.xl,
+    color: colors.primaryDark,
+    fontFamily: fonts.brand,
+    fontSize: 38,
+    textAlign: 'center',
+  },
+  landingTitle: {
+    marginTop: spacing.xxl,
+    marginBottom: spacing.xl,
+    color: colors.primaryDeep,
+    fontFamily: fonts.heading,
+    fontSize: 25,
+    lineHeight: 32,
+    textAlign: 'center',
+  },
+  roleChoiceList: {
+    gap: spacing.lg,
+    marginTop: spacing.lg,
+  },
+  roleChoiceCard: {
+    minHeight: 124,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+    borderRadius: radius.xl,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceMuted,
+  },
+  roleIllustration: {
+    width: 82,
+    height: 82,
+    borderRadius: radius.pill,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.primarySoft,
+    overflow: 'hidden',
+  },
+  roleChoiceTitle: {
+    flex: 1,
+    color: colors.primaryDeep,
+    fontFamily: fonts.bold,
+    fontSize: 21,
+    textAlign: 'center',
+  },
+  roleArrow: {
+    width: 52,
+    height: 52,
+    borderRadius: radius.pill,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.primary,
   },
   identityCard: {
     flexDirection: 'row',
@@ -309,7 +420,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   roleIconActive: {
-    backgroundColor: colors.primary,
+    backgroundColor: colors.primarySoft,
   },
   roleText: {
     flex: 1,

@@ -1,171 +1,102 @@
 import { router } from 'expo-router';
-import { ReactNode, useState } from 'react';
-import {
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  useWindowDimensions,
-  View,
-} from 'react-native';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import Svg, { Path } from 'react-native-svg';
-import PraktikanIdentityModal from '../../components/PraktikanIdentityModal';
-import { useAttendance } from '../../state/AttendanceContext';
-import { colors, fonts, shadows, spacing } from '../../theme';
-import { getActivePraktikans, isPraktikanActiveInTerm } from '../../utils/academic';
-import AssistantIllustration from '../role/illustrations/AssistantIllustration';
-import PraktikanIllustration from '../role/illustrations/PraktikanIllustration';
-import { CampusIllustration, TopLeftAccent } from './LandingDecor';
+import { Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import Svg, { Circle, Path } from 'react-native-svg';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { colors, fonts } from '../../theme';
 
-function ArrowIcon({ size }: { size: number }) {
+function MascotIllustration({ size }: { size: number }) {
   return (
-    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+    <Svg width={size} height={size} viewBox="0 0 220 220" fill="none">
+      <Circle cx="110" cy="110" r="108" fill="#FBE1E9" />
       <Path
-        d="M5 12H19"
-        stroke={colors.textOnPrimary}
-        strokeWidth={2.2}
+        d="M108 30c10-1 13 14 21 17 8 3 19-9 27-4 9 5 1 19 6 27 4 8 21 6 24 15 3 9-12 16-12 25 0 9 16 15 14 24-2 10-19 10-24 18-5 8 4 23-4 29-8 7-20-5-29-2-9 3-10 20-20 21-10 1-13-15-22-18-9-3-21 8-29 3-8-5 0-19-4-27-4-8-21-7-24-16-3-9 12-16 12-25 0-9-16-15-14-24 2-9 19-10 24-18 5-8-4-23 4-29 8-6 20 5 29 2 9-3 10-19 21-18Z"
+        fill={colors.primary}
+      />
+      <Circle cx="85" cy="96" r="4.5" fill="#76213F" />
+      <Circle cx="135" cy="96" r="4.5" fill="#76213F" />
+      <Circle cx="74" cy="113" r="8" fill="#F77FA7" />
+      <Circle cx="146" cy="113" r="8" fill="#F77FA7" />
+      <Path
+        d="M96 117c8 9 20 9 28 0"
+        stroke="#76213F"
+        strokeWidth="4"
         strokeLinecap="round"
       />
+      <Circle cx="173" cy="163" r="22" fill={colors.surface} />
       <Path
-        d="M13 6L19 12L13 18"
-        stroke={colors.textOnPrimary}
-        strokeWidth={2.2}
+        d="m163 163 7 7 13-16"
+        stroke={colors.primary}
+        strokeWidth="4"
         strokeLinecap="round"
         strokeLinejoin="round"
       />
+      <Path d="m28 59 3 7 7 3-7 3-3 7-3-7-7-3 7-3 3-7Zm164 98 2 5 5 2-5 2-2 5-2-5-5-2 5-2 2-5Z" fill={colors.primary} />
+      <Circle cx="202" cy="37" r="3.5" fill={colors.primary} />
+      <Circle cx="36" cy="184" r="2.5" fill="#F28CAF" />
     </Svg>
   );
 }
 
-type RoleCardProps = {
-  name: string;
-  illustration: ReactNode;
-  compact: boolean;
-  onPress: () => void;
-};
-
-function RoleCard({ name, illustration, compact, onPress }: RoleCardProps) {
+function CornerDecorations() {
   return (
-    <Pressable
-      onPress={onPress}
-      accessibilityRole="button"
-      accessibilityLabel={`Masuk sebagai ${name}`}
-      android_ripple={{ color: '#FDE7F0', borderless: false }}
-      style={({ pressed }) => [
-        styles.card,
-        compact && styles.cardCompact,
-        pressed && styles.cardPressed,
-      ]}
-    >
-      <View style={[styles.avatar, compact && styles.avatarCompact]}>{illustration}</View>
-      <Text style={[styles.roleName, compact && styles.roleNameCompact]} numberOfLines={1}>
-        {name}
-      </Text>
-      <View style={[styles.arrowButton, compact && styles.arrowButtonCompact]}>
-        <ArrowIcon size={compact ? 20 : 22} />
-      </View>
-    </Pressable>
+    <>
+      <Svg style={styles.topAccent} width={225} height={205} viewBox="0 0 225 205" fill="none">
+        <Path
+          d="M-50 30C-8-18 48 10 54 54c5 38-41 66-77 46-31-18-15-57 14-69 49-20 96 24 93 71-3 56-55 86-116 82M131 112c35-30 70-68 97-127"
+          stroke="#F6CAD8"
+          strokeWidth="18"
+          strokeLinecap="round"
+        />
+      </Svg>
+      <Svg style={styles.bottomAccent} width={230} height={190} viewBox="0 0 230 190" fill="none">
+        <Path
+          d="M245 5c-83 26-151 58-177 106-19 35 1 70 35 75 40 6 70-25 60-58-10-33-54-47-87-31-44 20-65 59-58 105"
+          stroke="#F6CAD8"
+          strokeWidth="19"
+          strokeLinecap="round"
+        />
+      </Svg>
+    </>
   );
 }
 
 export default function LandingScreen() {
   const { width, height } = useWindowDimensions();
-  const insets = useSafeAreaInsets();
-  const { setActiveRole, setActivePraktikanId, activePraktikanId } = useAttendance();
+  const mascotSize = Math.min(width * 0.53, height * 0.28, 230);
 
-  const [pickerVisible, setPickerVisible] = useState(false);
-  const [selectedPraktikanId, setSelectedPraktikanId] = useState<string | null>(
-    activePraktikanId
-  );
-
-  const activePraktikans = getActivePraktikans();
-
-  const compact = width < 350;
-  const shortScreen = height < 700;
-  const accentSize = Math.min(width * 0.36, 170);
-  const campusHeight = shortScreen
-    ? Math.max(120, Math.min(width * 0.48, height * 0.3, 200))
-    : Math.max(160, Math.min(width * 0.82, height * 0.38, 340));
-  const avatarSize = compact ? 66 : 80;
-  const contentTopPadding = shortScreen
-    ? spacing.xxxl
-    : Math.min(96, Math.max(48, height * 0.12 - insets.top));
-
-  const handleSelectAssistant = () => {
-    setActiveRole('assistant');
-    setActivePraktikanId(null);
-    router.replace('/assistant');
-  };
-
-  const handleOpenPraktikan = () => {
-    setSelectedPraktikanId(
-      isPraktikanActiveInTerm(activePraktikanId) ? activePraktikanId : null
-    );
-    setPickerVisible(true);
-  };
-
-  const handleConfirmPraktikan = () => {
-    if (!selectedPraktikanId || !isPraktikanActiveInTerm(selectedPraktikanId)) return;
-    setActiveRole('praktikan');
-    setActivePraktikanId(selectedPraktikanId);
-    setPickerVisible(false);
-    router.replace('/praktikan');
-  };
+  const continueToRoles = () => router.replace('/role');
 
   return (
     <View style={styles.root}>
-      <View
-        style={[styles.topAccent, { width: accentSize, height: accentSize }]}
-        pointerEvents="none"
-      >
-        <TopLeftAccent width={accentSize} />
-      </View>
-
-      <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
-        <ScrollView
-          contentContainerStyle={styles.scrollContent}
-          showsVerticalScrollIndicator={false}
-          bounces={false}
-        >
-          <View style={[styles.content, { paddingTop: contentTopPadding }]}>
-            <Text style={[styles.brand, compact && styles.brandCompact]}>TandaIU</Text>
-            <Text style={[styles.question, compact && styles.questionCompact]}>
-              Masuk sebagai siapa?
-            </Text>
-
-            <View style={styles.cards}>
-              <RoleCard
-                name="Asisten"
-                compact={compact}
-                onPress={handleSelectAssistant}
-                illustration={<AssistantIllustration size={avatarSize} />}
+      <CornerDecorations />
+      <SafeAreaView style={styles.safeArea}>
+        <View style={styles.center}>
+          <Pressable
+            onPress={continueToRoles}
+            accessibilityRole="button"
+            accessibilityLabel="Lanjut ke pemilihan peran"
+            style={({ pressed }) => [styles.brandAction, pressed && styles.pressed]}
+          >
+            <MascotIllustration size={mascotSize} />
+            <Text style={styles.brand}>TandaIU</Text>
+            <Svg width={112} height={20} viewBox="0 0 112 20" fill="none">
+              <Path
+                d="M12 8c27 11 61 11 88 0"
+                stroke="#F2789F"
+                strokeWidth="2.5"
+                strokeLinecap="round"
               />
-              <RoleCard
-                name="Praktikan"
-                compact={compact}
-                onPress={handleOpenPraktikan}
-                illustration={<PraktikanIllustration size={avatarSize} />}
-              />
-            </View>
-          </View>
-
-          <View style={styles.spacer} />
-
-          <View style={[styles.campus, { height: campusHeight }]} pointerEvents="none">
-            <CampusIllustration height={campusHeight} />
-          </View>
-        </ScrollView>
+            </Svg>
+          </Pressable>
+          <Pressable
+            onPress={continueToRoles}
+            accessibilityRole="button"
+            style={({ pressed }) => [styles.continueButton, pressed && styles.pressed]}
+          >
+            <Text style={styles.continueText}>Ketuk untuk melanjutkan</Text>
+          </Pressable>
+        </View>
       </SafeAreaView>
-
-      <PraktikanIdentityModal
-        visible={pickerVisible}
-        praktikans={activePraktikans}
-        selectedId={selectedPraktikanId}
-        onSelect={setSelectedPraktikanId}
-        onCancel={() => setPickerVisible(false)}
-        onConfirm={handleConfirmPraktikan}
-      />
     </View>
   );
 }
@@ -173,121 +104,51 @@ export default function LandingScreen() {
 const styles = StyleSheet.create({
   root: {
     flex: 1,
+    overflow: 'hidden',
     backgroundColor: colors.background,
-  },
-  topAccent: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
   },
   safeArea: {
     flex: 1,
   },
-  scrollContent: {
-    flexGrow: 1,
+  center: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 24,
   },
-  content: {
-    width: '100%',
-    maxWidth: 460,
-    alignSelf: 'center',
-    paddingHorizontal: 22,
+  brandAction: {
+    alignItems: 'center',
   },
   brand: {
-    fontFamily: fonts.brand,
-    fontSize: 42,
-    lineHeight: 52,
+    marginTop: 16,
     color: colors.primaryDark,
-    textAlign: 'center',
-    letterSpacing: -1,
+    fontFamily: fonts.brand,
+    fontSize: 45,
+    lineHeight: 56,
+    letterSpacing: -1.5,
   },
-  brandCompact: {
-    fontSize: 37,
-    lineHeight: 47,
-  },
-  question: {
-    marginTop: 30,
-    fontFamily: fonts.heading,
-    fontSize: 26,
-    lineHeight: 34,
-    color: colors.primaryDeep,
-    textAlign: 'center',
-    letterSpacing: -0.2,
-  },
-  questionCompact: {
-    fontSize: 23,
-    lineHeight: 30,
-  },
-  cards: {
-    marginTop: 30,
-    gap: 16,
-  },
-  card: {
-    minHeight: 116,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.md,
-    paddingVertical: 12,
-    paddingLeft: 14,
-    paddingRight: 12,
-    borderRadius: 26,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surfaceMuted,
-    overflow: 'hidden',
-    ...shadows.card,
-  },
-  cardCompact: {
-    minHeight: 96,
-    gap: spacing.sm,
-    paddingLeft: spacing.md,
-  },
-  cardPressed: {
-    backgroundColor: colors.primarySofter,
-    borderColor: colors.borderStrong,
-  },
-  avatar: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: colors.primarySoft,
-    alignItems: 'center',
+  continueButton: {
+    minHeight: 44,
+    marginTop: 22,
     justifyContent: 'center',
-    overflow: 'hidden',
+    paddingHorizontal: 18,
   },
-  avatarCompact: {
-    width: 66,
-    height: 66,
-    borderRadius: 33,
+  continueText: {
+    color: colors.primaryDark,
+    fontFamily: fonts.semiBold,
+    fontSize: 13,
   },
-  roleName: {
-    flex: 1,
-    textAlign: 'center',
-    fontFamily: fonts.bold,
-    fontSize: 22,
-    color: colors.primaryDeep,
-    letterSpacing: -0.3,
+  pressed: {
+    opacity: 0.75,
   },
-  roleNameCompact: {
-    fontSize: 20,
+  topAccent: {
+    position: 'absolute',
+    top: -4,
+    left: -20,
   },
-  arrowButton: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  arrowButtonCompact: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-  },
-  spacer: {
-    flexGrow: 1,
-    minHeight: spacing.lg,
-  },
-  campus: {
-    width: '100%',
+  bottomAccent: {
+    position: 'absolute',
+    right: -14,
+    bottom: -16,
   },
 });

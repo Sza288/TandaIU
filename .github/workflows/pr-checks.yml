@@ -1,0 +1,94 @@
+name: PR checks
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-checks-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Typecheck, lint, tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --include=dev
+
+      - name: Detect test script
+        id: detect
+        run: |
+          if node -e "process.exit(require('./package.json').scripts?.test ? 0 : 1)"; then
+            echo "has_tests=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_tests=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Typecheck
+        id: typecheck
+        continue-on-error: true
+        run: npx tsc --noEmit
+
+      - name: Lint
+        id: lint
+        continue-on-error: true
+        run: npm run lint
+
+      - name: Tests
+        id: tests
+        if: steps.detect.outputs.has_tests == 'true'
+        continue-on-error: true
+        run: npm test -- --ci
+
+      - name: Fail if any required check failed
+        if: >-
+          steps.typecheck.outcome != 'success' ||
+          steps.lint.outcome != 'success'
+        run: exit 1
+
+  conflicts:
+    name: Merge conflicts with base
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Attempt merge with base branch
+        id: merge
+        run: |
+          set +e
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          git fetch origin "${{ github.base_ref }}"
+          git merge --no-commit --no-ff "origin/${{ github.base_ref }}"
+          status=$?
+          if [ "$status" -eq 0 ]; then
+            echo "clean=true" >> "$GITHUB_OUTPUT"
+            echo "conflicts=" >> "$GITHUB_OUTPUT"
+          else
+            echo "clean=false" >> "$GITHUB_OUTPUT"
+            files=$(git diff --name-only --diff-filter=U | tr '\n' ' ')
+            echo "conflicts=$files" >> "$GITHUB_OUTPUT"
+          fi
+          git merge --abort || true
+
+      - name: Fail if merge conflicts detected
+        if: steps.merge.outputs.clean != 'true'
+        run: |
+          echo "Conflicting files: ${{ steps.merge.outputs.conflicts }}"
+          exit 1
