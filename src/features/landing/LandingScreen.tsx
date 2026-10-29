@@ -1,41 +1,11 @@
 import { router } from 'expo-router';
-import { Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
-import Svg, { Circle, Path } from 'react-native-svg';
+import { Image, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import Svg, { Path } from 'react-native-svg';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import BrandWordmark from '../../components/BrandWordmark';
 import { colors, fonts } from '../../theme';
 
-function MascotIllustration({ size }: { size: number }) {
-  return (
-    <Svg width={size} height={size} viewBox="0 0 220 220" fill="none">
-      <Circle cx="110" cy="110" r="108" fill="#FBE1E9" />
-      <Path
-        d="M108 30c10-1 13 14 21 17 8 3 19-9 27-4 9 5 1 19 6 27 4 8 21 6 24 15 3 9-12 16-12 25 0 9 16 15 14 24-2 10-19 10-24 18-5 8 4 23-4 29-8 7-20-5-29-2-9 3-10 20-20 21-10 1-13-15-22-18-9-3-21 8-29 3-8-5 0-19-4-27-4-8-21-7-24-16-3-9 12-16 12-25 0-9-16-15-14-24 2-9 19-10 24-18 5-8-4-23 4-29 8-6 20 5 29 2 9-3 10-19 21-18Z"
-        fill={colors.primary}
-      />
-      <Circle cx="85" cy="96" r="4.5" fill="#76213F" />
-      <Circle cx="135" cy="96" r="4.5" fill="#76213F" />
-      <Circle cx="74" cy="113" r="8" fill="#F77FA7" />
-      <Circle cx="146" cy="113" r="8" fill="#F77FA7" />
-      <Path
-        d="M96 117c8 9 20 9 28 0"
-        stroke="#76213F"
-        strokeWidth="4"
-        strokeLinecap="round"
-      />
-      <Circle cx="173" cy="163" r="22" fill={colors.surface} />
-      <Path
-        d="m163 163 7 7 13-16"
-        stroke={colors.primary}
-        strokeWidth="4"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <Path d="m28 59 3 7 7 3-7 3-3 7-3-7-7-3 7-3 3-7Zm164 98 2 5 5 2-5 2-2 5-2-5-5-2 5-2 2-5Z" fill={colors.primary} />
-      <Circle cx="202" cy="37" r="3.5" fill={colors.primary} />
-      <Circle cx="36" cy="184" r="2.5" fill="#F28CAF" />
-    </Svg>
-  );
-}
+const mascotImage = require('../../../assets/images/tandaiu-mascot.png');
 
 function CornerDecorations() {
   return (
@@ -77,16 +47,13 @@ export default function LandingScreen() {
             accessibilityLabel="Lanjut ke pemilihan peran"
             style={({ pressed }) => [styles.brandAction, pressed && styles.pressed]}
           >
-            <MascotIllustration size={mascotSize} />
-            <Text style={styles.brand}>TandaIU</Text>
-            <Svg width={112} height={20} viewBox="0 0 112 20" fill="none">
-              <Path
-                d="M12 8c27 11 61 11 88 0"
-                stroke="#F2789F"
-                strokeWidth="2.5"
-                strokeLinecap="round"
-              />
-            </Svg>
+            <Image
+              source={mascotImage}
+              style={{ width: mascotSize, height: mascotSize }}
+              resizeMode="contain"
+              accessibilityIgnoresInvertColors
+            />
+            <BrandWordmark size={45} withUnderline style={styles.brand} />
           </Pressable>
           <Pressable
             onPress={continueToRoles}
@@ -121,11 +88,6 @@ const styles = StyleSheet.create({
   },
   brand: {
     marginTop: 16,
-    color: colors.primaryDark,
-    fontFamily: fonts.brand,
-    fontSize: 45,
-    lineHeight: 56,
-    letterSpacing: -1.5,
   },
   continueButton: {
     minHeight: 44,
