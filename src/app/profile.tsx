@@ -1,3 +1,3 @@
-import RoleSelectionScreen from '../features/role/RoleSelectionScreen';
+import ProfileScreen from '../features/profile/ProfileScreen';
 
-export default RoleSelectionScreen;
+export default ProfileScreen;

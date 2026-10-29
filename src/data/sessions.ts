@@ -7,7 +7,8 @@ import { PracticumSession } from '../types';
 export const initialSessions: PracticumSession[] = [
   {
     id: 's1',
-    practicumName: 'Pemrograman Berbasis Objek',
+    courseId: 'pemrograman-berorientasi-objek',
+    practicumName: 'Pemrograman Berorientasi Objek',
     className: 'A1',
     startsAt: '2026-10-20T10:10:00+07:00',
     endsAt: '2026-10-20T12:10:00+07:00',
@@ -15,6 +16,7 @@ export const initialSessions: PracticumSession[] = [
   },
   {
     id: 's2',
+    courseId: 'basis-data',
     practicumName: 'Basis Data',
     className: 'B1',
     startsAt: '2026-10-21T13:00:00+07:00',
@@ -23,6 +25,7 @@ export const initialSessions: PracticumSession[] = [
   },
   {
     id: 's3',
+    courseId: 'jaringan-komputer',
     practicumName: 'Jaringan Komputer',
     className: 'D2',
     startsAt: '2026-10-22T09:40:00+07:00',
@@ -31,6 +34,7 @@ export const initialSessions: PracticumSession[] = [
   },
   {
     id: 's4',
+    courseId: 'sistem-operasi',
     practicumName: 'Sistem Operasi',
     className: 'A2',
     startsAt: '2026-10-26T08:00:00+07:00',
@@ -39,6 +43,7 @@ export const initialSessions: PracticumSession[] = [
   },
   {
     id: 's5',
+    courseId: 'struktur-data',
     practicumName: 'Struktur Data',
     className: 'C1',
     startsAt: '2026-10-27T08:00:00+07:00',
@@ -47,7 +52,8 @@ export const initialSessions: PracticumSession[] = [
   },
   {
     id: 's6',
-    practicumName: 'Pemrograman Web',
+    courseId: 'manajemen-basis-data',
+    practicumName: 'Manajemen Basis Data',
     className: 'B2',
     startsAt: '2026-10-27T13:00:00+07:00',
     endsAt: '2026-10-27T15:10:00+07:00',
@@ -55,6 +61,7 @@ export const initialSessions: PracticumSession[] = [
   },
   {
     id: 's7',
+    courseId: 'algoritma-dan-pemrograman',
     practicumName: 'Algoritma dan Pemrograman',
     className: 'C2',
     startsAt: '2026-10-28T08:00:00+07:00',
@@ -63,7 +70,8 @@ export const initialSessions: PracticumSession[] = [
   },
   {
     id: 's8',
-    practicumName: 'Rekayasa Perangkat Lunak',
+    courseId: 'grafik-dan-teknik-interaktif',
+    practicumName: 'Grafik dan Teknik Interaktif',
     className: 'A3',
     startsAt: '2026-10-28T13:00:00+07:00',
     endsAt: '2026-10-28T15:10:00+07:00',
@@ -71,15 +79,17 @@ export const initialSessions: PracticumSession[] = [
   },
   {
     id: 's9',
-    practicumName: 'Kecerdasan Buatan',
+    courseId: 'pembelajaran-mesin',
+    practicumName: 'Pembelajaran Mesin',
     className: 'D1',
     startsAt: '2026-10-29T08:00:00+07:00',
     endsAt: '2026-10-29T10:00:00+07:00',
-    status: 'dibuka',
+    status: 'terjadwal',
   },
   {
     id: 's10',
-    practicumName: 'Grafika Komputer',
+    courseId: 'analisis-dan-strategi-algoritma',
+    practicumName: 'Analisis dan Strategi Algoritma',
     className: 'B3',
     startsAt: '2026-10-29T13:00:00+07:00',
     endsAt: '2026-10-29T15:10:00+07:00',
@@ -87,7 +97,8 @@ export const initialSessions: PracticumSession[] = [
   },
   {
     id: 's11',
-    practicumName: 'Keamanan Informasi',
+    courseId: 'pengembangan-platform-khusus',
+    practicumName: 'Pengembangan Platform Khusus',
     className: 'C3',
     startsAt: '2026-10-30T08:00:00+07:00',
     endsAt: '2026-10-30T10:00:00+07:00',
@@ -95,7 +106,8 @@ export const initialSessions: PracticumSession[] = [
   },
   {
     id: 's12',
-    practicumName: 'Interaksi Manusia Komputer',
+    courseId: 'dasar-pemrograman',
+    practicumName: 'Dasar Pemrograman',
     className: 'A4',
     startsAt: '2026-10-30T13:00:00+07:00',
     endsAt: '2026-10-30T15:10:00+07:00',

@@ -1,35 +1,29 @@
 #!/usr/bin/env node
 
 /**
- * This script is used to reset the project to a blank state.
- * It deletes or moves the /src and /scripts directories to /example based on user input and creates a new /src/app directory with an index.tsx and _layout.tsx file.
- * Demo images in /assets/images are deleted or moved along with them.
- * You can remove the `reset-project` script from package.json and safely delete this file after running it.
+ * Reset the project to a blank Expo Router screen. This is an optional starter-template utility;
+ * do not run it when you want to keep the current TandaIU implementation.
  */
-
-const fs = require("fs");
-const path = require("path");
-const readline = require("readline");
-
+const fs = require('fs');
+const path = require('path');
+const readline = require('readline');
 const root = process.cwd();
-const oldDirs = ["src", "scripts"];
-const exampleDir = "example";
-const newAppDir = "src/app";
+const oldDirs = ['src', 'scripts'];
+const exampleDir = 'example';
+const newAppDir = 'src/app';
 const exampleDirPath = path.join(root, exampleDir);
-// Demo images and folders used only by the files in /src
 const exampleAssets = [
-  "expo-badge.png",
-  "expo-badge-white.png",
-  "expo-logo.png",
-  "logo-glow.png",
-  "react-logo.png",
-  "react-logo@2x.png",
-  "react-logo@3x.png",
-  "tutorial-web.png",
-  "tabIcons",
+  'expo-badge.png',
+  'expo-badge-white.png',
+  'expo-logo.png',
+  'logo-glow.png',
+  'react-logo.png',
+  'react-logo@2x.png',
+  'react-logo@3x.png',
+  'tutorial-web.png',
+  'tabIcons',
 ];
-
-const indexContent = `import { Text, View, StyleSheet } from "react-native";
+const indexContent = `import { Text, View, StyleSheet } from 'react-native';
 
 export default function Index() {
   return (
@@ -42,104 +36,65 @@ export default function Index() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });
 `;
-
-const layoutContent = `import { Stack } from "expo-router";
+const layoutContent = `import { Stack } from 'expo-router';
 
 export default function RootLayout() {
   return <Stack />;
 }
 `;
+const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 
-const rl = readline.createInterface({
-  input: process.stdin,
-  output: process.stdout,
-});
+async function moveDirectories(userInput) {
+  if (userInput !== 'y') {
+    console.log('Reset canceled. The project was not changed.');
+    return;
+  }
 
-const moveDirectories = async (userInput) => {
   try {
-    if (userInput === "y") {
-      // Create the app-example directory
-      await fs.promises.mkdir(exampleDirPath, { recursive: true });
-      await fs.promises.mkdir(path.join(exampleDirPath, "assets/images"), { recursive: true });
-      console.log(`📁 /${exampleDir} directory created.`);
+    if (fs.existsSync(exampleDirPath)) {
+      throw new Error(`/${exampleDir} already exists. Move or rename it before resetting.`);
     }
 
-    // Move old directories to new app-example directory or delete them
+    await fs.promises.mkdir(path.join(exampleDirPath, 'assets/images'), { recursive: true });
+    console.log(`📁 /${exampleDir} directory created.`);
+
     for (const dir of oldDirs) {
       const oldDirPath = path.join(root, dir);
-      if (fs.existsSync(oldDirPath)) {
-        if (userInput === "y") {
-          const newDirPath = path.join(root, exampleDir, dir);
-          await fs.promises.rename(oldDirPath, newDirPath);
-          console.log(`➡️ /${dir} moved to /${exampleDir}/${dir}.`);
-        } else {
-          await fs.promises.rm(oldDirPath, { recursive: true, force: true });
-          console.log(`❌ /${dir} deleted.`);
-        }
-      } else {
-        console.log(`➡️ /${dir} does not exist, skipping.`);
-      }
+      if (!fs.existsSync(oldDirPath)) continue;
+      await fs.promises.rename(oldDirPath, path.join(root, exampleDir, dir));
+      console.log(`➡️ /${dir} moved to /${exampleDir}/${dir}.`);
     }
 
-    // Move demo assets to /example or delete them
     for (const asset of exampleAssets) {
-      const assetPath = path.join(root, "assets/images", asset);
-      if (fs.existsSync(assetPath)) {
-        if (userInput === "y") {
-          const newAssetPath = path.join(exampleDirPath, "assets/images", asset);
-          await fs.promises.rename(assetPath, newAssetPath);
-          console.log(
-            `➡️ /assets/images/${asset} moved to /${exampleDir}/assets/images/${asset}.`
-          );
-        } else {
-          await fs.promises.rm(assetPath, { recursive: true, force: true });
-          console.log(`❌ /assets/images/${asset} deleted.`);
-        }
-      }
+      const assetPath = path.join(root, 'assets/images', asset);
+      if (!fs.existsSync(assetPath)) continue;
+      await fs.promises.rename(assetPath, path.join(exampleDirPath, 'assets/images', asset));
     }
 
-    // Create new /src/app directory
     const newAppDirPath = path.join(root, newAppDir);
     await fs.promises.mkdir(newAppDirPath, { recursive: true });
-    console.log("\n📁 New /src/app directory created.");
-
-    // Create index.tsx
-    const indexPath = path.join(newAppDirPath, "index.tsx");
-    await fs.promises.writeFile(indexPath, indexContent);
-    console.log("📄 src/app/index.tsx created.");
-
-    // Create _layout.tsx
-    const layoutPath = path.join(newAppDirPath, "_layout.tsx");
-    await fs.promises.writeFile(layoutPath, layoutContent);
-    console.log("📄 src/app/_layout.tsx created.");
-
-    console.log("\n✅ Project reset complete. Next steps:");
-    console.log(
-      `1. Run \`npx expo start\` to start a development server.\n2. Edit src/app/index.tsx to edit the main screen.\n3. Put all your application code in /src, only screens and layout files should be in /src/app.${
-        userInput === "y"
-          ? `\n4. Delete the /${exampleDir} directory when you're done referencing it.`
-          : ""
-      }`
-    );
+    await fs.promises.writeFile(path.join(newAppDirPath, 'index.tsx'), indexContent);
+    await fs.promises.writeFile(path.join(newAppDirPath, '_layout.tsx'), layoutContent);
+    console.log('Project reset complete. Run npx expo start to start the development server.');
   } catch (error) {
-    console.error(`❌ Error during script execution: ${error.message}`);
+    console.error(`Error during reset: ${error.message}`);
+    process.exitCode = 1;
   }
-};
+}
 
-rl.question(
-  "Do you want to move existing files to /example instead of deleting them? (Y/n): ",
-  (answer) => {
-    const userInput = answer.trim().toLowerCase() || "y";
-    if (userInput === "y" || userInput === "n") {
-      moveDirectories(userInput).finally(() => rl.close());
-    } else {
-      console.log("❌ Invalid input. Please enter 'Y' or 'N'.");
-      rl.close();
-    }
+rl.question('Move the existing implementation to /example before resetting? (y/N): ', (answer) => {
+  const input = answer.trim().toLowerCase();
+  if (input === 'y' || input === 'n') {
+    moveDirectories(input).finally(() => rl.close());
+  } else if (input === '') {
+    moveDirectories('n').finally(() => rl.close());
+  } else {
+    console.log("Please enter 'y' or 'n'.");
+    rl.close();
   }
-);
+});

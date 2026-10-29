@@ -1,5 +1,6 @@
 import { praktikans } from '../data/praktikans';
-import { Attendance, MutationResult, PracticumSession } from '../types';
+import { getPraktikanIdsForSession } from '../data/sessionEnrollments';
+import { Attendance, ExcuseReason, MutationResult, PracticumSession } from '../types';
 
 type SessionMutation = {
   result: MutationResult;
@@ -22,6 +23,15 @@ export function applyOpenSession(
   if (session.status !== 'terjadwal') {
     return {
       result: { ok: false, reason: 'Sesi hanya dapat dibuka jika berstatus terjadwal.' },
+      sessions,
+    };
+  }
+  if (sessions.some((item) => item.id !== sessionId && item.status === 'dibuka')) {
+    return {
+      result: {
+        ok: false,
+        reason: 'Tutup sesi yang sedang berlangsung sebelum membuka sesi lain.',
+      },
       sessions,
     };
   }
@@ -74,6 +84,12 @@ export function applyCheckIn(
       attendances,
     };
   }
+  if (!getPraktikanIdsForSession(sessionId).includes(praktikanId)) {
+    return {
+      result: { ok: false, reason: 'Praktikan tidak terdaftar pada sesi ini.' },
+      attendances,
+    };
+  }
   const alreadyCheckedIn = attendances.some(
     (attendance) =>
       attendance.sessionId === sessionId && attendance.praktikanId === praktikanId
@@ -86,7 +102,44 @@ export function applyCheckIn(
   }
   const nextAttendances = [
     ...attendances,
-    { sessionId, praktikanId, attendedAt },
+    { sessionId, praktikanId, attendedAt, status: 'hadir' as const },
   ];
+  return { result: { ok: true }, attendances: nextAttendances };
+}
+
+export function applyMarkExcused(
+  sessions: PracticumSession[],
+  attendances: Attendance[],
+  sessionId: string,
+  praktikanId: string,
+  excuseReason: ExcuseReason,
+  recordedAt: string = new Date().toISOString(),
+): CheckInMutation {
+  if (!sessions.some((session) => session.id === sessionId)) {
+    return { result: { ok: false, reason: 'Sesi tidak ditemukan.' }, attendances };
+  }
+  if (!praktikans.some((praktikan) => praktikan.id === praktikanId)) {
+    return { result: { ok: false, reason: 'Identitas praktikan tidak ditemukan.' }, attendances };
+  }
+  if (!getPraktikanIdsForSession(sessionId).includes(praktikanId)) {
+    return {
+      result: { ok: false, reason: 'Praktikan tidak terdaftar pada sesi ini.' },
+      attendances,
+    };
+  }
+
+  const updatedAttendance: Attendance = {
+    sessionId,
+    praktikanId,
+    attendedAt: recordedAt,
+    status: 'izin',
+    excuseReason,
+  };
+  const nextAttendances = attendances
+    .filter((attendance) =>
+      attendance.sessionId !== sessionId || attendance.praktikanId !== praktikanId,
+    )
+    .concat(updatedAttendance);
+
   return { result: { ok: true }, attendances: nextAttendances };
 }

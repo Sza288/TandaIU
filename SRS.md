@@ -175,10 +175,8 @@ Satu FR memiliki **satu PIC** yang bertanggung jawab menyelesaikan perilaku dan 
 |---|---|---|---|
 | P1 | **Olivia Oktaviani — 24060124120050** | Fondasi proyek, navigasi, identitas demo, data dummy, state bersama | FR-01, FR-11, FR-12 |
 | P2 | **Husni Ulyaa Khanifah — 24060124120021** | Daftar jadwal, detail sesi, keadaan kosong, konsistensi tampilan | FR-02, FR-03, FR-10 |
-| P3 | **Nabila Kayla Rafa — 2406012412002** | Buka/tutup sesi dan rekap asisten | FR-04, FR-05, FR-08 |
+| P3 | **Nabila Kayla Rafa — 24060124120022** | Buka/tutup sesi dan rekap asisten | FR-04, FR-05, FR-08 |
 | P4 | **Nadia Azura Nurhaniya — 24060124120019** | Presensi dan riwayat praktikan | FR-06, FR-07, FR-09 |
-
-**Catatan administrasi:** NIM Nabila tercatat `2406012412002` sesuai pesan PM. Jumlah digitnya berbeda dari tiga NIM lain; PM perlu memeriksanya sebelum dokumen diserahkan secara resmi.
 
 ## 12. Matriks pekerjaan rinci per kebutuhan SRS
 
@@ -220,40 +218,3 @@ Ini **rencana kepemilikan**, bukan daftar berkas yang sudah ada. Olivia membuat 
 | `src/features/praktikan/`, layar riwayat, modal/aksi presensi | **Nadia** | Komponen aksi menerima `sessionId` dan identitas aktif; riwayat membaca data terbaru. |
 
 **Aturan integrasi:** identitas praktikan memakai ID stabil, bukan nama. Fungsi mutasi menguji status dan duplikasi sebelum memperbarui state. Rekap dan riwayat dihitung dari `attendances`. Anggota yang membuat layar menguji layar tersebut dan menyerahkan ringkasan perubahan serta cara mencobanya kepada PM.
-
-## 14. Jadwal kerja sampai H+4
-
-| Waktu | Olivia (P1) | Husni (P2) | Nabila (P3) | Nadia (P4) | PM |
-|---|---|---|---|---|---|
-| **Minggu persiapan** | Sepakati tipe, rute, fungsi mutasi | Sepakati layar dan komponen bersama | Sepakati aksi/rekap asisten | Sepakati identitas/presensi/riwayat | Finalisasi SRS, nama, data contoh, perangkat demo |
-| **H / kickoff** | Buat proyek, seed, state, rute dasar | Buat rangka daftar/detail | Buat rangka aksi dan rekap | Buat rangka aksi dan riwayat | Pastikan kontrak disetujui semua anggota |
-| **H+1** | FR-01 dan state FR-12 siap dipakai | FR-02/03 tampak dengan data dummy | Modal buka/tutup terhubung ke kontrak | Presensi terhubung ke kontrak | Tinjau alur awal dan hambatan |
-| **H+2** | Rapikan transisi, duplikasi, navigasi | Lengkapi FR-10 dan gaya bersama | Selesaikan FR-04/05/08 | Selesaikan FR-06/07/09 | Cek tiap FR terhadap matriks bagian 12 |
-| **H+3** | Integrasi dan perbaikan state/rute | Uji visual dan keadaan kosong | Uji asisten dan perbaikan | Uji praktikan dan perbaikan | Jalankan AT-01–AT-09; catat bug dan pemiliknya |
-| **H+4 paling lambat** | Jalankan ulang proyek dan perbaiki hambatan setup | Perbaikan tampilan akhir | Perbaikan alur asisten akhir | Perbaikan alur praktikan akhir | Uji ulang, terima hasil, siapkan demo |
-
-Target H+4 mengikuti catatan studi kasus. Tanggal kalender diisi PM setelah tanggal praktikum diketahui. Integrasi dilakukan sejak H+1 agar masalah antarperan tidak baru muncul pada hari terakhir.
-
-## 15. Pemeriksaan dan serah terima kepada PM
-
-| Pemeriksaan | Penyiap utama | Penerima |
-|---|---|---|
-| AT-01 | Olivia + Husni | PM |
-| AT-02 | Nabila + Olivia | PM |
-| AT-03–04 | Nadia + Olivia | PM |
-| AT-05 | Nabila | PM |
-| AT-06 | Nadia | PM |
-| AT-07 | Nabila + Nadia + Olivia | PM |
-| AT-08 | Husni mengoordinasikan; Nabila dan Nadia menguji layar masing-masing | PM |
-| AT-09 | Husni; seluruh pemilik layar memperbaiki temuan | PM |
-
-Urutan demo utama: **asisten membuka sesi → praktikan A presensi → asisten melihat rekap → asisten menutup sesi**. Sesudah itu tunjukkan cegah presensi ganda, riwayat praktikan B, dan keadaan kosong. PM mencatat hasil nyata setiap AT sebagai *lulus*, *gagal*, atau *belum diuji*, lalu mengembalikan kegagalan kepada PIC pada bagian 12.
-
-## 16. Keputusan PM yang masih perlu diisi
-
-| Keputusan | Kondisi saat ini |
-|---|---|
-| Tanggal praktikum (H) dan tanggal kalender H+4 | Belum diberikan |
-| Nama praktikum, kelas, jadwal, dan identitas dummy | Perlu disepakati saat kickoff |
-| Perangkat/emulator Android untuk demonstrasi | Belum ditentukan |
-| Verifikasi NIM Nabila | `2406012412002` disalin persis dari pesan PM; mohon cek digitnya |
