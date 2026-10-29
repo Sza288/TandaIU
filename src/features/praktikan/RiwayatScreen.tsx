@@ -8,38 +8,18 @@ import PracticumIcon from '../../components/PracticumIcon';
 import ScreenHeader from '../../components/ScreenHeader';
 import { useAttendance } from '../../state/AttendanceContext';
 import { colors, fonts, radius, shadows, spacing } from '../../theme';
-import { Attendance, PracticumSession } from '../../types';
 import { getPraktikanById } from '../../utils/academic';
 import { formatDateTime, getInitials } from '../../utils/format';
-
-type HistoryRecord = {
-  attendance: Attendance;
-  session?: PracticumSession;
-};
+import { deriveRiwayat, RiwayatRecord } from './praktikan.utils';
 
 export default function RiwayatScreen() {
   const { activePraktikanId, attendances, sessions } = useAttendance();
   const activePraktikan = getPraktikanById(activePraktikanId);
 
-  const records = useMemo<HistoryRecord[]>(() => {
-    if (!activePraktikanId) return [];
-
-    const sessionById = new Map(sessions.map((session) => [session.id, session]));
-
-    return attendances
-      .filter((attendance) => attendance.praktikanId === activePraktikanId)
-      .map((attendance) => ({
-        attendance,
-        session: sessionById.get(attendance.sessionId),
-      }))
-      .sort((a, b) => {
-        const aTime = Date.parse(a.attendance.attendedAt);
-        const bTime = Date.parse(b.attendance.attendedAt);
-        const aValue = Number.isNaN(aTime) ? 0 : aTime;
-        const bValue = Number.isNaN(bTime) ? 0 : bTime;
-        return bValue - aValue;
-      });
-  }, [activePraktikanId, attendances, sessions]);
+  const records = useMemo(
+    () => deriveRiwayat(attendances, sessions, activePraktikanId),
+    [activePraktikanId, attendances, sessions],
+  );
 
   const handleBack = () => {
     if (router.canGoBack()) {
@@ -118,13 +98,7 @@ export default function RiwayatScreen() {
   );
 }
 
-function HistoryCard({
-  attendance,
-  session,
-}: {
-  attendance: Attendance;
-  session?: PracticumSession;
-}) {
+function HistoryCard({ attendance, session }: RiwayatRecord) {
   const isExcused = attendance.status === 'izin';
   const statusLabel = isExcused ? 'Izin' : 'Hadir';
   const excuseLabel = attendance.excuseReason === 'sakit'
