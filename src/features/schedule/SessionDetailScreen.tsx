@@ -214,8 +214,8 @@ export default function SessionDetailScreen() {
     if (activePraktikanId) {
       showActionResult(
         checkIn(session.id, activePraktikanId),
-        'Presensi berhasil',
-        'Kehadiranmu berhasil dicatat.',
+        'Presensi berhasil.',
+        '',
       );
     }
   };
@@ -355,7 +355,7 @@ export default function SessionDetailScreen() {
         : alreadyCheckedIn
           ? activeAttendance?.status === 'izin'
             ? 'Status izinnya sudah tercatat untuk sesi ini.'
-            : 'Presensimu untuk sesi ini sudah tercatat.'
+            : ''
           : session?.status === 'terjadwal'
             ? 'Presensi tersedia setelah asisten membuka sesi.'
             : session?.status === 'ditutup'
@@ -635,7 +635,9 @@ export default function SessionDetailScreen() {
                 />
                 <View style={styles.actionFeedbackCopy}>
                   <Text style={styles.actionFeedbackTitle}>{actionFeedback.title}</Text>
-                  <Text style={styles.actionFeedbackMessage}>{actionFeedback.message}</Text>
+                  {actionFeedback.message ? (
+                    <Text style={styles.actionFeedbackMessage}>{actionFeedback.message}</Text>
+                  ) : null}
                 </View>
                 <Pressable
                   onPress={() => setActionFeedback(null)}
@@ -656,7 +658,7 @@ export default function SessionDetailScreen() {
                 </Text>
               </View>
             ) : null}
-            <Text style={styles.actionHint}>{actionHint}</Text>
+            {actionHint ? <Text style={styles.actionHint}>{actionHint}</Text> : null}
             <Pressable
               accessibilityRole="button"
               disabled={actionDisabled}
