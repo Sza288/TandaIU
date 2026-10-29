@@ -19,6 +19,7 @@ import { colors, fonts, radius, shadows, spacing } from '../../theme';
 import { PracticumSession } from '../../types';
 import { getPraktikanById } from '../../utils/academic';
 import { formatDateLong, formatTimeRange, getInitials } from '../../utils/format';
+import { deriveOpenSessions } from './praktikan.utils';
 
 export default function PraktikanHomeScreen() {
   const { sessions, attendances, activePraktikanId } = useAttendance();
@@ -28,19 +29,7 @@ export default function PraktikanHomeScreen() {
     if (!activePraktikanId) return [];
 
     const enrolledSessionIds = new Set(getSessionIdsForPraktikan(activePraktikanId));
-    const handledSessionIds = new Set(
-      attendances
-        .filter((attendance) => attendance.praktikanId === activePraktikanId)
-        .map((attendance) => attendance.sessionId),
-    );
-
-    return sessions
-      .filter((session) =>
-        session.status === 'dibuka'
-        && enrolledSessionIds.has(session.id)
-        && !handledSessionIds.has(session.id),
-      )
-      .sort((a, b) => a.startsAt.localeCompare(b.startsAt));
+    return deriveOpenSessions(sessions, attendances, activePraktikanId, enrolledSessionIds);
   }, [activePraktikanId, attendances, sessions]);
 
   const handleChooseIdentity = () => router.push('/role');
