@@ -16,6 +16,7 @@ import type { ScrollViewInstance } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
 import BottomNav from '../../components/BottomNav';
+import ConfirmationModal from '../../components/ConfirmationModal';
 import { SupportContactCard } from '../../components/DashboardWidgets';
 import StatusBadge from '../../components/StatusBadge';
 import { getPraktikanIdsForSession } from '../../data/sessionEnrollments';
@@ -26,6 +27,14 @@ import { getLabLabel, getMeetingNumber } from '../../utils/session';
 import { getCourseById, getPraktikanById } from '../../utils/academic';
 import { colors, fonts, radius, shadows, spacing } from '../../theme';
 import { Attendance, ExcuseReason, Praktikan } from '../../types';
+
+type PendingSessionAction = 'open' | 'close' | 'checkin';
+
+type ActionFeedback = {
+  tone: 'success' | 'error';
+  title: string;
+  message: string;
+};
 
 function createAttendanceLink(sessionId: string): string {
   const encodedId = encodeURIComponent(sessionId);
@@ -127,6 +136,8 @@ export default function SessionDetailScreen() {
     ? 0
     : ((presentPraktikans.length + excusedPraktikans.length) / enrolledPraktikans.length) * 100;
   const alreadyCheckedIn = activeAttendance !== undefined;
+  const [pendingAction, setPendingAction] = useState<PendingSessionAction | null>(null);
+  const [actionFeedback, setActionFeedback] = useState<ActionFeedback | null>(null);
 
   useEffect(() => {
     if (linkedRole === 'praktikan' && activeRole !== 'praktikan') {
@@ -142,70 +153,71 @@ export default function SessionDetailScreen() {
     router.replace('/schedule');
   };
 
-  const showMutationResult = (title: string, successMessage: string, result: ReturnType<typeof openSession>) => {
-    Alert.alert(
-      result.ok ? title : 'Tindakan tidak berhasil',
-      result.ok ? successMessage : result.reason ?? 'Silakan coba lagi.',
-    );
+  const showActionResult = (
+    result: ReturnType<typeof openSession>,
+    successTitle: string,
+    successMessage: string,
+  ) => {
+    setActionFeedback({
+      tone: result.ok ? 'success' : 'error',
+      title: result.ok ? successTitle : 'Tindakan tidak berhasil',
+      message: result.ok ? successMessage : result.reason ?? 'Silakan coba lagi.',
+    });
   };
 
   const handleAssistantAction = () => {
     if (!session) return;
     if (session.status === 'terjadwal') {
-      Alert.alert(
-        'Buka sesi praktikum?',
-        'Praktikan dapat melakukan presensi setelah sesi dibuka.',
-        [
-          { text: 'Batal', style: 'cancel' },
-          {
-            text: 'Buka Sesi',
-            onPress: () => showMutationResult(
-              'Sesi dibuka',
-              'Status sesi sudah diperbarui.',
-              openSession(session.id),
-            ),
-          },
-        ],
-      );
+      setActionFeedback(null);
+      setPendingAction('open');
       return;
     }
     if (session.status === 'dibuka') {
-      Alert.alert(
-        'Tutup sesi praktikum?',
-        'Praktikan tidak dapat melakukan presensi setelah sesi ditutup.',
-        [
-          { text: 'Batal', style: 'cancel' },
-          {
-            text: 'Tutup Sesi',
-            style: 'destructive',
-            onPress: () => showMutationResult(
-              'Sesi ditutup',
-              'Sesi praktikum berhasil ditutup.',
-              closeSession(session.id),
-            ),
-          },
-        ],
-      );
+      setActionFeedback(null);
+      setPendingAction('close');
     }
   };
 
   const handlePractikanAction = () => {
-    if (!session || !activePraktikanId || !activePraktikan) return;
-    Alert.alert(
-      'Konfirmasi presensi',
-      `Presensi sebagai ${activePraktikan.name}? Waktu kehadiran akan dicatat.`,
-      [
-        { text: 'Batal', style: 'cancel' },
-        {
-          text: 'Konfirmasi',
-          onPress: () => showMutationResult(
-            'Presensi berhasil',
-            'Kehadiranmu berhasil dicatat.',
-            checkIn(session.id, activePraktikanId),
-          ),
-        },
-      ],
-    );
+    if (
+      !session
+      || session.status !== 'dibuka'
+      || !activePraktikanId
+      || !activePraktikan
+      || alreadyCheckedIn
+    ) return;
+    setActionFeedback(null);
+    setPendingAction('checkin');
+  };
+
+  const handleConfirmAction = () => {
+    const action = pendingAction;
+    if (!session || !action) return;
+    setPendingAction(null);
+
+    if (action === 'open') {
+      showActionResult(
+        openSession(session.id),
+        'Sesi dibuka',
+        'Status sesi sudah diperbarui.',
+      );
+      return;
+    }
+    if (action === 'close') {
+      showActionResult(
+        closeSession(session.id),
+        'Sesi ditutup',
+        'Sesi praktikum berhasil ditutup.',
+      );
+      return;
+    }
+    if (activePraktikanId) {
+      showActionResult(
+        checkIn(session.id, activePraktikanId),
+        'Presensi berhasil',
+        'Kehadiranmu berhasil dicatat.',
+      );
+    }
   };
 
   const handleMarkExcused = (praktikan: Praktikan) => {
@@ -251,10 +263,10 @@ export default function SessionDetailScreen() {
         { text: 'Batal', style: 'cancel' },
         {
           text: 'Hadir',
-          onPress: () => showMutationResult(
+          onPress: () => showActionResult(
+            checkIn(session.id, praktikan.id),
             'Presensi berhasil dicatat',
             `${praktikan.name} dicatat hadir.`,
-            checkIn(session.id, praktikan.id),
           ),
         },
         {
@@ -349,6 +361,28 @@ export default function SessionDetailScreen() {
             : session?.status === 'ditutup'
               ? 'Presensi tidak tersedia karena sesi sudah ditutup.'
               : 'Pastikan detail sesi benar sebelum melakukan presensi.';
+  const actionConfirmation = pendingAction === 'open'
+    ? {
+      title: 'Buka sesi praktikum?',
+      message: 'Praktikan dapat melakukan presensi setelah sesi dibuka.',
+      confirmLabel: 'Buka Sesi',
+      destructive: false,
+    }
+    : pendingAction === 'close'
+      ? {
+        title: 'Tutup sesi praktikum?',
+        message: 'Praktikan tidak dapat melakukan presensi setelah sesi ditutup.',
+        confirmLabel: 'Tutup Sesi',
+        destructive: true,
+      }
+      : pendingAction === 'checkin'
+        ? {
+          title: 'Konfirmasi presensi',
+          message: `Presensi sebagai ${activePraktikan?.name ?? 'praktikan'}? Waktu kehadiran akan dicatat.`,
+          confirmLabel: 'Konfirmasi',
+          destructive: false,
+        }
+        : null;
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
@@ -586,6 +620,42 @@ export default function SessionDetailScreen() {
           </ScrollView>
 
           <View style={styles.actionDock}>
+            {actionFeedback ? (
+              <View
+                style={[
+                  styles.actionFeedback,
+                  actionFeedback.tone === 'error' && styles.actionFeedbackError,
+                ]}
+                accessibilityLiveRegion="polite"
+              >
+                <Ionicons
+                  name={actionFeedback.tone === 'success' ? 'checkmark-circle' : 'alert-circle'}
+                  size={18}
+                  color={actionFeedback.tone === 'success' ? colors.success : colors.danger}
+                />
+                <View style={styles.actionFeedbackCopy}>
+                  <Text style={styles.actionFeedbackTitle}>{actionFeedback.title}</Text>
+                  <Text style={styles.actionFeedbackMessage}>{actionFeedback.message}</Text>
+                </View>
+                <Pressable
+                  onPress={() => setActionFeedback(null)}
+                  accessibilityRole="button"
+                  accessibilityLabel="Tutup pesan"
+                  hitSlop={8}
+                  style={styles.actionFeedbackDismiss}
+                >
+                  <Ionicons name="close" size={16} color={colors.textSecondary} />
+                </Pressable>
+              </View>
+            ) : null}
+            {!isAssistant && activeAttendance && activeAttendance.status !== 'izin' ? (
+              <View style={styles.attendanceStamp}>
+                <Ionicons name="checkmark-circle" size={14} color={colors.success} />
+                <Text style={styles.attendanceStampText}>
+                  Presensi tercatat pukul {formatTime(activeAttendance.attendedAt)} WIB
+                </Text>
+              </View>
+            ) : null}
             <Text style={styles.actionHint}>{actionHint}</Text>
             <Pressable
               accessibilityRole="button"
@@ -611,6 +681,15 @@ export default function SessionDetailScreen() {
           </View>
         </>
       )}
+      <ConfirmationModal
+        visible={pendingAction !== null}
+        title={actionConfirmation?.title ?? ''}
+        message={actionConfirmation?.message ?? ''}
+        confirmLabel={actionConfirmation?.confirmLabel ?? 'Konfirmasi'}
+        destructive={actionConfirmation?.destructive ?? false}
+        onCancel={() => setPendingAction(null)}
+        onConfirm={handleConfirmAction}
+      />
       <BottomNav />
     </SafeAreaView>
   );
@@ -1004,6 +1083,56 @@ const styles = StyleSheet.create({
     fontSize: 11,
     lineHeight: 16,
     textAlign: 'center',
+  },
+  actionFeedback: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.sm,
+    marginBottom: spacing.sm,
+    padding: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.success,
+    borderRadius: radius.md,
+    backgroundColor: colors.successBg,
+  },
+  actionFeedbackError: {
+    borderColor: colors.danger,
+    backgroundColor: colors.dangerBg,
+  },
+  actionFeedbackCopy: {
+    flex: 1,
+    gap: 1,
+  },
+  actionFeedbackTitle: {
+    color: colors.text,
+    fontFamily: fonts.bold,
+    fontSize: 12,
+  },
+  actionFeedbackMessage: {
+    color: colors.textSecondary,
+    fontFamily: fonts.regular,
+    fontSize: 11,
+    lineHeight: 16,
+  },
+  actionFeedbackDismiss: {
+    padding: 2,
+  },
+  attendanceStamp: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+    alignSelf: 'center',
+    marginBottom: spacing.sm,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    borderRadius: radius.pill,
+    backgroundColor: colors.successBg,
+  },
+  attendanceStampText: {
+    color: colors.success,
+    fontFamily: fonts.semiBold,
+    fontSize: 11,
   },
   mainAction: {
     minHeight: 52,
