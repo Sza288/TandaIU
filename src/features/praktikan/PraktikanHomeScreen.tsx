@@ -1,6 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import { useMemo } from 'react';
 import {
   ScrollView,
   StyleSheet,
@@ -25,12 +24,14 @@ export default function PraktikanHomeScreen() {
   const { sessions, attendances, activePraktikanId } = useAttendance();
   const activePraktikan = getPraktikanById(activePraktikanId);
 
-  const openSessions = useMemo(() => {
-    if (!activePraktikanId) return [];
-
-    const enrolledSessionIds = new Set(getSessionIdsForPraktikan(activePraktikanId));
-    return deriveOpenSessions(sessions, attendances, activePraktikanId, enrolledSessionIds);
-  }, [activePraktikanId, attendances, sessions]);
+  const openSessions = activePraktikanId
+    ? deriveOpenSessions(
+        sessions,
+        attendances,
+        activePraktikanId,
+        new Set(getSessionIdsForPraktikan(activePraktikanId)),
+      )
+    : [];
 
   const handleChooseIdentity = () => router.push('/role');
   const handleOpenSchedule = () => router.push('/schedule');
