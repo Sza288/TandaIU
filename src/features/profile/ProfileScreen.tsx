@@ -21,7 +21,7 @@ export default function ProfileScreen() {
     : activeRole === 'praktikan'
       ? 'Praktikan'
       : 'Belum memilih peran';
-  const openRoleSelection = () => router.push({ pathname: '/role', params: { from: 'switch' } });
+  const openRoleSelection = () => router.push('/role');
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
