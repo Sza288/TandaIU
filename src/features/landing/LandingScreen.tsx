@@ -1,8 +1,10 @@
 import { router } from 'expo-router';
+import { useRef, type ComponentRef } from 'react';
 import { Image, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import BrandWordmark from '../../components/BrandWordmark';
+import { useRoleTransition } from '../role/RoleTransitionContext';
 import { colors, fonts } from '../../theme';
 
 const mascotImage = require('../../../assets/images/tandaiu-mascot.png');
@@ -33,8 +35,47 @@ function CornerDecorations() {
 export default function LandingScreen() {
   const { width, height } = useWindowDimensions();
   const mascotSize = Math.min(width * 0.53, height * 0.28, 230);
+  const logoRef = useRef<ComponentRef<typeof View>>(null);
+  const hasStartedRef = useRef(false);
+  const hasNavigatedRef = useRef(false);
+  const { startFromLanding, rootOffset } = useRoleTransition();
 
-  const continueToRoles = () => router.replace('/role');
+  const continueToRoles = () => {
+    if (hasStartedRef.current) return;
+    hasStartedRef.current = true;
+
+    const goToRoles = () => {
+      if (hasNavigatedRef.current) return;
+      hasNavigatedRef.current = true;
+      router.replace('/role');
+    };
+
+    const goNextFrame = () => {
+      requestAnimationFrame(goToRoles);
+    };
+
+    const logo = logoRef.current;
+    if (!logo) {
+      goNextFrame();
+      return;
+    }
+
+    logo.measureInWindow((x, y, logoWidth, logoHeight) => {
+      if (hasNavigatedRef.current) return;
+      if (logoWidth > 0 && logoHeight > 0) {
+        startFromLanding({
+          x: x - rootOffset.x,
+          y: y - rootOffset.y,
+          width: logoWidth,
+          height: logoHeight,
+        });
+      }
+      goNextFrame();
+    });
+
+    // Never leave the landing screen stuck if measurement is unavailable.
+    setTimeout(goNextFrame, 180);
+  };
 
   return (
     <View style={styles.root}>
@@ -47,12 +88,18 @@ export default function LandingScreen() {
             accessibilityLabel="Lanjut ke pemilihan peran"
             style={({ pressed }) => [styles.brandAction, pressed && styles.pressed]}
           >
-            <Image
-              source={mascotImage}
+            <View
+              ref={logoRef}
+              collapsable={false}
               style={{ width: mascotSize, height: mascotSize }}
-              resizeMode="contain"
-              accessibilityIgnoresInvertColors
-            />
+            >
+              <Image
+                source={mascotImage}
+                style={styles.brandLogo}
+                resizeMode="contain"
+                accessibilityIgnoresInvertColors
+              />
+            </View>
             <BrandWordmark size={45} withUnderline style={styles.brand} />
           </Pressable>
           <Pressable
@@ -85,6 +132,10 @@ const styles = StyleSheet.create({
   },
   brandAction: {
     alignItems: 'center',
+  },
+  brandLogo: {
+    width: '100%',
+    height: '100%',
   },
   brand: {
     marginTop: 16,
