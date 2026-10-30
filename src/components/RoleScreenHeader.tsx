@@ -1,6 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
+import { useCallback, useRef } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useRoleTransition } from '../features/role/RoleTransitionContext';
 import { colors, fonts, radius, shadows, spacing } from '../theme';
 
 type Props = {
@@ -11,8 +13,31 @@ type Props = {
 };
 
 export default function RoleScreenHeader({ title, eyebrow, subtitle, onBack }: Props) {
+  const hasStartedRef = useRef(false);
+  const hasNavigatedRef = useRef(false);
+  const { startMascotPulse } = useRoleTransition();
+
+  useFocusEffect(
+    useCallback(() => {
+      hasStartedRef.current = false;
+      hasNavigatedRef.current = false;
+    }, [])
+  );
+
   const handleChangeRole = () => {
-    router.push({ pathname: '/role', params: { from: 'switch' } });
+    if (hasStartedRef.current) return;
+    hasStartedRef.current = true;
+
+    const goToRoles = () => {
+      if (hasNavigatedRef.current) return;
+      hasNavigatedRef.current = true;
+      router.push('/role');
+    };
+
+    // The mascot pulse animates on the destination page; the header wordmark
+    // stays in place so no horizontal or vertical wordmark travel is needed.
+    startMascotPulse();
+    requestAnimationFrame(goToRoles);
   };
 
   return (
