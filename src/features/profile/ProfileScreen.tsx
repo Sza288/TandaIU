@@ -1,11 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
-import { router, useFocusEffect } from 'expo-router';
-import { useCallback, useRef } from 'react';
+import { router } from 'expo-router';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import BottomNav from '../../components/BottomNav';
 import { assistantIdentity } from '../../data/assistantIdentity';
-import { useRoleTransition } from '../role/RoleTransitionContext';
 import AssistantIllustration from '../role/illustrations/AssistantIllustration';
 import PraktikanIllustration from '../role/illustrations/PraktikanIllustration';
 import { useAttendance } from '../../state/AttendanceContext';
@@ -23,22 +21,7 @@ export default function ProfileScreen() {
     : activeRole === 'praktikan'
       ? 'Praktikan'
       : 'Belum memilih peran';
-
-  const hasStartedRef = useRef(false);
-  const { startMascotPulse } = useRoleTransition();
-
-  useFocusEffect(
-    useCallback(() => {
-      hasStartedRef.current = false;
-    }, [])
-  );
-
-  const openRoleSelection = () => {
-    if (hasStartedRef.current) return;
-    hasStartedRef.current = true;
-    startMascotPulse();
-    requestAnimationFrame(() => router.push('/role'));
-  };
+  const openRoleSelection = () => router.push({ pathname: '/role', params: { from: 'switch' } });
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
