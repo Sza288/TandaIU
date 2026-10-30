@@ -39,16 +39,16 @@ npm install
 npm start
 ```
 
-`npx expo start` langsung menjalankan server untuk **Expo Go**. Untuk membuka dari iPhone tanpa harus berada di Wi-Fi yang sama, gunakan tunnel: `npx expo start --tunnel` atau `npm start`.
+`npm start` menjalankan Expo Go melalui tunnel, jadi QR bisa discan dari iPhone tanpa harus berada di Wi-Fi yang sama. Untuk Wi-Fi lokal yang tidak membatasi koneksi antar-perangkat, gunakan `npm run start:lan`.
 
-Expo Go versi App Store saat ini (58.0.5) mendukung SDK 58, jadi proyek bisa discan langsung dari iPhone. Jika nanti membutuhkan development build, pasang kembali `expo-dev-client` dengan `npx expo install expo-dev-client`, lalu jalankan `npx expo start --dev-client`.
+> Gunakan `npm start`, bukan `npx expo start`, karena proyek ini memiliki `expo-dev-client` sehingga `npx expo start` default-nya membuat QR untuk development build. Jika ingin memakai Expo CLI langsung, jalankan `npx expo start --go --tunnel`.
+>
+> Catatan iOS: Expo Go dari App Store berhenti di SDK 54, sedangkan proyek ini memakai SDK 58. Untuk iPhone fisik, buka URL tunnel di Safari (versi web) atau gunakan Expo Go SDK 58 lewat TestFlight (`eas go`, perlu Apple Developer Program). Expo Go SDK 58 juga tersedia untuk Android/emulator lewat [expo.dev/go](https://expo.dev/go).
 
 Setelah dev server berjalan, buka pada perangkat/emulator:
 
 | Perintah | Keterangan |
 |---|---|
-| `npx expo start` | Expo Go via Wi-Fi lokal (scan QR dari iPhone) |
-| `npx expo start --tunnel` | Expo Go via tunnel |
 | `npm start` | Expo Go via tunnel (scan QR dari iPhone) |
 | `npm run start:lan` | Expo Go via Wi-Fi lokal |
 | `npm run android` | Membuka di Expo Go pada emulator/perangkat Android |
