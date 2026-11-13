@@ -53,6 +53,12 @@ export default function RootLayout() {
           options={{ title: 'Rekap Presensi' }}
         />
         <Stack.Screen name="praktikan/riwayat" options={{ title: 'Riwayat Presensi' }} />
+        <Stack.Screen name="auth/login" options={{ headerShown: false }} />
+        <Stack.Screen name="auth/register" options={{ headerShown: false }} />
+        <Stack.Screen name="assistant/manage" options={{ title: 'Kelola Praktikum', headerShown: false }} />
+        <Stack.Screen name="assistant/attendance" options={{ title: 'Presensi', headerShown: false }} />
+        <Stack.Screen name="assistant/permits" options={{ title: 'Review Izin', headerShown: false }} />
+        <Stack.Screen name="praktikan/permit" options={{ title: 'Ajukan Izin', headerShown: false }} />
       </Stack>
     </AttendanceProvider>
   );
