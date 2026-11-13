@@ -18,7 +18,7 @@ Satu sprint ditargetkan selesai **maksimal empat hari setelah kegiatan praktikum
 - Tidak diperlukan server, basis data, login sungguhan, atau sinkronisasi antarperangkat.
 - Dua sudut pandang harus dapat dicoba melalui pemilihan peran dalam aplikasi. Pengguna praktikan dipilih dari data dummy agar identitas presensi tetap konsisten.
 - Status sesi harus langsung tercermin pada layar yang menggunakan state yang sama. Penyelarasan data presensi antara perangkat asisten dan perangkat praktikan **tidak diwajibkan** oleh catatan studi kasus. Untuk demo pada satu proses aplikasi, state bersama dianjurkan agar alur lengkap mudah terlihat.
-- Data state boleh kembali ke kondisi awal saat aplikasi dimuat ulang; persistensi tidak termasuk ruang lingkup.
+- Data state blh kembali ke kondisi awal saat aplikasi dimuat ulang; persistensi tidak termasuk ruang lingkup.
 
 ### 1.2 Di luar ruang lingkup sprint
 
