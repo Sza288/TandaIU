@@ -4,22 +4,26 @@
 
 Aplikasi memakai dua sudut pandang dalam satu aplikasi:
 
-- **Asisten** — membuka/menutup sesi praktikum dan melihat rekap presensi.
-- **Praktikan** — melakukan presensi pada sesi yang dibuka dan melihat riwayat kehadiran sendiri.
+- **Asisten** — membuka/menutup sesi praktikum, melihat rekap presensi, dan meninjau pengajuan izin beserta sentimen AI.
+- **Praktikan** — melakukan presensi pada sesi yang dibuka, melihat riwayat kehadiran, dan mengajukan izin.
 
-Data bersifat **lokal/dummy** (tanpa backend, autentikasi, atau persistensi). Rincian kebutuhan, pembagian tugas, dan kriteria penerimaan ada di [`SRS.md`](./SRS.md).
+Data bersifat **lokal/dummy** (tanpa backend, autentikasi, atau persistensi). Rincian kebutuhan, pembagian tugas, dan kriteria penerimaan ada di [`SRS.md`](./SRS.md) dan [`PembagianSprint2.md`](./PembagianSprint2.md).
 
 ## Alur pengguna
 
 ```text
 Pemilihan peran
 ├─ Asisten → Daftar jadwal → Detail sesi → Buka/Tutup sesi
-│                                   └→ Rekap presensi
+│                                   ├→ Rekap presensi
+│                                   └→ Review izin (setujui/tolak)
 └─ Praktikan (pilih identitas) → Daftar jadwal → Detail sesi → Presensi
-                                             └→ Riwayat pribadi
+                                             ├→ Riwayat pribadi
+                                             └→ Ajukan izin → Status izin realtime
 ```
 
 Status sesi bertransisi `terjadwal` → `dibuka` → `ditutup`. Presensi hanya dapat dilakukan saat sesi `dibuka`, dan presensi ganda untuk praktikan yang sama pada satu sesi ditolak.
+
+Pengajuan izin menyimpan alasan praktikan, lalu alasan tersebut dianalisis sentimennya **di perangkat** memakai model lokal di `src/features/permit/ai/`. Asisten dapat menyetujui atau menolak, dan status langsung terlihat oleh praktikan.
 
 ## Teknologi
 
@@ -70,14 +74,19 @@ src/
 │  ├─ home.tsx, profile.tsx, role.tsx
 │  ├─ assistant.tsx
 │  ├─ assistant/rekap/[sessionId].tsx   # Rekap presensi (asisten)
+│  ├─ assistant/permits.tsx             # Review izin + sentimen AI (asisten)
 │  ├─ praktikan.tsx
 │  ├─ praktikan/riwayat.tsx             # Riwayat presensi (praktikan)
+│  ├─ praktikan/permit.tsx              # Form pengajuan izin (praktikan)
 │  ├─ schedule.tsx
 │  └─ schedule/[id].tsx                 # Detail sesi
-├─ features/         # Implementasi layar per domain (assistant, praktikan, schedule, role, landing, home)
+├─ features/         # Implementasi layar per domain (assistant, praktikan, schedule, role, landing, home, permit)
+│  └─ permit/        # Form izin, review izin, badge, dan model AI on-device
 ├─ components/       # Komponen bersama (header, kartu sesi, badge status, navigasi bawah, placeholder)
 ├─ state/            # AttendanceContext + fungsi mutasi state lokal
-├─ data/             # Data dummy (sessions, attendances, praktikans, courses)
+├─ services/         # permitService (simpan izin, review, listener realtime)
+├─ hooks/            # usePermit (langganan status izin)
+├─ data/             # Data dummy (sessions, attendances, praktikans, courses, permits)
 ├─ types/            # Kontrak tipe (PracticumSession, Attendance, Praktikan, Role, dst.)
 ├─ utils/            # Helper akademik, format waktu, sesi
 ├─ config/           # Konfigurasi term akademik aktif
@@ -88,10 +97,11 @@ Aturan singkat: kode non-rute (komponen, hook, util) disimpan **di luar** `src/a
 
 ## Ruang lingkup dan batasan
 
-- Data jadwal, sesi, dan praktikan bersifat lokal/dummy; perubahan dikelola dengan state React.
+- Data jadwal, sesi, praktikan, dan izin bersifat lokal/dummy; perubahan dikelola dengan state React.
 - Tidak ada server, basis data, login sungguhan, atau sinkronisasi antarperangkat.
+- Analisis sentimen izin berjalan **on-device** memakai model di `src/features/permit/ai/` (tanpa panggilan jaringan). Bila model tidak mengenali teks atau gagal, sistem memakai fallback `src/lib/aiClient.ts` dan UI menampilkan peringatan.
 - State kembali ke kondisi awal saat aplikasi dimuat ulang (tanpa persistensi).
-- Di luar ruang lingkup: autentikasi produksi, GPS/QR, bukti foto, persetujuan izin/sakit, ekspor laporan, notifikasi, dan administrasi jadwal.
+- Di luar ruang lingkup: autentikasi produksi, GPS/QR, bukti foto, ekspor laporan, notifikasi, dan administrasi jadwal.
 
 ## Dokumentasi
 
@@ -100,4 +110,4 @@ Aturan singkat: kode non-rute (komponen, hook, util) disimpan **di luar** `src/a
 
 ## Status
 
-Fondasi proyek sudah tersedia (navigasi, pemilihan peran, kontrak tipe, data dummy, dan state bersama). Layar fitur untuk daftar jadwal, detail sesi, buka/tutup sesi, rekap, presensi, dan riwayat masih berupa *placeholder* dan dikerjakan oleh pemilik fitur masing-masing (lihat [`SRS.md`](./SRS.md) §11–13).
+Fondasi proyek sudah tersedia (navigasi, pemilihan peran, kontrak tipe, data dummy, dan state bersama). Fitur **pengajuan izin + analisis sentimen AI** sudah diimplementasikan di `src/features/permit/`, `src/services/permitService.ts`, dan `src/hooks/usePermit.ts`. Layar fitur lain seperti daftar jadwal, detail sesi, buka/tutup sesi, rekap, presensi, dan riwayat masih dikerjakan oleh pemilik fitur masing-masing (lihat [`SRS.md`](./SRS.md) §11–13).
