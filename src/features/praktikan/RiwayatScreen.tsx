@@ -6,14 +6,18 @@ import BottomNav from '../../components/BottomNav';
 import PracticumIcon from '../../components/PracticumIcon';
 import ScreenHeader from '../../components/ScreenHeader';
 import { useAttendance } from '../../state/AttendanceContext';
+import { useAuthSession } from '../auth/AuthSessionContext';
 import { colors, fonts, radius, shadows, spacing } from '../../theme';
-import { getPraktikanById } from '../../utils/academic';
 import { formatDateTime, getInitials } from '../../utils/format';
 import { deriveRiwayat, RiwayatRecord } from './praktikan.utils';
+import { getAuthenticatedPraktikanIdentity } from './authenticatedIdentity';
 
 export default function RiwayatScreen() {
-  const { activePraktikanId, attendances, sessions } = useAttendance();
-  const activePraktikan = getPraktikanById(activePraktikanId);
+  const { attendances, sessions } = useAttendance();
+  const session = useAuthSession();
+  const profile = session?.status === 'authenticated' ? session.profile : null;
+  const activePraktikan = getAuthenticatedPraktikanIdentity(profile);
+  const activePraktikanId = activePraktikan?.localScheduleId ?? null;
 
   const records = deriveRiwayat(attendances, sessions, activePraktikanId);
 
@@ -23,10 +27,6 @@ export default function RiwayatScreen() {
       return;
     }
     router.replace('/praktikan');
-  };
-
-  const handleChooseIdentity = () => {
-    router.push('/role');
   };
 
   return (
@@ -42,13 +42,11 @@ export default function RiwayatScreen() {
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
       >
-        {!activePraktikanId ? (
+        {!activePraktikan ? (
           <EmptyState
             icon="person-outline"
-            title="Identitas praktikan belum dipilih"
-            description="Pilih identitas praktikan terlebih dahulu agar riwayat kehadiranmu dapat ditampilkan."
-            actionLabel="Pilih Identitas"
-            onAction={handleChooseIdentity}
+            title="Profil praktikan belum tersedia"
+            description="Data profil akun belum tersedia. Coba muat ulang sesi atau masuk kembali."
           />
         ) : records.length === 0 ? (
           <EmptyState
@@ -56,7 +54,7 @@ export default function RiwayatScreen() {
             title="Belum ada riwayat presensi"
             description={`${
               activePraktikan?.name ?? 'Praktikan ini'
-            } belum memiliki catatan kehadiran. Riwayat akan muncul setelah presensi pada sesi yang dibuka.`}
+            } belum memiliki catatan presensi yang terhubung. Riwayat demo lokal tidak ditampilkan untuk akun ini.`}
           />
         ) : (
           <>
