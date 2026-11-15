@@ -53,20 +53,33 @@ service cloud.firestore {
       allow write: if isAssistant();
     }
 
-    // Sementara, menunggu konfirmasi pemilik.
-    // Presensi boleh dibaca dan dibuat semua pengguna login; update/hapus hanya asisten.
+    // Presensi: ID = sessionId + '_' + uid, hanya praktikan untuk dirinya saat sesi dibuka.
     match /attendances/{attendanceId} {
       allow read: if isSignedIn();
-      allow create: if isSignedIn();
-      allow update, delete: if isAssistant();
+      allow create: if isSignedIn()
+        && userRole() == 'praktikan'
+        && request.resource.data.praktikanId == request.auth.uid
+        && attendanceId == request.resource.data.sessionId + '_' + request.auth.uid
+        && request.resource.data.status == 'hadir'
+        && request.resource.data.keys().hasAll(['sessionId', 'praktikanId', 'praktikanName', 'attendedAt', 'status'])
+        && get(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId)).data.status == 'dibuka';
+      allow update, delete: if false;
     }
 
-    // Sementara, menunggu konfirmasi pemilik.
-    // Izin boleh dibaca dan dibuat semua pengguna login; update hanya asisten; hapus ditolak.
+    // Izin: praktikan mengajukan 'pending', asisten mereview jadi 'approved'/'rejected'.
     match /permits/{permitId} {
-      allow read: if isSignedIn();
-      allow create: if isSignedIn();
-      allow update: if isAssistant();
+      allow read: if isSignedIn()
+        && (resource.data.studentId == request.auth.uid || isAssistant());
+      allow create: if isSignedIn()
+        && userRole() == 'praktikan'
+        && request.resource.data.studentId == request.auth.uid
+        && request.resource.data.status == 'pending'
+        && !request.resource.data.keys().hasAny(['reviewedAt', 'reviewedBy'])
+        && request.resource.data.keys().hasAll(['sessionId', 'studentId', 'studentName', 'reason', 'sentiment', 'sentimentSource', 'status', 'createdAt']);
+      allow update: if isAssistant()
+        && resource.data.status == 'pending'
+        && request.resource.data.status in ['approved', 'rejected']
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'reviewedAt', 'reviewedBy']);
       allow delete: if false;
     }
 
