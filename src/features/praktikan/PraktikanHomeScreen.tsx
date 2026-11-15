@@ -14,15 +14,19 @@ import RoleScreenHeader from '../../components/RoleScreenHeader';
 import StatusBadge from '../../components/StatusBadge';
 import { getSessionIdsForPraktikan } from '../../data/sessionEnrollments';
 import { useAttendance } from '../../state/AttendanceContext';
+import { useAuthSession } from '../auth/AuthSessionContext';
 import { colors, fonts, radius, shadows, spacing } from '../../theme';
 import { PracticumSession } from '../../types';
-import { getPraktikanById } from '../../utils/academic';
 import { formatDateLong, formatTimeRange, getInitials } from '../../utils/format';
+import { getAuthenticatedPraktikanIdentity } from './authenticatedIdentity';
 import { deriveOpenSessions } from './praktikan.utils';
 
 export default function PraktikanHomeScreen() {
-  const { sessions, attendances, activePraktikanId } = useAttendance();
-  const activePraktikan = getPraktikanById(activePraktikanId);
+  const { sessions, attendances } = useAttendance();
+  const session = useAuthSession();
+  const profile = session?.status === 'authenticated' ? session.profile : null;
+  const activePraktikan = getAuthenticatedPraktikanIdentity(profile);
+  const activePraktikanId = activePraktikan?.localScheduleId ?? null;
 
   const openSessions = activePraktikanId
     ? deriveOpenSessions(
@@ -33,15 +37,11 @@ export default function PraktikanHomeScreen() {
       )
     : [];
 
-  const handleChooseIdentity = () => router.push('/role');
   const handleOpenSchedule = () => router.push('/schedule');
   const handleOpenHistory = () => router.push('/praktikan/riwayat');
   const handleOpenSession = (sessionId: string) => {
     router.push({ pathname: '/schedule/[id]', params: { id: sessionId } });
   };
-
-  const identityMissing = !activePraktikanId;
-  const identityInvalid = Boolean(activePraktikanId) && !activePraktikan;
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
@@ -68,35 +68,20 @@ export default function PraktikanHomeScreen() {
                 {activePraktikan.studentCode ? (
                   <Text style={styles.identityMeta}>{activePraktikan.studentCode}</Text>
                 ) : null}
-                <Text style={styles.identityMeta}>Semester {activePraktikan.semester}</Text>
               </View>
             </View>
-          ) : (
+          ) : null}
+          {!activePraktikan ? (
             <View style={styles.emptyCard}>
               <View style={styles.emptyIcon}>
                 <Ionicons name="person-outline" size={26} color={colors.primary} />
               </View>
-              <Text style={styles.emptyTitle}>
-                {identityInvalid
-                  ? 'Identitas praktikan tidak ditemukan'
-                  : 'Identitas praktikan belum dipilih'}
-              </Text>
+              <Text style={styles.emptyTitle}>Profil praktikan belum tersedia</Text>
               <Text style={styles.emptyDescription}>
-                {identityMissing
-                  ? 'Pilih identitas praktikan terlebih dahulu agar sesi dan kehadiranmu dapat ditampilkan.'
-                  : 'Identitas yang aktif tidak tersedia pada data demo. Silakan pilih identitas praktikan kembali.'}
+                Data profil akun belum tersedia. Coba muat ulang sesi atau masuk kembali.
               </Text>
-              <TouchableOpacity
-                style={styles.primaryAction}
-                onPress={handleChooseIdentity}
-                activeOpacity={0.85}
-                accessibilityRole="button"
-                accessibilityLabel="Pilih identitas praktikan"
-              >
-                <Text style={styles.primaryActionText}>Pilih Identitas</Text>
-              </TouchableOpacity>
             </View>
-          )}
+          ) : null}
 
           {activePraktikan ? (
             <View style={styles.section}>
@@ -121,7 +106,7 @@ export default function PraktikanHomeScreen() {
                     Tidak ada sesi terbuka yang menunggu presensi
                   </Text>
                   <Text style={styles.emptySessionDescription}>
-                    Ringkasan akan muncul di sini saat asisten membuka sesi untuk kelasmu.
+                    Data enrollment akun belum tersedia. Jadwal demo lokal tidak ditampilkan sebagai sesi terdaftar.
                   </Text>
                   <TouchableOpacity
                     style={styles.secondaryAction}
