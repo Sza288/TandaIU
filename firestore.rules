@@ -1,0 +1,78 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Memeriksa apakah pengguna sudah login.
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Mengambil role dari dokumen users/{uid}, bukan dari custom token.
+    function userRole() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+    }
+
+    // Asisten adalah pengguna login dengan role 'assistant'.
+    function isAssistant() {
+      return isSignedIn() && userRole() == 'assistant';
+    }
+
+    // Pengguna hanya boleh membaca dokumennya sendiri.
+    match /users/{uid} {
+      allow read: if isSignedIn() && request.auth.uid == uid;
+      // Pembuatan hanya oleh pemilik, role valid, uid cocok, dan field wajib lengkap.
+      allow create: if isSignedIn()
+        && request.auth.uid == uid
+        && request.resource.data.role in ['assistant', 'praktikan']
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.keys().hasAll(['uid', 'name', 'email', 'role']);
+      // Update hanya oleh pemilik dan field role tidak boleh berubah.
+      allow update: if isSignedIn()
+        && request.auth.uid == uid
+        && request.resource.data.role == resource.data.role;
+      // Penghapusan dokumen pengguna ditolak.
+      allow delete: if false;
+    }
+
+    // Semua pengguna terautentikasi boleh membaca kelas; hanya asisten yang boleh menulis.
+    match /classes/{classId} {
+      allow read: if isSignedIn();
+      allow write: if isAssistant();
+    }
+
+    // Semua pengguna terautentikasi boleh membaca jadwal; hanya asisten yang boleh menulis.
+    match /schedules/{scheduleId} {
+      allow read: if isSignedIn();
+      allow write: if isAssistant();
+    }
+
+    // Semua pengguna terautentikasi boleh membaca sesi; hanya asisten yang boleh menulis.
+    match /sessions/{sessionId} {
+      allow read: if isSignedIn();
+      allow write: if isAssistant();
+    }
+
+    // Sementara, menunggu konfirmasi pemilik.
+    // Presensi boleh dibaca dan dibuat semua pengguna login; update/hapus hanya asisten.
+    match /attendances/{attendanceId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update, delete: if isAssistant();
+    }
+
+    // Sementara, menunggu konfirmasi pemilik.
+    // Izin boleh dibaca dan dibuat semua pengguna login; update hanya asisten; hapus ditolak.
+    match /permits/{permitId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update: if isAssistant();
+      allow delete: if false;
+    }
+
+    // Koleksi lain ditolak secara default.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
