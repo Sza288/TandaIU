@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
@@ -8,34 +8,32 @@ import BottomNav from '../../components/BottomNav';
 import SessionCard from '../../components/SessionCard';
 import { getSessionIdsForPraktikan } from '../../data/sessionEnrollments';
 import { useAttendance } from '../../state/AttendanceContext';
-import { getPraktikanById } from '../../utils/academic';
+import { useAuthSession } from '../auth/AuthSessionContext';
+import { getAuthenticatedPraktikanIdentity } from '../praktikan/authenticatedIdentity';
 import { colors, fonts, radius, shadows, spacing } from '../../theme';
 
 export default function ScheduleListScreen() {
-  const { sessions, attendances, activeRole, activePraktikanId } = useAttendance();
+  const { sessions, attendances } = useAttendance();
+  const session = useAuthSession();
+  const profile = session?.status === 'authenticated' ? session.profile : null;
+  const activeRole = profile?.role ?? null;
+  const activePraktikan = getAuthenticatedPraktikanIdentity(profile);
+  const activePraktikanId = activePraktikan?.localScheduleId ?? null;
   const [query, setQuery] = useState('');
-  const activePraktikan = getPraktikanById(activePraktikanId);
-  const enrolledSessionIds = useMemo(
-    () => new Set(activePraktikanId ? getSessionIdsForPraktikan(activePraktikanId) : []),
-    [activePraktikanId],
+  const enrolledSessionIds = new Set(
+    activePraktikanId ? getSessionIdsForPraktikan(activePraktikanId) : [],
   );
-  const enrolledSessions = useMemo(
-    () => sessions.filter((session) => enrolledSessionIds.has(session.id)),
-    [enrolledSessionIds, sessions],
+  const enrolledSessions = sessions.filter((session) => enrolledSessionIds.has(session.id));
+  const roleSessions = activeRole === 'assistant'
+    ? sessions
+    : activeRole === 'praktikan'
+      ? enrolledSessions
+      : [];
+  const normalizedQuery = query.trim().toLocaleLowerCase('id-ID');
+  const visibleSessions = roleSessions.filter((session) =>
+    [session.practicumName, session.className]
+      .some((value) => value.toLocaleLowerCase('id-ID').includes(normalizedQuery)),
   );
-  const visibleSessions = useMemo(() => {
-    const roleSessions = activeRole === 'assistant'
-      ? sessions
-      : activeRole === 'praktikan'
-        ? enrolledSessions
-        : [];
-    const normalizedQuery = query.trim().toLocaleLowerCase('id-ID');
-
-    return roleSessions.filter((session) =>
-      [session.practicumName, session.className]
-        .some((value) => value.toLocaleLowerCase('id-ID').includes(normalizedQuery)),
-    );
-  }, [activeRole, enrolledSessions, query, sessions]);
   const outstandingAttendanceCount = activeRole === 'praktikan' && activePraktikanId
     ? enrolledSessions.filter((session) =>
       !attendances.some((attendance) =>
@@ -46,7 +44,7 @@ export default function ScheduleListScreen() {
   const assistantScheduledCount = activeRole === 'assistant'
     ? sessions.filter((session) => session.status === 'terjadwal').length
     : 0;
-  const missingIdentity = activeRole === 'praktikan' && !activePraktikanId;
+  const missingEnrollmentMapping = activeRole === 'praktikan' && !activePraktikanId;
   const missingRole = activeRole === null;
 
   const handleBack = () => {
@@ -62,7 +60,7 @@ export default function ScheduleListScreen() {
       router.replace('/praktikan');
       return;
     }
-    router.replace('/home');
+    router.replace('/');
   };
 
   return (
@@ -83,7 +81,7 @@ export default function ScheduleListScreen() {
           </Pressable>
           <View style={styles.headerCopy}>
             <Text style={styles.eyebrow}>
-              {activeRole === 'assistant' ? 'PERAN ASISTEN' : activeRole === 'praktikan' ? 'PERAN PRAKTIKAN' : 'PILIH PERAN'}
+              {activeRole === 'assistant' ? 'PERAN ASISTEN' : activeRole === 'praktikan' ? 'PERAN PRAKTIKAN' : 'JADWAL'}
             </Text>
             <Text style={styles.title}>Sesi Laboratorium</Text>
           </View>
@@ -98,7 +96,7 @@ export default function ScheduleListScreen() {
 
         {activeRole === 'praktikan' ? (
           <Text style={styles.greeting}>
-            {activePraktikan ? `Halo, ${activePraktikan.name} 👋` : 'Pilih identitas praktikan'}
+            {activePraktikan ? `Halo, ${activePraktikan.name} 👋` : 'Jadwal akun praktikan'}
           </Text>
         ) : null}
 
@@ -133,10 +131,10 @@ export default function ScheduleListScreen() {
             </View>
             <Text style={styles.reminderText}>
               {missingRole
-                ? 'Pilih peran terlebih dahulu untuk melihat jadwal praktikum.'
+                ? 'Sesi autentikasi belum tersedia. Silakan masuk kembali.'
                 : activeRole === 'praktikan'
-                ? missingIdentity
-                  ? 'Pilih identitas praktikan untuk melihat jadwal dan pengingat presensimu.'
+                ? missingEnrollmentMapping
+                  ? 'Data pendaftaran akun belum terhubung ke jadwal praktikum.'
                   : outstandingAttendanceCount > 0
                     ? `Ada ${outstandingAttendanceCount} sesi terdaftar yang belum kamu ikuti.`
                     : 'Kamu sudah mengikuti semua sesi yang terdaftar.'
@@ -167,20 +165,20 @@ export default function ScheduleListScreen() {
           <View>
             <Text style={styles.sectionTitle}>Jadwal Praktikum</Text>
             <Text style={styles.sectionSubtitle}>
-              {missingRole ? 'Peran diperlukan' : missingIdentity ? 'Identitas diperlukan' : `${visibleSessions.length} sesi tersedia`}
+              {missingRole ? 'Peran diperlukan' : missingEnrollmentMapping ? 'Pendaftaran belum tersedia' : `${visibleSessions.length} sesi tersedia`}
             </Text>
           </View>
         </View>
 
         {missingRole ? (
           <EmptyScheduleState
-            title="Peran belum dipilih"
-            description="Pilih peran Asisten atau Praktikan untuk melihat jadwal yang sesuai."
+            title="Sesi belum tersedia"
+            description="Silakan kembali ke Landing Page dan masuk kembali."
           />
-        ) : missingIdentity ? (
+        ) : missingEnrollmentMapping ? (
           <EmptyScheduleState
-            title="Identitas praktikan belum dipilih"
-            description="Pilih identitas dari menu Profil untuk melihat jadwal yang kamu ikuti."
+            title="Jadwal akun belum terhubung"
+            description="Data enrollment akun belum tersedia. Jadwal demo lokal tidak ditampilkan sebagai sesi terdaftar."
           />
         ) : visibleSessions.length === 0 ? (
           <EmptyScheduleState

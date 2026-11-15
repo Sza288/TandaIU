@@ -34,37 +34,37 @@ export default function LandingScreen() {
   const { width, height } = useWindowDimensions();
   const mascotSize = Math.min(width * 0.53, height * 0.28, 230);
 
-  const continueToRoles = () => router.replace('/role');
+  const continueToLogin = () => router.replace('/auth/login');
 
   return (
-    <View style={styles.root}>
-      <CornerDecorations />
-      <SafeAreaView style={styles.safeArea}>
-        <View style={styles.center}>
-          <Pressable
-            onPress={continueToRoles}
-            accessibilityRole="button"
-            accessibilityLabel="Lanjut ke pemilihan peran"
-            style={({ pressed }) => [styles.brandAction, pressed && styles.pressed]}
-          >
-            <Image
-              source={mascotImage}
-              style={{ width: mascotSize, height: mascotSize }}
-              resizeMode="contain"
-              accessibilityIgnoresInvertColors
-            />
-            <BrandWordmark size={45} withUnderline style={styles.brand} />
-          </Pressable>
-          <Pressable
-            onPress={continueToRoles}
-            accessibilityRole="button"
-            style={({ pressed }) => [styles.continueButton, pressed && styles.pressed]}
-          >
-            <Text style={styles.continueText}>Ketuk untuk melanjutkan</Text>
-          </Pressable>
-        </View>
-      </SafeAreaView>
-    </View>
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel="Ketuk untuk masuk ke TandaIU"
+      onPress={continueToLogin}
+      style={styles.root}
+    >
+      {({ pressed }) => (
+        <>
+          <CornerDecorations />
+          <SafeAreaView style={styles.safeArea}>
+            <View style={styles.center}>
+              <View style={[styles.brandAction, pressed && styles.pressed]}>
+                <Image
+                  source={mascotImage}
+                  style={{ width: mascotSize, height: mascotSize }}
+                  resizeMode="contain"
+                  accessibilityIgnoresInvertColors
+                />
+                <BrandWordmark size={45} withUnderline style={styles.brand} />
+              </View>
+              <View style={[styles.continueButton, pressed && styles.pressed]}>
+                <Text style={styles.continueText}>Ketuk untuk melanjutkan</Text>
+              </View>
+            </View>
+          </SafeAreaView>
+        </>
+      )}
+    </Pressable>
   );
 }
 
