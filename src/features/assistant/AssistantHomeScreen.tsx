@@ -71,6 +71,8 @@ export default function AssistantHomeScreen() {
   const goToPermits = () => router.push('/assistant/permits');
   const goToReviews = () => router.push('/assistant/reviews');
 
+  const goToKelola = () => router.push('/assistant/manage');
+
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
@@ -151,6 +153,12 @@ export default function AssistantHomeScreen() {
             title="Ulasan Praktikan"
             caption="Baca ulasan beserta sentimen AI"
             onPress={goToReviews}
+          />
+          <QuickCard
+            icon="settings-outline"
+            title="Kelola Praktikum"
+            caption="Atur kelas, jadwal, dan sesi"
+            onPress={goToKelola}
           />
         </View>
 

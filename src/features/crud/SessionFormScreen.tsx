@@ -15,14 +15,16 @@ import {
   COURSE_OPTIONS,
   LECTURER_OPTIONS,
   SESSION_STATUS_OPTIONS,
+  addHoursToDateTime,
+  combineDateTime,
   fieldForMessage,
-  fromDateTimeInput,
   getErrorMessage,
-  getLecturerName,
   returnToManage,
-  toDateTimeInput,
+  splitDateTimeInput,
   toLecturerId,
+  todayDateValue,
 } from './crud.utils';
+import { DateField, TimeField } from './DateTimeField';
 import FormScaffold, { FormLoadingScreen } from './FormScaffold';
 import {
   FormNote,
@@ -62,8 +64,10 @@ export default function SessionFormScreen() {
   const [practicumName, setPracticumName] = useState('');
   const [className, setClassName] = useState('');
   const [lecturerId, setLecturerId] = useState('');
-  const [startsAtInput, setStartsAtInput] = useState('');
-  const [endsAtInput, setEndsAtInput] = useState('');
+  const [startDate, setStartDate] = useState(() => todayDateValue());
+  const [startTime, setStartTime] = useState('08:00');
+  const [endDate, setEndDate] = useState(() => todayDateValue());
+  const [endTime, setEndTime] = useState('10:00');
   const [status, setStatus] = useState('terjadwal');
   const [coursePickerVisible, setCoursePickerVisible] = useState(false);
   const [lecturerPickerVisible, setLecturerPickerVisible] = useState(false);
@@ -86,8 +90,12 @@ export default function SessionFormScreen() {
           setPracticumName(session.practicumName);
           setClassName(session.className);
           setLecturerId(session.lecturerId ?? '');
-          setStartsAtInput(toDateTimeInput(session.startsAt));
-          setEndsAtInput(toDateTimeInput(session.endsAt));
+          const startParts = splitDateTimeInput(session.startsAt);
+          const endParts = splitDateTimeInput(session.endsAt);
+          setStartDate(startParts.date);
+          setStartTime(startParts.time);
+          setEndDate(endParts.date);
+          setEndTime(endParts.time);
           setStatus(session.status);
         }
         setReady(true);
@@ -106,19 +114,43 @@ export default function SessionFormScreen() {
   const selectedCourse = courses.find((course) => course.id === courseId);
   const selectedLecturer = dosen.find((lecturer) => lecturer.id === lecturerId);
 
+  const handleStartDateChange = (nextDate: string) => {
+    if (endDate === startDate) {
+      setEndDate(nextDate);
+    }
+    setStartDate(nextDate);
+  };
+
+  const handleStartTimeChange = (nextTime: string) => {
+    setStartTime(nextTime);
+    const autoEnd = addHoursToDateTime(startDate, nextTime, 2);
+    setEndDate(autoEnd.date);
+    setEndTime(autoEnd.time);
+  };
+
+  const handleSelectLecturer = (value: string) => {
+    setLecturerId(value);
+    setErrors((current) => ({ ...current, lecturerId: undefined }));
+  };
+
   const handleSubmit = async () => {
     setErrors({});
     setFormError(null);
+
+    if (!selectedLecturer) {
+      setErrors({ lecturerId: 'Dosen pengampu wajib dipilih.' });
+      return;
+    }
 
     const input: SessionInput = {
       courseId,
       practicumName: selectedCourse?.name ?? practicumName,
       className: className.trim(),
-      startsAt: fromDateTimeInput(startsAtInput),
-      endsAt: fromDateTimeInput(endsAtInput),
+      startsAt: combineDateTime(startDate, startTime),
+      endsAt: combineDateTime(endDate, endTime),
       status: status as SessionStatus,
       lecturerId: toLecturerId(lecturerId),
-      lecturer: selectedLecturer?.name ?? '',
+      lecturer: selectedLecturer.name,
     };
 
     try {
@@ -131,11 +163,6 @@ export default function SessionFormScreen() {
       } else {
         setFormError(message);
       }
-      return;
-    }
-
-    if (!selectedLecturer) {
-      setErrors({ lecturerId: 'Dosen pengampu wajib dipilih.' });
       return;
     }
 
@@ -179,7 +206,9 @@ export default function SessionFormScreen() {
 
       <FormReadOnlyField
         label="Nama praktikum"
-        value={selectedCourse?.name ?? (practicumName || 'Pilih mata kuliah')}
+        value={selectedCourse?.name ?? practicumName}
+        placeholder="Pilih mata kuliah"
+        hint="Nama praktikum mengikuti mata kuliah yang dipilih."
       />
 
       <FormTextField
@@ -193,7 +222,7 @@ export default function SessionFormScreen() {
 
       <FormPickerField
         label="Dosen pengampu"
-        value={getLecturerName(lecturerId) ?? ''}
+        value={selectedLecturer?.name ?? ''}
         placeholder="Pilih dosen pengampu"
         error={errors.lecturerId}
         hint="Pilih salah satu dosen yang tersedia."
@@ -210,22 +239,31 @@ export default function SessionFormScreen() {
         onPress={() => setStatusPickerVisible(true)}
       />
 
-      <FormTextField
-        label="Waktu mulai"
-        value={startsAtInput}
-        onChangeText={setStartsAtInput}
-        placeholder="2026-11-20T08:00"
-        autoCapitalize="none"
-        error={errors.startsAt}
-        hint="Format YYYY-MM-DDTHH:mm, contoh 2026-11-20T08:00."
+      <DateField
+        label="Tanggal mulai"
+        value={startDate}
+        onChange={handleStartDateChange}
       />
 
-      <FormTextField
-        label="Waktu selesai"
-        value={endsAtInput}
-        onChangeText={setEndsAtInput}
-        placeholder="2026-11-20T10:00"
-        autoCapitalize="none"
+      <TimeField
+        label="Jam mulai"
+        value={startTime}
+        onChange={handleStartTimeChange}
+        error={errors.startsAt}
+        hint="Jam selesai terisi otomatis 2 jam setelah jam mulai."
+      />
+
+      <DateField
+        label="Tanggal selesai"
+        value={endDate}
+        onChange={setEndDate}
+        hint="Ikuti tanggal mulai, kecuali praktikum selesai di hari lain."
+      />
+
+      <TimeField
+        label="Jam selesai"
+        value={endTime}
+        onChange={setEndTime}
         error={errors.endsAt}
         hint="Harus setelah waktu mulai."
       />
@@ -249,7 +287,7 @@ export default function SessionFormScreen() {
         title="Pilih Dosen Pengampu"
         options={LECTURER_OPTIONS}
         selectedValue={lecturerId}
-        onSelect={setLecturerId}
+        onSelect={handleSelectLecturer}
         onClose={() => setLecturerPickerVisible(false)}
       />
 
