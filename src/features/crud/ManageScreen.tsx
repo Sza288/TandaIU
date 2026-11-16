@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
+import { router, Stack } from 'expo-router';
 import { ReactNode, useState } from 'react';
 import {
   ActivityIndicator,
@@ -155,7 +155,18 @@ export default function ManageScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
-      <ScreenHeader title="Kelola Praktikum" eyebrow="Peran Asisten" />
+      <Stack.Screen options={{ headerShown: false }} />
+      <ScreenHeader
+        title="Kelola Praktikum"
+        eyebrow="Peran Asisten"
+        onBack={() => {
+          if (router.canGoBack()) {
+            router.back();
+            return;
+          }
+          router.replace('/assistant');
+        }}
+      />
 
       <ScrollView
         contentContainerStyle={styles.content}
