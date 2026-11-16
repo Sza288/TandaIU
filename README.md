@@ -25,7 +25,7 @@ Login / registrasi (email atau Google)
 
 Status sesi bertransisi `terjadwal` → `dibuka` → `ditutup`. Presensi hanya dapat dilakukan saat sesi `dibuka`, dan presensi ganda untuk praktikan yang sama pada satu sesi ditolak.
 
-Pengajuan izin menyimpan alasan praktikan **tanpa** analisis sentimen. Setelah sesi ditutup, praktikan dapat menulis **ulasan pasca-praktikum**; teks ulasan itulah yang dianalisis sentimennya **di perangkat** memakai model lokal. Asisten dapat menyetujui atau menolak izin, dan status izin langsung terlihat oleh praktikan.
+Pengajuan izin menyimpan alasan praktikan **tanpa** analisis sentimen. Setiap praktikan hanya dapat mengajukan **satu izin per sesi** (ID dokumen `permits/{sessionId}_{uid}`); pengajuan kedua untuk sesi yang sama ditolak, baik di UI maupun di security rules. Setelah sesi ditutup, praktikan dapat menulis **ulasan pasca-praktikum**; teks ulasan itulah yang dianalisis sentimennya **di perangkat** memakai model lokal. Asisten dapat menyetujui atau menolak izin, dan status izin langsung terlihat oleh praktikan.
 
 ## Teknologi
 
@@ -114,6 +114,7 @@ Aturan singkat: kode non-rute (komponen, hook, util) disimpan **di luar** `src/a
 - Presensi pada branch ini masih memakai state lokal (`AttendanceContext`); sinkronisasi presensi ke Firestore termasuk pekerjaan lanjutan.
 - Analisis sentimen berjalan **on-device** (tanpa panggilan jaringan) dan hanya dipakai untuk **ulasan pasca-praktikum**. Bila model tidak mengenali teks atau gagal, sistem memakai fallback `src/lib/aiClient.ts` dan UI menampilkan “Analisis cadangan”.
 - Ulasan hanya dapat dikirim untuk sesi yang sudah **ditutup**, satu ulasan per pasangan sesi + praktikan (ID dokumen `reviews/{sessionId}_{uid}`).
+- Izin hanya dapat diajukan satu kali per pasangan sesi + praktikan (ID dokumen `permits/{sessionId}_{uid}`); pengajuan ulang untuk sesi yang sama ditolak.
 - Di luar ruang lingkup: GPS/QR, bukti foto, ekspor laporan, notifikasi, dan administrasi jadwal lanjutan.
 
 ## Dokumentasi
@@ -129,7 +130,7 @@ Periode 13–17 Nov 2026. Ringkasan status per modul:
 |---|---|---|---|
 | Auth & role management | Husni | **Selesai** (PR #15) | `src/services/authService.ts`, `src/features/auth/*`, `src/app/auth/*`; login email/Google, registrasi profil `users/{uid}`, guard rute, reset kata sandi, logout. |
 | CRUD kelas/jadwal/sesi + security rules | Nadia | **Selesai** (PR #16) | `src/services/practicumService.ts`, `src/hooks/useClasses`, `useSchedules`, `useSessions`, `src/features/crud/*`, `firestore.rules`; validasi input dan listener realtime. |
-| Pengajuan & review izin | Khanza | **Selesai di branch `feature/sprint-2-izin-ai`** | `src/services/permitService.ts`, `src/hooks/usePermit.ts`, `src/features/permit/*`; simpan izin, transaksi approve/reject, status realtime. |
+| Pengajuan & review izin | Khanza | **Selesai di branch `feature/sprint-2-izin-ai`** | `src/services/permitService.ts`, `src/hooks/usePermit.ts`, `src/features/permit/*`; simpan izin (satu izin per sesi, ID `permits/{sessionId}_{uid}`), transaksi approve/reject, status realtime. |
 | Ulasan pasca-praktikum + sentimen AI | Khanza | **Selesai di branch `feature/sprint-2-izin-ai`** | `src/features/review/*`, `src/services/reviewService.ts`, `src/hooks/useReview.ts`, `src/data/reviews.ts`; satu ulasan per sesi, sentimen on-device, tampilan asisten. |
 | Presensi realtime | Olivia | **Belum tergabung di branch ini** | State presensi lokal: `src/state/AttendanceContext.tsx`, `src/state/attendanceMutations.ts`; sinkronisasi Firestore belum ada. |
 | Perbaikan UX form izin | Khanza | **Selesai** | `PraktikanPermitScreen` memakai `KeyboardAvoidingView` + `keyboardDismissMode` agar tombol kirim dan daftar sesi tidak tertutup keyboard. |

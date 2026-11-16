@@ -289,7 +289,7 @@ Jika ada keperluan mengubah file di `src/lib` atau `src/data`, **PM** melakukann
 
 | SRS Kode | User‑Story |
 |----------|------------|
-| **SRS‑12** | Praktikan dapat **mengajukan izin** dengan alasan; data tersimpan di `permits/{permitId}` **tanpa** field sentimen. |
+| **SRS‑12** | Praktikan dapat **mengajukan izin** dengan alasan; data tersimpan di `permits/{sessionId}_{uid}` **tanpa** field sentimen. **Asumsi:** satu izin per pasangan `sessionId` + `studentId`; pengajuan kedua untuk sesi yang sama ditolak. |
 | **SRS‑13** | Setelah sesi praktikum **ditutup**, praktikan dapat menulis **ulasan** untuk sesi tersebut; satu ulasan per pasangan `sessionId` + `studentId`, tersimpan di `reviews/{reviewId}`. |
 | **SRS‑14** | Sistem menganalisis **teks ulasan** memakai model sentimen on‑device dan menyimpan `sentiment` (`positif`/`netral`/`negatif`) beserta `sentimentSource` (`model`/`fallback`). |
 | **SRS‑15** | Asisten dapat **melihat semua izin** dan **menyetujui / menolak**, serta melihat **ulasan** praktikan beserta sentimen AI‑nya. |
@@ -305,14 +305,15 @@ Jika ada keperluan mengubah file di `src/lib` atau `src/data`, **PM** melakukann
 - Unit‑test `src/__tests__/permit.test.ts` dan `src/__tests__/review.test.ts`.  
 
 **Acceptance**  
-1. Form izin menyimpan `permits/{id}` dengan `{sessionId, studentId, studentName, reason, status:"pending", createdAt}` dan **tidak** memuat `sentiment`/`sentimentSource`.  
-2. Form ulasan hanya aktif untuk sesi `ditutup`; ulasan kedua untuk sesi yang sama ditolak.  
-3. `analyzeSentiment()` dipanggil pada teks ulasan; `reviews/{id}` memuat `sentiment` dan `sentimentSource`.  
-4. Asisten melihat daftar izin (setujui/tolak) dan daftar ulasan + sentimen.  
-5. Bila model tidak mengenali teks, hasil fallback ditandai `sentimentSource:"fallback"` dan UI menampilkan “Analisis cadangan”.  
-6. Semua tes lulus, lint dan typecheck bersih.  
+1. Form izin menyimpan `permits/{sessionId}_{uid}` dengan `{sessionId, studentId, studentName, reason, status:"pending", createdAt}` dan **tidak** memuat `sentiment`/`sentimentSource`.  
+2. Form izin menolak pengajuan ulang untuk sesi yang sama (satu izin per sesi); sesi yang sudah diajukan ditandai **“Sudah diajukan”**.  
+3. Form ulasan hanya aktif untuk sesi `ditutup`; ulasan kedua untuk sesi yang sama ditolak.  
+4. `analyzeSentiment()` dipanggil pada teks ulasan; `reviews/{id}` memuat `sentiment` dan `sentimentSource`.  
+5. Asisten melihat daftar izin (setujui/tolak) dan daftar ulasan + sentimen.  
+6. Bila model tidak mengenali teks, hasil fallback ditandai `sentimentSource:"fallback"` dan UI menampilkan “Analisis cadangan”.  
+7. Semua tes lulus, lint dan typecheck bersih.  
 
-> **PM:** tambahkan match `/reviews/{reviewId}` pada `firestore.rules` (praktikan membuat/membaca miliknya saat sesi `ditutup`, asisten membaca semua) dan hapus kewajiban field `sentiment` pada create `permits`.  
+> **PM:** tambahkan match `/reviews/{reviewId}` pada `firestore.rules` (praktikan membuat/membaca miliknya saat sesi `ditutup`, asisten membaca semua), wajibkan ID `permits/{sessionId}_{uid}` pada create izin (satu izin per sesi), dan hapus kewajiban field `sentiment` pada create `permits`.  
 
 ---  
 
