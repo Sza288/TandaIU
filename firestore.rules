@@ -83,6 +83,25 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // Ulasan pasca-praktikum: ID = sessionId + '_' + uid, satu ulasan per sesi.
+    // Bila sesi tersedia di Firestore, statusnya wajib sudah 'ditutup'.
+    match /reviews/{reviewId} {
+      allow read: if isSignedIn()
+        && (resource.data.studentId == request.auth.uid || isAssistant());
+      allow create: if isSignedIn()
+        && userRole() == 'praktikan'
+        && request.resource.data.studentId == request.auth.uid
+        && reviewId == request.resource.data.sessionId + '_' + request.auth.uid
+        && request.resource.data.sentiment in ['positif', 'netral', 'negatif']
+        && request.resource.data.sentimentSource in ['model', 'fallback']
+        && request.resource.data.keys().hasAll(['sessionId', 'studentId', 'studentName', 'comment', 'sentiment', 'sentimentSource', 'createdAt'])
+        && (
+          !exists(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId))
+          || get(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId)).data.status == 'ditutup'
+        );
+      allow update, delete: if false;
+    }
+
     // Koleksi lain ditolak secara default.
     match /{document=**} {
       allow read, write: if false;

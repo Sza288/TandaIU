@@ -1,4 +1,9 @@
 // Pure JavaScript inference. No network calls or native dependencies.
+
+// Skor teratas harus unggul cukup jauh dari skor kedua. Jika marginnya terlalu
+// tipis, prediksi dianggap tidak yakin dan dikembalikan sebagai netral.
+const MIN_DECISION_MARGIN = 0.3;
+
 function createSentimentClassifier(model) {
   if (model.schema_version !== 1 || ![
     'ascii_lowercase_words_unigram_bigram_sublinear_tf_l2_v1',
@@ -32,10 +37,16 @@ function createSentimentClassifier(model) {
     const norm = Math.sqrt(values.reduce((sum, pair) => sum + pair[1] ** 2, 0));
     const scores = model.weights.map((weights, c) =>
       values.reduce((score, [i, value]) => score + weights[i] * value / norm, model.bias[c]));
-    const best = scores.indexOf(Math.max(...scores));
+    const rankedScores = [...scores].sort((a, b) => b - a);
+    const scoreType = model.algorithm === 'LinearSVC' ? 'decision_margin' : 'log_score';
+    const experimental = model.status !== 'production';
+    if (rankedScores[0] - rankedScores[1] < MIN_DECISION_MARGIN && model.labels.includes('netral')) {
+      return {label: 'netral', status: 'low_confidence',
+        scores, scoreType, experimental};
+    }
+    const best = scores.indexOf(rankedScores[0]);
     return {label: model.labels[best], status: 'predicted',
-      scores, scoreType: model.algorithm === 'LinearSVC' ? 'decision_margin' : 'log_score',
-      experimental: model.status !== 'production'};
+      scores, scoreType, experimental};
   };
 }
 
