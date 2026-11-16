@@ -144,14 +144,14 @@ describe('registration flow', () => {
     expect(validProfile.role).toBe('praktikan');
   });
 
-  it('creates an asisten profile with the Firestore role and no student code', async () => {
+  it('creates an asisten profile with the normalized Firestore role and no student code', async () => {
     jest.mocked(createUserWithEmailAndPassword).mockResolvedValue(userCredential);
 
     await expect(registerWithEmailAndPassword({
       ...registrationInput,
       role: 'asisten',
       studentCode: '',
-    })).resolves.toMatchObject({ role: 'assistant' });
+    })).resolves.toMatchObject({ role: 'asisten' });
 
     expect(doc).toHaveBeenCalledWith(expect.anything(), 'users', 'uid-1');
     expect(setDoc).toHaveBeenCalledWith(documentReference, {
@@ -253,7 +253,7 @@ describe('profile validation and login', () => {
       uid: 'uid-1',
       name: 'Raka Asisten',
       email: 'raka@example.com',
-      role: 'assistant',
+      role: 'asisten',
     });
     expect(doc).toHaveBeenCalledWith(expect.anything(), 'users', 'uid-1');
   });
@@ -271,7 +271,7 @@ describe('profile validation and login', () => {
 
     await expect(
       signInWithEmailAndPasswordForProfile('raka@example.com', 'rahasia123'),
-    ).resolves.toMatchObject({ uid: 'uid-1', role: 'assistant' });
+    ).resolves.toMatchObject({ uid: 'uid-1', role: 'asisten' });
     expect(doc).toHaveBeenCalledWith(expect.anything(), 'users', 'uid-1');
   });
 
@@ -471,7 +471,7 @@ describe('Google Sign-In', () => {
     jest.mocked(getDoc).mockResolvedValue(makeDocumentSnapshot(existingDocument));
 
     await expect(registerGoogleProfile({ name: 'New Name', role: 'praktikan', studentCode: 'NIM-1' }))
-      .resolves.toMatchObject({ uid: 'uid-1', role: 'assistant' });
+      .resolves.toMatchObject({ uid: 'uid-1', role: 'asisten' });
 
     expect(doc).toHaveBeenCalledWith(expect.anything(), 'users', 'uid-1');
     expect(runTransaction).toHaveBeenCalled();

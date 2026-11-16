@@ -45,7 +45,7 @@ function ProtectedRouteContent({
     } else if (decision === 'error') {
       router.replace('/auth/login');
     } else if (decision === 'forbidden' && profile) {
-      router.replace(profile.role === 'assistant' ? '/assistant' : '/praktikan');
+      router.replace(profile.role === 'asisten' ? '/assistant' : '/praktikan');
     }
   }, [decision, profile]);
 

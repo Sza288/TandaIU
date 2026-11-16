@@ -61,7 +61,7 @@ export default function BottomNav() {
     }
 
     if (tab === 'riwayat') {
-      if (role === 'assistant') {
+      if (role === 'asisten') {
         router.replace('/assistant/riwayat');
       } else if (role === 'praktikan') {
         router.replace('/praktikan/riwayat');

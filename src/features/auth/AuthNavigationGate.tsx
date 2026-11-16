@@ -13,7 +13,7 @@ type AuthNavigationGateProps = {
 
 function requiredRoles(pathname: string): readonly UserRole[] | undefined {
   if (pathname === '/assistant' || pathname.startsWith('/assistant/')) {
-    return ['assistant'];
+    return ['asisten'];
   }
   if (pathname === '/praktikan' || pathname.startsWith('/praktikan/')) {
     return ['praktikan'];

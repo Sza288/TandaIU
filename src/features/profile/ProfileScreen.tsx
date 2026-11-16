@@ -15,10 +15,10 @@ export default function ProfileScreen() {
   const [loggingOut, setLoggingOut] = useState(false);
   const session = useAuthSession();
   const authProfile = session?.status === 'authenticated' ? session.profile : null;
-  const isAssistant = authProfile?.role === 'assistant';
+  const isAssistant = authProfile?.role === 'asisten';
   const name = authProfile?.name ?? 'Belum tersedia';
   const code = authProfile?.studentCode ?? 'Belum tersedia';
-  const role = authProfile?.role === 'assistant'
+  const role = authProfile?.role === 'asisten'
     ? 'Asisten'
     : authProfile?.role === 'praktikan'
       ? 'Praktikan'
