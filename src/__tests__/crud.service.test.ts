@@ -1,8 +1,9 @@
-import { addDoc, setDoc } from 'firebase/firestore';
+import { addDoc, deleteDoc, getDocs, setDoc } from 'firebase/firestore';
 
 import { dosen } from '../data/dosen';
 import {
   createSession,
+  deleteClass,
   validateClassInput,
   validateScheduleInput,
   validateSessionInput,
@@ -21,8 +22,10 @@ jest.mock('firebase/firestore', () => ({
   doc: jest.fn(),
   getDoc: jest.fn(),
   getDocs: jest.fn(),
+  query: jest.fn(),
   setDoc: jest.fn(),
   updateDoc: jest.fn(),
+  where: jest.fn(),
 }));
 
 jest.mock('../lib/firebase', () => ({ db: {} }));
@@ -123,6 +126,27 @@ describe('createSession lecturer validation', () => {
     await expect(createSession(validSession)).resolves.toMatchObject({ id: 's1' });
 
     expect(addDoc).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('deleteClass', () => {
+  it('rejects deletion when the class still has schedules', async () => {
+    (getDocs as jest.Mock).mockResolvedValue({ size: 2, empty: false, docs: [] });
+
+    await expect(deleteClass('c1')).rejects.toThrow(
+      'Kelas masih memiliki 2 jadwal. Hapus jadwalnya dulu.',
+    );
+
+    expect(deleteDoc).not.toHaveBeenCalled();
+  });
+
+  it('deletes the class when it has no schedules', async () => {
+    (getDocs as jest.Mock).mockResolvedValue({ size: 0, empty: true, docs: [] });
+    (deleteDoc as jest.Mock).mockResolvedValue(undefined);
+
+    await expect(deleteClass('c1')).resolves.toBeUndefined();
+
+    expect(deleteDoc).toHaveBeenCalledTimes(1);
   });
 });
 

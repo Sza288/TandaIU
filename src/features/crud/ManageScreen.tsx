@@ -28,6 +28,7 @@ import { formatDateShort, formatTimeRange } from '../../utils/format';
 import CrudCard from './CrudCard';
 import {
   DAY_LABELS,
+  confirmAction,
   getCourseName,
   getErrorMessage,
   manageHref,
@@ -51,6 +52,7 @@ const FORM_PATHS: Record<CrudKind, string> = {
 export default function ManageScreen() {
   const [tab, setTab] = useState<TabKey>('classes');
   const [deleting, setDeleting] = useState<{ kind: CrudKind; id: string } | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [seeding, setSeeding] = useState(false);
 
   const classes = useClasses();
@@ -65,6 +67,7 @@ export default function ManageScreen() {
 
   const runDelete = async (kind: CrudKind, id: string) => {
     setDeleting({ kind, id });
+    setDeleteError(null);
     try {
       if (kind === 'class') {
         await deleteClass(id);
@@ -74,27 +77,20 @@ export default function ManageScreen() {
         await deleteSession(id);
       }
     } catch (error) {
-      Alert.alert('Gagal menghapus', getErrorMessage(error));
+      setDeleteError(getErrorMessage(error));
     } finally {
       setDeleting(null);
     }
   };
 
   const confirmDelete = (kind: CrudKind, id: string, label: string) => {
-    Alert.alert(
-      `Hapus ${label}?`,
-      'Data yang dihapus tidak dapat dikembalikan.',
-      [
-        { text: 'Batal', style: 'cancel' },
-        {
-          text: 'Hapus',
-          style: 'destructive',
-          onPress: () => {
-            void runDelete(kind, id);
-          },
-        },
-      ],
-    );
+    confirmAction({
+      title: `Hapus ${label}?`,
+      message: 'Data yang dihapus tidak dapat dikembalikan.',
+      onConfirm: () => {
+        void runDelete(kind, id);
+      },
+    });
   };
 
   const runSeed = async () => {
@@ -172,6 +168,13 @@ export default function ManageScreen() {
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
       >
+        {deleteError ? (
+          <View style={styles.errorBanner}>
+            <Ionicons name="alert-circle-outline" size={18} color={colors.danger} />
+            <Text style={styles.errorText}>{deleteError}</Text>
+          </View>
+        ) : null}
+
         <View style={styles.tabs}>
           {TABS.map((item) => {
             const active = item.key === tab;
