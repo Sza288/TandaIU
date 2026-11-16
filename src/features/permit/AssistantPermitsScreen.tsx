@@ -15,6 +15,7 @@ import BottomNav from '../../components/BottomNav';
 import ScreenHeader from '../../components/ScreenHeader';
 import { assistantIdentity } from '../../data/assistantIdentity';
 import { praktikans } from '../../data/praktikans';
+import { useAuthSession } from '../auth/AuthSessionContext';
 import { usePermits } from '../../hooks/usePermit';
 import { reviewPermit, ReviewStatus } from '../../services/permitService';
 import { useAttendance } from '../../state/AttendanceContext';
@@ -22,7 +23,7 @@ import { colors, fonts, radius, shadows, spacing } from '../../theme';
 import { PracticumSession } from '../../types';
 import { formatDateTime } from '../../utils/format';
 import { Permit, PermitStatus } from './permit.types';
-import { PermitStatusBadge, SentimentBadge } from './PermitBadges';
+import { PermitStatusBadge } from './PermitBadges';
 
 type FilterKey = 'all' | PermitStatus;
 
@@ -42,6 +43,9 @@ const STATUS_BY_FILTER: Record<Exclude<FilterKey, 'all'>, PermitStatus> = {
 export default function AssistantPermitsScreen() {
   const { sessions } = useAttendance();
   const permits = usePermits();
+  const authSession = useAuthSession();
+  const reviewerName =
+    authSession?.status === 'authenticated' ? authSession.profile.name : assistantIdentity.name;
   const [filter, setFilter] = useState<FilterKey>('pending');
   const [reviewingId, setReviewingId] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<{ tone: 'success' | 'error'; message: string } | null>(null);
@@ -79,7 +83,7 @@ export default function AssistantPermitsScreen() {
     setReviewingId(permit.id);
     setFeedback(null);
     try {
-      const result = await reviewPermit(permit.id, status, assistantIdentity.name);
+      const result = await reviewPermit(permit.id, status, reviewerName);
       if (!result.ok) {
         setFeedback({ tone: 'error', message: result.reason });
         return;
@@ -243,16 +247,6 @@ function PermitReviewCard({
 
       <Text style={styles.reasonLabel}>Alasan izin</Text>
       <Text style={styles.reason}>{permit.reason}</Text>
-
-      <View style={styles.badges}>
-        <SentimentBadge sentiment={permit.sentiment} />
-        {permit.sentimentSource === 'fallback' ? (
-          <View style={styles.fallbackNote}>
-            <Ionicons name="warning-outline" size={13} color={colors.warning} />
-            <Text style={styles.fallbackText}>Analisis cadangan</Text>
-          </View>
-        ) : null}
-      </View>
 
       <Text style={styles.timestamp}>
         Diajukan {formatDateTime(permit.createdAt)}
@@ -459,22 +453,6 @@ const styles = StyleSheet.create({
     fontFamily: fonts.regular,
     fontSize: 12,
     lineHeight: 18,
-  },
-  badges: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    alignItems: 'center',
-    gap: spacing.sm,
-  },
-  fallbackNote: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-  },
-  fallbackText: {
-    color: colors.warning,
-    fontFamily: fonts.semiBold,
-    fontSize: 10,
   },
   timestamp: {
     color: colors.textMuted,

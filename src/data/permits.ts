@@ -11,8 +11,6 @@ export const dummyPermits: Permit[] = [
     studentId: 'p1',
     studentName: 'Andi Pratama',
     reason: 'Demam tinggi, harus istirahat.',
-    sentiment: 'negatif',
-    sentimentSource: 'model',
     status: 'pending',
     createdAt: '2026-10-27T06:30:00+07:00',
   },
