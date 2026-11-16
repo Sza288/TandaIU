@@ -1,4 +1,5 @@
-import { router, type Href } from 'expo-router';
+import { router, type Href, type ImperativeRouter } from 'expo-router';
+import { Alert, Platform } from 'react-native';
 
 import { courses } from '../../data/courses';
 import { dosen } from '../../data/dosen';
@@ -78,6 +79,73 @@ export function fromDateTimeInput(value: string): string {
   return date.toISOString();
 }
 
+function toDateValue(date: Date): string {
+  const pad = (value: number) => String(value).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+function toTimeValue(date: Date): string {
+  const pad = (value: number) => String(value).padStart(2, '0');
+  return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+export function todayDateValue(): string {
+  return toDateValue(new Date());
+}
+
+export function splitDateTimeInput(value: string): { date: string; time: string } {
+  const normalized = toDateTimeInput(value);
+  const [date = '', time = ''] = normalized.split('T');
+  return { date, time: time.slice(0, 5) };
+}
+
+export function combineDateTime(date: string, time: string): string {
+  if (!date || !time) return '';
+  return fromDateTimeInput(`${date}T${time}`);
+}
+
+export function addHoursToDateTime(
+  date: string,
+  time: string,
+  hours: number,
+): { date: string; time: string } {
+  const [hour = '0', minute = '0'] = time.split(':');
+  const base = new Date(
+    `${date}T${hour.padStart(2, '0')}:${minute.padStart(2, '0')}:00`,
+  );
+  if (Number.isNaN(base.getTime())) {
+    return { date, time };
+  }
+
+  base.setHours(base.getHours() + hours);
+  return { date: toDateValue(base), time: toTimeValue(base) };
+}
+
+const DAY_SHORT_LABELS = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'];
+const MONTH_SHORT_LABELS = [
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'Mei',
+  'Jun',
+  'Jul',
+  'Agu',
+  'Sep',
+  'Okt',
+  'Nov',
+  'Des',
+];
+
+export function formatDateLabel(value: string): string {
+  const date = new Date(`${value}T00:00:00`);
+  if (!value || Number.isNaN(date.getTime())) return value;
+
+  return `${DAY_SHORT_LABELS[date.getDay()]}, ${date.getDate()} ${
+    MONTH_SHORT_LABELS[date.getMonth()]
+  } ${date.getFullYear()}`;
+}
+
 export function fieldForMessage<T extends string>(
   message: string,
   mappings: { field: T; prefix: string }[],
@@ -90,10 +158,39 @@ export function manageHref(pathname: string, id?: string): Href {
   return { pathname, params: id ? { id } : undefined } as Href;
 }
 
-export function returnToManage(): void {
-  if (router.canGoBack()) {
-    router.back();
+export function goBackOr(navigationRouter: ImperativeRouter, fallback: Href): void {
+  if (navigationRouter.canGoBack()) {
+    navigationRouter.back();
     return;
   }
-  router.replace(manageHref('/assistant/manage'));
+  navigationRouter.replace(fallback);
 }
+
+export function returnToManage(): void {
+  goBackOr(router, manageHref('/assistant/manage'));
+}
+
+export function confirmAction({
+  title,
+  message,
+  confirmLabel = 'Hapus',
+  onConfirm,
+}: {
+  title: string;
+  message: string;
+  confirmLabel?: string;
+  onConfirm: () => void;
+}): void {
+  if (Platform.OS === 'web') {
+    if (window.confirm(`${title}\n\n${message}`)) {
+      onConfirm();
+    }
+    return;
+  }
+
+  Alert.alert(title, message, [
+    { text: 'Batal', style: 'cancel' },
+    { text: confirmLabel, style: 'destructive', onPress: onConfirm },
+  ]);
+}
+

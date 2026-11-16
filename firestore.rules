@@ -13,26 +13,29 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
     }
 
-    // Asisten adalah pengguna login dengan role 'assistant'.
+    // Asisten adalah pengguna login dengan role 'asisten'.
     function isAssistant() {
-      return isSignedIn() && userRole() == 'assistant';
+      return isSignedIn() && userRole() == 'asisten';
     }
 
-    // Pengguna hanya boleh membaca dokumennya sendiri.
-    match /users/{uid} {
-      allow read: if isSignedIn() && request.auth.uid == uid;
-      // Pembuatan hanya oleh pemilik, role valid, uid cocok, dan field wajib lengkap.
-      allow create: if isSignedIn()
-        && request.auth.uid == uid
-        && request.resource.data.role in ['assistant', 'praktikan']
-        && request.resource.data.uid == request.auth.uid
-        && request.resource.data.keys().hasAll(['uid', 'name', 'email', 'role']);
-      // Update hanya oleh pemilik dan field role tidak boleh berubah.
-      allow update: if isSignedIn()
-        && request.auth.uid == uid
-        && request.resource.data.role == resource.data.role;
-      // Penghapusan dokumen pengguna ditolak.
-      allow delete: if false;
+    // Pengguna hanya dapat membaca profil miliknya
+    match /users/{userId} {
+      allow get: if request.auth != null
+                 && request.auth.uid == userId;
+
+      // Tidak boleh membaca seluruh koleksi users
+      allow list: if false;
+
+      // Praktikan maupun asisten boleh membuat profil sendiri
+      allow create: if request.auth != null
+                    && request.auth.uid == userId
+                    && request.resource.data.role in ['praktikan', 'asisten']
+                    && request.resource.data.authProvider in ['google', 'password']
+                    && request.resource.data.email is string
+                    && request.resource.data.name is string;
+
+      // Profil dan role tidak boleh diubah langsung oleh pengguna
+      allow update, delete: if false;
     }
 
     // Semua pengguna terautentikasi boleh membaca kelas; hanya asisten yang boleh menulis.
