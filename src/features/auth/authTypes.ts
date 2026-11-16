@@ -1,4 +1,4 @@
-export const USER_ROLES = ['assistant', 'praktikan'] as const;
+export const USER_ROLES = ['asisten', 'praktikan'] as const;
 
 export type UserRole = (typeof USER_ROLES)[number];
 export type RegistrationRole = 'praktikan' | 'asisten';
@@ -25,7 +25,7 @@ export type AuthSessionState =
 export type GuardDecision = 'loading' | 'allow' | 'login' | 'forbidden' | 'error';
 
 export function getDashboardPath(role: UserRole): '/assistant' | '/praktikan' {
-  return role === 'assistant' ? '/assistant' : '/praktikan';
+  return role === 'asisten' ? '/assistant' : '/praktikan';
 }
 
 export function getAuthNavigationTarget(
@@ -44,8 +44,11 @@ export function getAuthNavigationTarget(
   return null;
 }
 
-export function isUserRole(value: unknown): value is UserRole {
-  return value === 'assistant' || value === 'praktikan';
+// Dokumen lama sempat menyimpan role 'assistant'; nilai itu tetap diterima saat membaca.
+export function toUserRole(value: unknown): UserRole | null {
+  if (value === 'asisten' || value === 'assistant') return 'asisten';
+  if (value === 'praktikan') return 'praktikan';
+  return null;
 }
 
 export function getGuardDecision(

@@ -37,7 +37,7 @@ export type Attendance = {
   excuseReason?: ExcuseReason;
 };
 
-export type Role = 'assistant' | 'praktikan';
+export type Role = 'asisten' | 'praktikan';
 
 export type MutationResult = {
   ok: boolean;

@@ -14,7 +14,7 @@ import {
 import { doc, getDoc, runTransaction, setDoc } from 'firebase/firestore';
 import { auth, db } from '../lib/firebase';
 import {
-  isUserRole,
+  toUserRole,
   type AuthProfile,
   type RegistrationRole,
 } from '../features/auth/authTypes';
@@ -162,18 +162,13 @@ function makeProfile(data: Record<string, unknown>, expectedUid: string): AuthPr
       'Data akun tidak cocok dengan sesi ini. Hubungi admin sebelum mencoba lagi.',
     );
   }
-  const role =
-    data.role === 'asisten' || data.role === 'assistant'
-      ? 'assistant'
-      : data.role === 'praktikan'
-        ? 'praktikan'
-        : null;
+  const role = toUserRole(data.role);
   if (
     typeof data.name !== 'string' ||
     !data.name.trim() ||
     typeof data.email !== 'string' ||
     !data.email.trim() ||
-    !isUserRole(role)
+    !role
   ) {
     throw new AuthServiceError(
       'invalid-profile',
@@ -257,7 +252,7 @@ export async function registerWithEmailAndPassword(
     uid: user.uid,
     name: input.name.trim(),
     email: input.email.trim(),
-    role: input.role === 'asisten' ? 'assistant' : 'praktikan',
+    role: input.role,
     ...(input.role === 'praktikan' ? { studentCode: input.studentCode.trim() } : {}),
   };
 
@@ -265,7 +260,7 @@ export async function registerWithEmailAndPassword(
     await setDoc(doc(db, 'users', user.uid), {
       name: profile.name,
       email: profile.email,
-      role: input.role,
+      role: profile.role,
       authProvider: 'password',
       ...(profile.studentCode ? { studentCode: profile.studentCode } : {}),
     });
