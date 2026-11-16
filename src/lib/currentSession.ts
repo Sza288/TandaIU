@@ -5,7 +5,7 @@ export interface CurrentUser {
   uid: string;
   name: string;
   email: string;
-  role: 'assistant' | 'praktikan';
+  role: 'asisten' | 'praktikan';
   studentCode?: string;
 }
 

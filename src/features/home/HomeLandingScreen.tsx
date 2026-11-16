@@ -6,7 +6,7 @@ export default function HomeLandingScreen() {
   const { activeRole } = useAttendance();
 
   useEffect(() => {
-    if (activeRole === 'assistant') {
+    if (activeRole === 'asisten') {
       router.replace('/assistant');
     } else if (activeRole === 'praktikan') {
       router.replace('/praktikan');

@@ -25,7 +25,7 @@ describe('protected route access decisions', () => {
       getAuthNavigationTarget(
         {
           status: 'authenticated',
-          profile: { ...praktikanSession.profile, role: 'assistant' },
+          profile: { ...praktikanSession.profile, role: 'asisten' },
         },
         '/auth/register',
       ),
@@ -49,7 +49,7 @@ describe('protected route access decisions', () => {
 
   it('maps each verified role to its existing dashboard route', () => {
     expect(getDashboardPath('praktikan')).toBe('/praktikan');
-    expect(getDashboardPath('assistant')).toBe('/assistant');
+    expect(getDashboardPath('asisten')).toBe('/assistant');
   });
 
   it('keeps the guard loading until the auth check finishes', () => {
@@ -61,7 +61,7 @@ describe('protected route access decisions', () => {
   });
 
   it('rejects a role that is not allowed on the route', () => {
-    expect(getGuardDecision(praktikanSession, ['assistant'])).toBe('forbidden');
+    expect(getGuardDecision(praktikanSession, ['asisten'])).toBe('forbidden');
   });
 
   it('allows a verified profile for its permitted role', () => {
