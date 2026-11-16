@@ -1,4 +1,4 @@
-import { router, type Href } from 'expo-router';
+import { router, type Href, type ImperativeRouter } from 'expo-router';
 import { Alert, Platform } from 'react-native';
 
 import { courses } from '../../data/courses';
@@ -158,12 +158,16 @@ export function manageHref(pathname: string, id?: string): Href {
   return { pathname, params: id ? { id } : undefined } as Href;
 }
 
-export function returnToManage(): void {
-  if (router.canGoBack()) {
-    router.back();
+export function goBackOr(navigationRouter: ImperativeRouter, fallback: Href): void {
+  if (navigationRouter.canGoBack()) {
+    navigationRouter.back();
     return;
   }
-  router.replace(manageHref('/assistant/manage'));
+  navigationRouter.replace(fallback);
+}
+
+export function returnToManage(): void {
+  goBackOr(router, manageHref('/assistant/manage'));
 }
 
 export function confirmAction({
