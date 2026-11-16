@@ -31,6 +31,7 @@ import {
   confirmAction,
   getCourseName,
   getErrorMessage,
+  goBackOr,
   manageHref,
 } from './crud.utils';
 
@@ -155,13 +156,7 @@ export default function ManageScreen() {
       <ScreenHeader
         title="Kelola Praktikum"
         eyebrow="Peran Asisten"
-        onBack={() => {
-          if (router.canGoBack()) {
-            router.back();
-            return;
-          }
-          router.replace('/assistant');
-        }}
+        onBack={() => goBackOr(router, '/assistant')}
       />
 
       <ScrollView
