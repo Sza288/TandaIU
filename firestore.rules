@@ -69,13 +69,15 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
-    // Izin: praktikan mengajukan 'pending', asisten mereview jadi 'approved'/'rejected'.
+    // Izin: ID = sessionId + '_' + uid, satu pengajuan per sesi per praktikan.
+    // Praktikan mengajukan 'pending', asisten mereview jadi 'approved'/'rejected'.
     match /permits/{permitId} {
       allow read: if isSignedIn()
         && (resource.data.studentId == request.auth.uid || isAssistant());
       allow create: if isSignedIn()
         && userRole() == 'praktikan'
         && request.resource.data.studentId == request.auth.uid
+        && permitId == request.resource.data.sessionId + '_' + request.auth.uid
         && request.resource.data.status == 'pending'
         && !request.resource.data.keys().hasAny(['reviewedAt', 'reviewedBy'])
         && request.resource.data.keys().hasAll(['sessionId', 'studentId', 'studentName', 'reason', 'status', 'createdAt']);
