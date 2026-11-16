@@ -11,13 +11,16 @@ import {
 import type { ScheduleInput } from '../../types/praktikum';
 import {
   DAY_OPTIONS,
+  addHoursToDateTime,
   fieldForMessage,
   getCourseName,
   getErrorMessage,
   returnToManage,
   toClockTime,
   toDayOfWeek,
+  todayDateValue,
 } from './crud.utils';
+import { TimeField } from './DateTimeField';
 import FormScaffold, { FormLoadingScreen } from './FormScaffold';
 import {
   FormNote,
@@ -123,6 +126,11 @@ export default function ScheduleFormScreen() {
     }
   };
 
+  const handleStartTimeChange = (nextTime: string) => {
+    setStartTime(nextTime);
+    setEndTime(addHoursToDateTime(todayDateValue(), nextTime, 2).time);
+  };
+
   const handleSubmit = async () => {
     setErrors({});
     setFormError(null);
@@ -202,24 +210,18 @@ export default function ScheduleFormScreen() {
         onPress={() => setDayPickerVisible(true)}
       />
 
-      <FormTextField
+      <TimeField
         label="Waktu mulai"
         value={startTime}
-        onChangeText={setStartTime}
-        placeholder="08:00"
-        autoCapitalize="none"
-        maxLength={5}
+        onChange={handleStartTimeChange}
         error={errors.startTime}
-        hint="Format HH:mm, contoh 08:00."
+        hint="Pilih jam mulai praktikum."
       />
 
-      <FormTextField
+      <TimeField
         label="Waktu selesai"
         value={endTime}
-        onChangeText={setEndTime}
-        placeholder="10:00"
-        autoCapitalize="none"
-        maxLength={5}
+        onChange={setEndTime}
         error={errors.endTime}
         hint="Harus setelah waktu mulai."
       />
