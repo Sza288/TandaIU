@@ -102,15 +102,24 @@ export function FormPickerField({
 type FormReadOnlyFieldProps = {
   label: string;
   value: string;
+  placeholder?: string;
   hint?: string;
   style?: ViewStyle;
 };
 
-export function FormReadOnlyField({ label, value, hint, style }: FormReadOnlyFieldProps) {
+export function FormReadOnlyField({
+  label,
+  value,
+  placeholder,
+  hint,
+  style,
+}: FormReadOnlyFieldProps) {
   return (
     <FormField label={label} hint={hint}>
       <View style={[styles.input, styles.readOnly, style]}>
-        <Text style={styles.readOnlyText}>{value}</Text>
+        <Text style={[styles.readOnlyText, !value ? styles.readOnlyPlaceholder : null]}>
+          {value || placeholder || ''}
+        </Text>
       </View>
     </FormField>
   );
@@ -184,6 +193,9 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     fontFamily: fonts.regular,
     fontSize: 14,
+  },
+  readOnlyPlaceholder: {
+    color: colors.textMuted,
   },
   note: {
     color: colors.textMuted,
