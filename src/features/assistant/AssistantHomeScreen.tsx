@@ -68,6 +68,8 @@ export default function AssistantHomeScreen() {
   };
 
   const goToRiwayat = () => router.push('/assistant/riwayat');
+  const goToPermits = () => router.push('/assistant/permits');
+  const goToReviews = () => router.push('/assistant/reviews');
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
@@ -137,6 +139,18 @@ export default function AssistantHomeScreen() {
             title="Riwayat"
             caption="Praktikum yang telah selesai"
             onPress={goToRiwayat}
+          />
+          <QuickCard
+            icon="document-text-outline"
+            title="Review Izin"
+            caption="Tinjau pengajuan izin praktikan"
+            onPress={goToPermits}
+          />
+          <QuickCard
+            icon="chatbubbles-outline"
+            title="Ulasan Praktikan"
+            caption="Baca ulasan beserta sentimen AI"
+            onPress={goToReviews}
           />
         </View>
 
