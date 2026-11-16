@@ -409,7 +409,7 @@ describe('Google Sign-In', () => {
     }
 
     expect(GoogleSignin.configure).toHaveBeenCalledWith({
-      webClientId: 'web-client-id',
+      webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID,
       offlineAccess: false,
     });
     expect(GoogleAuthProvider.credential).toHaveBeenCalledWith('google-id-token');
