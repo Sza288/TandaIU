@@ -76,6 +76,11 @@ export default function PraktikanPermitScreen() {
     [studentId, permits],
   );
 
+  const submittedSessionIds = useMemo(
+    () => new Set(myPermits.map((permit) => permit.sessionId)),
+    [myPermits],
+  );
+
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [reason, setReason] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -95,6 +100,14 @@ export default function PraktikanPermitScreen() {
   };
 
   const handleChooseSession = (session: PracticumSession) => {
+    if (submittedSessionIds.has(session.id)) {
+      setFeedback({
+        tone: 'error',
+        title: 'Izin sudah diajukan',
+        message: 'Setiap sesi hanya dapat diajukan izin satu kali.',
+      });
+      return;
+    }
     setSessionId(session.id);
     setFeedback(null);
   };
@@ -121,6 +134,14 @@ export default function PraktikanPermitScreen() {
         tone: 'error',
         title: 'Alasan terlalu singkat',
         message: `Tuliskan alasan izin minimal ${MIN_REASON_LENGTH} karakter.`,
+      });
+      return;
+    }
+    if (submittedSessionIds.has(sessionId)) {
+      setFeedback({
+        tone: 'error',
+        title: 'Izin sudah diajukan',
+        message: 'Setiap sesi hanya dapat diajukan izin satu kali.',
       });
       return;
     }
@@ -208,14 +229,19 @@ export default function PraktikanPermitScreen() {
                   <View style={styles.sessionList}>
                     {eligibleSessions.map((session) => {
                       const selected = session.id === sessionId;
+                      const submitted = submittedSessionIds.has(session.id);
                       return (
                         <TouchableOpacity
                           key={session.id}
-                          style={[styles.sessionOption, selected && styles.sessionOptionSelected]}
+                          style={[
+                            styles.sessionOption,
+                            selected && styles.sessionOptionSelected,
+                            submitted && styles.sessionOptionSubmitted,
+                          ]}
                           onPress={() => handleChooseSession(session)}
                           activeOpacity={0.85}
                           accessibilityRole="radio"
-                          accessibilityState={{ selected }}
+                          accessibilityState={{ selected, disabled: submitted }}
                           accessibilityLabel={`Pilih sesi ${session.practicumName} kelas ${session.className}`}
                         >
                           <View style={styles.sessionCopy}>
@@ -226,11 +252,15 @@ export default function PraktikanPermitScreen() {
                               Kelas {session.className} · {formatDateTime(session.startsAt)}
                             </Text>
                           </View>
-                          <Ionicons
-                            name={selected ? 'radio-button-on' : 'radio-button-off'}
-                            size={20}
-                            color={selected ? colors.primary : colors.textMuted}
-                          />
+                          {submitted ? (
+                            <Text style={styles.submittedText}>Sudah diajukan</Text>
+                          ) : (
+                            <Ionicons
+                              name={selected ? 'radio-button-on' : 'radio-button-off'}
+                              size={20}
+                              color={selected ? colors.primary : colors.textMuted}
+                            />
+                          )}
                         </TouchableOpacity>
                       );
                     })}
@@ -256,7 +286,7 @@ export default function PraktikanPermitScreen() {
                   />
                   <View style={styles.fieldFooter}>
                     <Text style={styles.hintText}>
-                      Alasan dianalisis otomatis oleh model sentimen di perangkat.
+                      Setiap sesi hanya dapat diajukan izin satu kali.
                     </Text>
                     <Text style={styles.counter}>
                       {reason.length}/{MAX_REASON_LENGTH}
@@ -436,6 +466,14 @@ const styles = StyleSheet.create({
   sessionOptionSelected: {
     borderColor: colors.primary,
     backgroundColor: colors.primarySofter,
+  },
+  sessionOptionSubmitted: {
+    opacity: 0.7,
+  },
+  submittedText: {
+    color: colors.success,
+    fontFamily: fonts.bold,
+    fontSize: 10,
   },
   sessionCopy: {
     flex: 1,
