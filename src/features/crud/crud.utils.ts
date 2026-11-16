@@ -146,20 +146,6 @@ export function formatDateLabel(value: string): string {
   } ${date.getFullYear()}`;
 }
 
-export function buildDateOptions(days = 60): { label: string; value: string }[] {
-  const options: { label: string; value: string }[] = [];
-  const today = new Date();
-
-  for (let index = 0; index < days; index += 1) {
-    const date = new Date(today);
-    date.setDate(today.getDate() + index);
-    const value = toDateValue(date);
-    options.push({ label: formatDateLabel(value), value });
-  }
-
-  return options;
-}
-
 export function fieldForMessage<T extends string>(
   message: string,
   mappings: { field: T; prefix: string }[],
