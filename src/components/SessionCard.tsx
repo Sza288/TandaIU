@@ -10,7 +10,7 @@ import { getCourseById } from '../utils/academic';
 import { getLabLabel, getMeetingNumber } from '../utils/session';
 
 function detailLabelFor(role: Role | null) {
-  if (role === 'assistant') return 'Lihat Detail';
+  if (role === 'asisten') return 'Lihat Detail';
   if (role === 'praktikan') return 'Sesi Praktikan';
   return 'Lihat Detail';
 }

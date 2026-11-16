@@ -24,7 +24,7 @@ export default function ScheduleListScreen() {
     activePraktikanId ? getSessionIdsForPraktikan(activePraktikanId) : [],
   );
   const enrolledSessions = sessions.filter((session) => enrolledSessionIds.has(session.id));
-  const roleSessions = activeRole === 'assistant'
+  const roleSessions = activeRole === 'asisten'
     ? sessions
     : activeRole === 'praktikan'
       ? enrolledSessions
@@ -41,7 +41,7 @@ export default function ScheduleListScreen() {
       ),
     ).length
     : 0;
-  const assistantScheduledCount = activeRole === 'assistant'
+  const assistantScheduledCount = activeRole === 'asisten'
     ? sessions.filter((session) => session.status === 'terjadwal').length
     : 0;
   const missingEnrollmentMapping = activeRole === 'praktikan' && !activePraktikanId;
@@ -52,7 +52,7 @@ export default function ScheduleListScreen() {
       router.back();
       return;
     }
-    if (activeRole === 'assistant') {
+    if (activeRole === 'asisten') {
       router.replace('/assistant');
       return;
     }
@@ -81,7 +81,7 @@ export default function ScheduleListScreen() {
           </Pressable>
           <View style={styles.headerCopy}>
             <Text style={styles.eyebrow}>
-              {activeRole === 'assistant' ? 'PERAN ASISTEN' : activeRole === 'praktikan' ? 'PERAN PRAKTIKAN' : 'JADWAL'}
+              {activeRole === 'asisten' ? 'PERAN ASISTEN' : activeRole === 'praktikan' ? 'PERAN PRAKTIKAN' : 'JADWAL'}
             </Text>
             <Text style={styles.title}>Sesi Laboratorium</Text>
           </View>

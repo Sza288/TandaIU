@@ -89,7 +89,7 @@ export default function SessionDetailScreen() {
   const activePraktikanId = activePraktikan?.localScheduleId ?? null;
   const session = sessions.find((item) => item.id === sessionId);
   const sessionCourse = session ? getCourseById(session.courseId) : undefined;
-  const isAssistant = activeRole === 'assistant';
+  const isAssistant = activeRole === 'asisten';
   const activeAttendance = attendances.find(
     (attendance) =>
       attendance.sessionId === sessionId && attendance.praktikanId === activePraktikanId,

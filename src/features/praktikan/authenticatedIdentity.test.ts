@@ -32,12 +32,12 @@ describe('getAuthenticatedPraktikanIdentity', () => {
     });
   });
 
-  it('does not create a praktikan identity for an assistant profile', () => {
+  it('does not create a praktikan identity for an asisten profile', () => {
     expect(getAuthenticatedPraktikanIdentity({
-      uid: 'assistant-uid',
+      uid: 'asisten-uid',
       name: 'Asisten',
       email: 'asisten@example.com',
-      role: 'assistant',
+      role: 'asisten',
     })).toBeNull();
   });
 });

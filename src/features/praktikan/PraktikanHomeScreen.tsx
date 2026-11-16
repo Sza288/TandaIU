@@ -39,6 +39,8 @@ export default function PraktikanHomeScreen() {
 
   const handleOpenSchedule = () => router.push('/schedule');
   const handleOpenHistory = () => router.push('/praktikan/riwayat');
+  const handleOpenPermit = () => router.push('/praktikan/permit');
+  const handleOpenReview = () => router.push('/praktikan/review');
   const handleOpenSession = (sessionId: string) => {
     router.push({ pathname: '/schedule/[id]', params: { id: sessionId } });
   };
@@ -146,6 +148,18 @@ export default function PraktikanHomeScreen() {
                 title="Riwayat"
                 caption="Lihat catatan kehadiranmu"
                 onPress={handleOpenHistory}
+              />
+              <QuickCard
+                icon="document-text-outline"
+                title="Ajukan Izin"
+                caption="Kirim izin dan pantau statusnya"
+                onPress={handleOpenPermit}
+              />
+              <QuickCard
+                icon="chatbubble-ellipses-outline"
+                title="Ulasan"
+                caption="Beri ulasan setelah praktikum selesai"
+                onPress={handleOpenReview}
               />
             </View>
           </View>
