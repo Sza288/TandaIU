@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { Stack } from 'expo-router';
+import { Stack, useRouter } from 'expo-router';
 import { ReactNode } from 'react';
 import {
   ActivityIndicator,
@@ -14,6 +14,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import ScreenHeader from '../../components/ScreenHeader';
 import { colors, fonts, radius, spacing } from '../../theme';
+import { goBackOr } from './crud.utils';
 
 type Props = {
   title: string;
@@ -36,6 +37,7 @@ export default function FormScaffold({
   formError,
   children,
 }: Props) {
+  const router = useRouter();
   const disabled = submitting || submitDisabled;
 
   return (
@@ -45,7 +47,11 @@ export default function FormScaffold({
         style={styles.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        <ScreenHeader title={title} eyebrow={eyebrow} />
+        <ScreenHeader
+          title={title}
+          eyebrow={eyebrow}
+          onBack={() => goBackOr(router, '/assistant/manage')}
+        />
         <ScrollView
           contentContainerStyle={styles.content}
           keyboardShouldPersistTaps="handled"
@@ -87,10 +93,16 @@ export default function FormScaffold({
 }
 
 export function FormLoadingScreen({ title }: { title: string }) {
+  const router = useRouter();
+
   return (
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
       <Stack.Screen options={{ headerShown: false }} />
-      <ScreenHeader title={title} eyebrow="Kelola Praktikum" />
+      <ScreenHeader
+        title={title}
+        eyebrow="Kelola Praktikum"
+        onBack={() => goBackOr(router, '/assistant/manage')}
+      />
       <View style={styles.loading}>
         <ActivityIndicator color={colors.primary} />
         <Text style={styles.loadingText}>Memuat data...</Text>

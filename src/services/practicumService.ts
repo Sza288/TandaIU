@@ -5,8 +5,10 @@ import {
   doc,
   getDoc,
   getDocs,
+  query,
   setDoc,
   updateDoc,
+  where,
 } from 'firebase/firestore';
 
 import { dosen } from '../data/dosen';
@@ -159,6 +161,19 @@ export async function updateClass(
 }
 
 export async function deleteClass(id: string): Promise<void> {
+  const scheduleCount = await runFirestore(async () => {
+    const snapshot = await getDocs(
+      query(collection(db, COLLECTIONS.schedules), where('classId', '==', id)),
+    );
+    return snapshot.size;
+  });
+
+  if (scheduleCount > 0) {
+    throw new Error(
+      `Kelas masih memiliki ${scheduleCount} jadwal. Hapus jadwalnya dulu.`,
+    );
+  }
+
   return runFirestore(async () => {
     await deleteDoc(doc(db, COLLECTIONS.classes, id));
   });
