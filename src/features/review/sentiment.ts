@@ -1,36 +1,36 @@
 import { analyzeSentiment } from '../../lib/aiClient';
 import model from './ai/model-edom.json';
 import { createSentimentClassifier } from './ai/sentiment';
-import { PermitSentiment, PermitSentimentSource } from './permit.types';
+import { ReviewSentiment, ReviewSentimentSource } from './review.types';
 
-export type PermitSentimentResult = {
-  sentiment: PermitSentiment;
-  source: PermitSentimentSource;
+export type ReviewSentimentResult = {
+  sentiment: ReviewSentiment;
+  source: ReviewSentimentSource;
 };
 
-const SENTIMENTS: readonly PermitSentiment[] = ['positif', 'netral', 'negatif'];
+const SENTIMENTS: readonly ReviewSentiment[] = ['positif', 'netral', 'negatif'];
 
 const classify = createSentimentClassifier(model);
 
-function isPermitSentiment(value: unknown): value is PermitSentiment {
-  return typeof value === 'string' && SENTIMENTS.includes(value as PermitSentiment);
+function isReviewSentiment(value: unknown): value is ReviewSentiment {
+  return typeof value === 'string' && SENTIMENTS.includes(value as ReviewSentiment);
 }
 
 /**
- * Menganalisis alasan izin memakai model sentimen on-device di `ai/`.
+ * Menganalisis teks ulasan pasca-praktikum memakai model sentimen on-device di `ai/`.
  * Bila model tidak mengenali kosakata atau gagal dimuat, fungsi ini jatuh ke
  * `analyzeSentiment()` di `src/lib/aiClient.ts` dan menandai hasilnya sebagai
  * `fallback` agar UI dapat menampilkan peringatan.
  */
-export async function analyzePermitSentiment(reason: string): Promise<PermitSentimentResult> {
-  const text = reason.trim();
+export async function analyzeReviewSentiment(comment: string): Promise<ReviewSentimentResult> {
+  const text = comment.trim();
   if (!text) {
     return { sentiment: 'netral', source: 'fallback' };
   }
 
   try {
     const prediction = classify(text);
-    if (isPermitSentiment(prediction.label)) {
+    if (isReviewSentiment(prediction.label)) {
       return { sentiment: prediction.label, source: 'model' };
     }
   } catch (error) {
