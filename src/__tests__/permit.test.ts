@@ -1,16 +1,15 @@
-import { addDoc, runTransaction } from 'firebase/firestore';
+import { runTransaction } from 'firebase/firestore';
 
 import { Permit } from '../features/permit/permit.types';
-import { reviewPermit, submitPermit } from '../services/permitService';
+import { getPermitId, reviewPermit, submitPermit } from '../services/permitService';
 
 const mockAuthState: { currentUser: { uid: string } | null } = {
   currentUser: { uid: 'praktikan-uid' },
 };
 
 jest.mock('firebase/firestore', () => ({
-  addDoc: jest.fn(),
   collection: jest.fn(() => ({ path: 'permits' })),
-  doc: jest.fn(() => ({ path: 'permits/perm-test' })),
+  doc: jest.fn((_db, collectionName, id) => ({ id, path: `${collectionName}/${id}` })),
   onSnapshot: jest.fn(() => () => undefined),
   query: jest.fn(() => ({})),
   runTransaction: jest.fn(),
@@ -53,14 +52,35 @@ function mockPendingTransaction(current: Permit | null, update = jest.fn()) {
   return update;
 }
 
+function mockSubmitTransaction(existing: Permit | null, set = jest.fn()) {
+  (runTransaction as jest.Mock).mockImplementation(async (_db, callback) => {
+    const snapshot = {
+      id: existing?.id ?? 'perm-baru',
+      exists: () => existing !== null,
+      data: () => {
+        if (!existing) return {};
+        const { id, ...data } = existing;
+        return data;
+      },
+    };
+    const transaction = {
+      get: jest.fn().mockResolvedValue(snapshot),
+      set,
+    };
+    return callback(transaction);
+  });
+  return set;
+}
+
 beforeEach(() => {
   jest.clearAllMocks();
   mockAuthState.currentUser = { uid: 'praktikan-uid' };
-  (addDoc as jest.Mock).mockResolvedValue({ id: 'perm-baru' });
 });
 
 describe('submitPermit', () => {
-  it('menyimpan pengajuan izin tanpa sentimen ke Firestore', async () => {
+  it('menyimpan pengajuan izin tanpa sentimen memakai ID sesi_uid', async () => {
+    const set = mockSubmitTransaction(null);
+
     const result = await submitPermit({
       sessionId: 's5',
       studentId: 'praktikan-uid',
@@ -71,13 +91,14 @@ describe('submitPermit', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
-    expect(result.permit.id).toBe('perm-baru');
+    expect(getPermitId('s5', 'praktikan-uid')).toBe('s5_praktikan-uid');
+    expect(result.permit.id).toBe('s5_praktikan-uid');
     expect(result.permit.status).toBe('pending');
     expect(result.permit.studentId).toBe('praktikan-uid');
 
-    expect(addDoc).toHaveBeenCalledTimes(1);
-    expect(addDoc).toHaveBeenCalledWith(
-      expect.anything(),
+    expect(set).toHaveBeenCalledTimes(1);
+    expect(set).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 's5_praktikan-uid' }),
       expect.objectContaining({
         sessionId: 's5',
         studentId: 'praktikan-uid',
@@ -85,12 +106,30 @@ describe('submitPermit', () => {
         status: 'pending',
       }),
     );
-    const payload = (addDoc as jest.Mock).mock.calls[0][1] as Record<string, unknown>;
+    const payload = set.mock.calls[0][1] as Record<string, unknown>;
     expect(payload).not.toHaveProperty('sentiment');
     expect(payload).not.toHaveProperty('sentimentSource');
   });
 
+  it('menolak pengajuan kedua untuk sesi yang sama', async () => {
+    const set = mockSubmitTransaction({ ...seedPermit, id: 's5_praktikan-uid' });
+
+    const result = await submitPermit({
+      sessionId: 's5',
+      studentId: 'praktikan-uid',
+      studentName: 'Andi Pratama',
+      reason: 'Alasan lain untuk sesi yang sama.',
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe('Kamu sudah mengajukan izin untuk sesi ini.');
+    expect(set).not.toHaveBeenCalled();
+  });
+
   it('menolak pengajuan tanpa sesi atau alasan yang cukup', async () => {
+    mockSubmitTransaction(null);
+
     const noSession = await submitPermit({
       sessionId: '',
       studentId: 'praktikan-uid',
@@ -106,10 +145,12 @@ describe('submitPermit', () => {
       reason: 'sakit',
     });
     expect(shortReason.ok).toBe(false);
-    expect(addDoc).not.toHaveBeenCalled();
+    expect(runTransaction).not.toHaveBeenCalled();
   });
 
   it('menolak pengajuan tanpa sesi login atau identitas yang tidak cocok', async () => {
+    mockSubmitTransaction(null);
+
     mockAuthState.currentUser = null;
     const signedOut = await submitPermit({
       sessionId: 's5',
@@ -127,7 +168,7 @@ describe('submitPermit', () => {
       reason: 'Demam tinggi, harus istirahat.',
     });
     expect(mismatch.ok).toBe(false);
-    expect(addDoc).not.toHaveBeenCalled();
+    expect(runTransaction).not.toHaveBeenCalled();
   });
 });
 
