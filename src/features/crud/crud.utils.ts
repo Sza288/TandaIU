@@ -1,4 +1,5 @@
 import { router, type Href } from 'expo-router';
+import { Alert, Platform } from 'react-native';
 
 import { courses } from '../../data/courses';
 import { dosen } from '../../data/dosen';
@@ -97,3 +98,28 @@ export function returnToManage(): void {
   }
   router.replace(manageHref('/assistant/manage'));
 }
+
+export function confirmAction({
+  title,
+  message,
+  confirmLabel = 'Hapus',
+  onConfirm,
+}: {
+  title: string;
+  message: string;
+  confirmLabel?: string;
+  onConfirm: () => void;
+}): void {
+  if (Platform.OS === 'web') {
+    if (window.confirm(`${title}\n\n${message}`)) {
+      onConfirm();
+    }
+    return;
+  }
+
+  Alert.alert(title, message, [
+    { text: 'Batal', style: 'cancel' },
+    { text: confirmLabel, style: 'destructive', onPress: onConfirm },
+  ]);
+}
+
