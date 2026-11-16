@@ -13,9 +13,9 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
     }
 
-    // Asisten adalah pengguna login dengan role 'assistant'.
+    // Asisten adalah pengguna login dengan role 'asisten'.
     function isAssistant() {
-      return isSignedIn() && userRole() == 'assistant';
+      return isSignedIn() && userRole() == 'asisten';
     }
 
     // Pengguna hanya boleh membaca dokumennya sendiri.
@@ -24,7 +24,7 @@ service cloud.firestore {
       // Pembuatan hanya oleh pemilik, role valid, uid cocok, dan field wajib lengkap.
       allow create: if isSignedIn()
         && request.auth.uid == uid
-        && request.resource.data.role in ['assistant', 'praktikan']
+        && request.resource.data.role in ['asisten', 'praktikan']
         && request.resource.data.uid == request.auth.uid
         && request.resource.data.keys().hasAll(['uid', 'name', 'email', 'role']);
       // Update hanya oleh pemilik dan field role tidak boleh berubah.
