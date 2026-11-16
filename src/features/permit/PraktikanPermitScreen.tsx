@@ -3,6 +3,8 @@ import { router } from 'expo-router';
 import { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -19,10 +21,11 @@ import { submitPermit } from '../../services/permitService';
 import { useAttendance } from '../../state/AttendanceContext';
 import { colors, fonts, radius, shadows, spacing } from '../../theme';
 import { PracticumSession } from '../../types';
-import { getPraktikanById } from '../../utils/academic';
 import { formatDateTime } from '../../utils/format';
+import { getAuthenticatedPraktikanIdentity } from '../praktikan/authenticatedIdentity';
+import { useAuthSession } from '../auth/AuthSessionContext';
 import { Permit } from './permit.types';
-import { PermitStatusBadge, SentimentBadge } from './PermitBadges';
+import { PermitStatusBadge } from './PermitBadges';
 
 const MIN_REASON_LENGTH = 10;
 const MAX_REASON_LENGTH = 280;
@@ -40,15 +43,22 @@ const FEEDBACK_COLORS = {
 };
 
 export default function PraktikanPermitScreen() {
-  const { sessions, activePraktikanId } = useAttendance();
+  const { sessions } = useAttendance();
   const permits = usePermits();
-  const activePraktikan = getPraktikanById(activePraktikanId);
+  const authSession = useAuthSession();
+  const profile = authSession?.status === 'authenticated' ? authSession.profile : null;
+  const activePraktikan = getAuthenticatedPraktikanIdentity(profile);
+  const studentId = activePraktikan?.id ?? null;
+  const localPraktikanId = activePraktikan?.localScheduleId ?? null;
+  const studentName = activePraktikan?.name ?? profile?.name ?? null;
+  const hasIdentity = Boolean(studentId && studentName);
 
   const eligibleSessions = useMemo(() => {
-    if (!activePraktikanId) return [];
-    const enrolledIds = new Set(getSessionIdsForPraktikan(activePraktikanId));
+    const enrolledIds = localPraktikanId
+      ? new Set(getSessionIdsForPraktikan(localPraktikanId))
+      : null;
     return sessions
-      .filter((session) => enrolledIds.has(session.id))
+      .filter((session) => !enrolledIds || enrolledIds.has(session.id))
       .sort((a, b) => {
         if (a.status !== b.status) {
           if (a.status === 'dibuka') return -1;
@@ -56,14 +66,14 @@ export default function PraktikanPermitScreen() {
         }
         return b.startsAt.localeCompare(a.startsAt);
       });
-  }, [activePraktikanId, sessions]);
+  }, [localPraktikanId, sessions]);
 
   const myPermits = useMemo(
     () =>
       permits
-        .filter((permit) => permit.studentId === activePraktikanId)
+        .filter((permit) => permit.studentId === studentId)
         .sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
-    [activePraktikanId, permits],
+    [studentId, permits],
   );
 
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -90,19 +100,19 @@ export default function PraktikanPermitScreen() {
   };
 
   const handleSubmit = async () => {
-    if (!activePraktikanId || !activePraktikan) {
-      setFeedback({
-        tone: 'error',
-        title: 'Identitas belum dipilih',
-        message: 'Pilih identitas praktikan terlebih dahulu sebelum mengajukan izin.',
-      });
-      return;
-    }
     if (!sessionId) {
       setFeedback({
         tone: 'error',
         title: 'Sesi belum dipilih',
         message: 'Pilih sesi praktikum yang ingin diajukan izinnya.',
+      });
+      return;
+    }
+    if (!hasIdentity || !studentId || !studentName) {
+      setFeedback({
+        tone: 'error',
+        title: 'Identitas belum siap',
+        message: 'Profil akun belum lengkap untuk mengajukan izin.',
       });
       return;
     }
@@ -120,8 +130,8 @@ export default function PraktikanPermitScreen() {
     try {
       const result = await submitPermit({
         sessionId,
-        studentId: activePraktikanId,
-        studentName: activePraktikan.name,
+        studentId,
+        studentName,
         reason,
       });
 
@@ -131,13 +141,10 @@ export default function PraktikanPermitScreen() {
       }
 
       setReason('');
-      const usedFallback = result.permit.sentimentSource === 'fallback';
       setFeedback({
-        tone: usedFallback ? 'warning' : 'success',
-        title: usedFallback ? 'Izin terkirim, sentimen memakai cadangan' : 'Pengajuan izin terkirim',
-        message: usedFallback
-          ? 'Model AI tidak mengenali teks alasan, jadi sistem memakai analisis cadangan. Asisten tetap dapat meninjau izinmu.'
-          : `Sentimen alasan terdeteksi: ${result.permit.sentiment}. Asisten akan meninjau pengajuanmu.`,
+        tone: 'success',
+        title: 'Pengajuan izin terkirim',
+        message: 'Asisten akan meninjau pengajuanmu.',
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Terjadi kesalahan yang tidak diketahui.';
@@ -155,153 +162,160 @@ export default function PraktikanPermitScreen() {
         onBack={handleBack}
       />
 
-      <ScrollView
-        contentContainerStyle={styles.content}
-        showsVerticalScrollIndicator={false}
-        keyboardShouldPersistTaps="handled"
+      <KeyboardAvoidingView
+        style={styles.flex}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        {!activePraktikan ? (
-          <View style={styles.emptyCard}>
-            <View style={styles.emptyIcon}>
-              <Ionicons name="person-outline" size={26} color={colors.primary} />
-            </View>
-            <Text style={styles.emptyTitle}>Identitas praktikan belum dipilih</Text>
-            <Text style={styles.emptyDescription}>
-              Pilih identitas praktikan terlebih dahulu agar pengajuan izin dapat dikirim.
-            </Text>
-            <TouchableOpacity
-              style={styles.primaryAction}
-              onPress={() => router.push('/role')}
-              activeOpacity={0.85}
-              accessibilityRole="button"
-              accessibilityLabel="Pilih identitas praktikan"
-            >
-              <Text style={styles.primaryActionText}>Pilih Identitas</Text>
-            </TouchableOpacity>
-          </View>
-        ) : (
-          <>
-            <View style={styles.card}>
-              <Text style={styles.cardTitle}>Sesi Praktikum</Text>
-              <Text style={styles.cardSubtitle}>
-                Pilih sesi yang ingin diajukan izinnya.
+        <ScrollView
+          contentContainerStyle={styles.content}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+        >
+          {!profile ? (
+            <View style={styles.emptyCard}>
+              <View style={styles.emptyIcon}>
+                <Ionicons name="person-outline" size={26} color={colors.primary} />
+              </View>
+              <Text style={styles.emptyTitle}>Sesi belum tersedia</Text>
+              <Text style={styles.emptyDescription}>
+                Sesi autentikasi belum tersedia. Silakan masuk kembali untuk mengajukan izin.
               </Text>
-
-              {eligibleSessions.length === 0 ? (
-                <Text style={styles.hintText}>
-                  Belum ada sesi praktikum untuk kelasmu.
+            </View>
+          ) : !hasIdentity ? (
+            <View style={styles.emptyCard}>
+              <View style={styles.emptyIcon}>
+                <Ionicons name="link-outline" size={26} color={colors.primary} />
+              </View>
+              <Text style={styles.emptyTitle}>Profil akun belum lengkap</Text>
+              <Text style={styles.emptyDescription}>
+                Profil akunmu belum memuat nama dan identitas yang dibutuhkan, jadi pengajuan izin belum dapat dikirim.
+              </Text>
+            </View>
+          ) : (
+            <>
+              <View style={styles.card}>
+                <Text style={styles.cardTitle}>Sesi Praktikum</Text>
+                <Text style={styles.cardSubtitle}>
+                  Pilih sesi yang ingin diajukan izinnya.
                 </Text>
-              ) : (
-                <View style={styles.sessionList}>
-                  {eligibleSessions.map((session) => {
-                    const selected = session.id === sessionId;
-                    return (
-                      <TouchableOpacity
-                        key={session.id}
-                        style={[styles.sessionOption, selected && styles.sessionOptionSelected]}
-                        onPress={() => handleChooseSession(session)}
-                        activeOpacity={0.85}
-                        accessibilityRole="radio"
-                        accessibilityState={{ selected }}
-                        accessibilityLabel={`Pilih sesi ${session.practicumName} kelas ${session.className}`}
-                      >
-                        <View style={styles.sessionCopy}>
-                          <Text style={styles.sessionName} numberOfLines={1}>
-                            {session.practicumName}
-                          </Text>
-                          <Text style={styles.sessionMeta}>
-                            Kelas {session.className} · {formatDateTime(session.startsAt)}
-                          </Text>
-                        </View>
-                        <Ionicons
-                          name={selected ? 'radio-button-on' : 'radio-button-off'}
-                          size={20}
-                          color={selected ? colors.primary : colors.textMuted}
-                        />
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
-              )}
 
-              <View style={styles.field}>
-                <Text style={styles.fieldLabel}>Alasan Izin</Text>
-                <TextInput
-                  value={reason}
-                  onChangeText={(value) => {
-                    setReason(value);
-                    if (feedback?.tone === 'error') setFeedback(null);
-                  }}
-                  placeholder="Contoh: Demam tinggi, harus istirahat sesuai surat dokter."
-                  placeholderTextColor={colors.textMuted}
-                  multiline
-                  maxLength={MAX_REASON_LENGTH}
-                  editable={!submitting}
-                  style={styles.input}
-                  textAlignVertical="top"
-                  accessibilityLabel="Alasan izin"
-                />
-                <View style={styles.fieldFooter}>
+                {eligibleSessions.length === 0 ? (
                   <Text style={styles.hintText}>
-                    Alasan dianalisis otomatis oleh model sentimen di perangkat.
+                    Belum ada sesi praktikum untuk kelasmu.
                   </Text>
-                  <Text style={styles.counter}>
-                    {reason.length}/{MAX_REASON_LENGTH}
-                  </Text>
-                </View>
-              </View>
-
-              <TouchableOpacity
-                style={[styles.submitButton, submitting && styles.submitButtonDisabled]}
-                onPress={() => void handleSubmit()}
-                disabled={submitting}
-                activeOpacity={0.85}
-                accessibilityRole="button"
-                accessibilityLabel="Kirim pengajuan izin"
-              >
-                {submitting ? (
-                  <ActivityIndicator size="small" color={colors.textOnPrimary} />
                 ) : (
-                  <Ionicons name="paper-plane-outline" size={18} color={colors.textOnPrimary} />
+                  <View style={styles.sessionList}>
+                    {eligibleSessions.map((session) => {
+                      const selected = session.id === sessionId;
+                      return (
+                        <TouchableOpacity
+                          key={session.id}
+                          style={[styles.sessionOption, selected && styles.sessionOptionSelected]}
+                          onPress={() => handleChooseSession(session)}
+                          activeOpacity={0.85}
+                          accessibilityRole="radio"
+                          accessibilityState={{ selected }}
+                          accessibilityLabel={`Pilih sesi ${session.practicumName} kelas ${session.className}`}
+                        >
+                          <View style={styles.sessionCopy}>
+                            <Text style={styles.sessionName} numberOfLines={1}>
+                              {session.practicumName}
+                            </Text>
+                            <Text style={styles.sessionMeta}>
+                              Kelas {session.className} · {formatDateTime(session.startsAt)}
+                            </Text>
+                          </View>
+                          <Ionicons
+                            name={selected ? 'radio-button-on' : 'radio-button-off'}
+                            size={20}
+                            color={selected ? colors.primary : colors.textMuted}
+                          />
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
                 )}
-                <Text style={styles.submitButtonText}>
-                  {submitting ? 'Menganalisis sentimen...' : 'Kirim Pengajuan'}
-                </Text>
-              </TouchableOpacity>
-            </View>
 
-            {feedback ? <FeedbackBanner feedback={feedback} onDismiss={() => setFeedback(null)} /> : null}
-
-            <View style={styles.section}>
-              <View style={styles.sectionHeading}>
-                <Text style={styles.sectionTitle}>Izin Saya</Text>
-                <View style={styles.countBadge}>
-                  <Text style={styles.countText}>{myPermits.length}</Text>
+                <View style={styles.field}>
+                  <Text style={styles.fieldLabel}>Alasan Izin</Text>
+                  <TextInput
+                    value={reason}
+                    onChangeText={(value) => {
+                      setReason(value);
+                      if (feedback?.tone === 'error') setFeedback(null);
+                    }}
+                    placeholder="Contoh: Demam tinggi, harus istirahat sesuai surat dokter."
+                    placeholderTextColor={colors.textMuted}
+                    multiline
+                    maxLength={MAX_REASON_LENGTH}
+                    editable={!submitting}
+                    style={styles.input}
+                    textAlignVertical="top"
+                    accessibilityLabel="Alasan izin"
+                  />
+                  <View style={styles.fieldFooter}>
+                    <Text style={styles.hintText}>
+                      Alasan dianalisis otomatis oleh model sentimen di perangkat.
+                    </Text>
+                    <Text style={styles.counter}>
+                      {reason.length}/{MAX_REASON_LENGTH}
+                    </Text>
+                  </View>
                 </View>
+
+                <TouchableOpacity
+                  style={[styles.submitButton, submitting && styles.submitButtonDisabled]}
+                  onPress={() => void handleSubmit()}
+                  disabled={submitting}
+                  activeOpacity={0.85}
+                  accessibilityRole="button"
+                  accessibilityLabel="Kirim pengajuan izin"
+                >
+                  {submitting ? (
+                    <ActivityIndicator size="small" color={colors.textOnPrimary} />
+                  ) : (
+                    <Ionicons name="paper-plane-outline" size={18} color={colors.textOnPrimary} />
+                  )}
+                  <Text style={styles.submitButtonText}>
+                    {submitting ? 'Mengirim pengajuan...' : 'Kirim Pengajuan'}
+                  </Text>
+                </TouchableOpacity>
               </View>
 
-              {myPermits.length === 0 ? (
-                <View style={styles.emptyListCard}>
-                  <Ionicons name="document-text-outline" size={24} color={colors.primary} />
-                  <Text style={styles.emptyListText}>
-                    Belum ada pengajuan izin. Status akan muncul di sini secara realtime.
-                  </Text>
+              {feedback ? <FeedbackBanner feedback={feedback} onDismiss={() => setFeedback(null)} /> : null}
+
+              <View style={styles.section}>
+                <View style={styles.sectionHeading}>
+                  <Text style={styles.sectionTitle}>Izin Saya</Text>
+                  <View style={styles.countBadge}>
+                    <Text style={styles.countText}>{myPermits.length}</Text>
+                  </View>
                 </View>
-              ) : (
-                <View style={styles.permitList}>
-                  {myPermits.map((permit) => (
-                    <PermitCard
-                      key={permit.id}
-                      permit={permit}
-                      session={sessionById.get(permit.sessionId)}
-                    />
-                  ))}
-                </View>
-              )}
-            </View>
-          </>
-        )}
-      </ScrollView>
+
+                {myPermits.length === 0 ? (
+                  <View style={styles.emptyListCard}>
+                    <Ionicons name="document-text-outline" size={24} color={colors.primary} />
+                    <Text style={styles.emptyListText}>
+                      Belum ada pengajuan izin. Status akan muncul di sini secara realtime.
+                    </Text>
+                  </View>
+                ) : (
+                  <View style={styles.permitList}>
+                    {myPermits.map((permit) => (
+                      <PermitCard
+                        key={permit.id}
+                        permit={permit}
+                        session={sessionById.get(permit.sessionId)}
+                      />
+                    ))}
+                  </View>
+                )}
+              </View>
+            </>
+          )}
+        </ScrollView>
+      </KeyboardAvoidingView>
 
       <BottomNav />
     </SafeAreaView>
@@ -325,16 +339,6 @@ function PermitCard({ permit, session }: { permit: Permit; session?: PracticumSe
       </View>
 
       <Text style={styles.permitReason}>{permit.reason}</Text>
-
-      <View style={styles.permitBadges}>
-        <SentimentBadge sentiment={permit.sentiment} />
-        {permit.sentimentSource === 'fallback' ? (
-          <View style={styles.fallbackNote}>
-            <Ionicons name="warning-outline" size={13} color={colors.warning} />
-            <Text style={styles.fallbackText}>Analisis cadangan</Text>
-          </View>
-        ) : null}
-      </View>
 
       {permit.status !== 'pending' && permit.reviewedAt ? (
         <Text style={styles.reviewText}>
@@ -383,6 +387,9 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,
+  },
+  flex: {
+    flex: 1,
   },
   content: {
     width: '100%',
@@ -588,22 +595,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 18,
   },
-  permitBadges: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    alignItems: 'center',
-    gap: spacing.sm,
-  },
-  fallbackNote: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-  },
-  fallbackText: {
-    color: colors.warning,
-    fontFamily: fonts.semiBold,
-    fontSize: 10,
-  },
   reviewText: {
     color: colors.textMuted,
     fontFamily: fonts.regular,
@@ -641,20 +632,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 19,
     textAlign: 'center',
-  },
-  primaryAction: {
-    marginTop: spacing.sm,
-    minHeight: 44,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: spacing.xl,
-    borderRadius: radius.md,
-    backgroundColor: colors.primary,
-  },
-  primaryActionText: {
-    color: colors.textOnPrimary,
-    fontFamily: fonts.bold,
-    fontSize: 13,
   },
   emptyListCard: {
     flexDirection: 'row',

@@ -1,6 +1,14 @@
-import { dummyPermits } from '../data/permits';
+import {
+  addDoc,
+  collection,
+  doc,
+  onSnapshot,
+  query,
+  runTransaction,
+  where,
+} from 'firebase/firestore';
 import { Permit, PermitStatus } from '../features/permit/permit.types';
-import { analyzePermitSentiment } from '../features/permit/sentiment';
+import { auth, db } from '../lib/firebase';
 
 export type SubmitPermitInput = {
   sessionId: string;
@@ -15,36 +23,60 @@ export type PermitMutationResult =
 
 export type ReviewStatus = Extract<PermitStatus, 'approved' | 'rejected'>;
 
+/**
+ * `studentId` membatasi langganan ke izin milik satu praktikan.
+ * Tanpa `studentId`, seluruh izin dibaca (dipakai asisten).
+ */
+export type PermitSubscriptionScope = {
+  studentId?: string;
+};
+
+const PERMITS_COLLECTION = 'permits';
 const MIN_REASON_LENGTH = 10;
 
+type PermitOperationErrorCode = 'not-found' | 'already-reviewed';
+
+class PermitOperationError extends Error {
+  constructor(public readonly code: PermitOperationErrorCode, message: string) {
+    super(message);
+    this.name = 'PermitOperationError';
+  }
+}
+
+function firebaseErrorCode(error: unknown): string | null {
+  if (typeof error !== 'object' || error === null || !('code' in error)) {
+    return null;
+  }
+  return typeof error.code === 'string' ? error.code : null;
+}
+
+function toPermit(id: string, data: Record<string, unknown>): Permit {
+  return { id, ...(data as Omit<Permit, 'id'>) };
+}
+
+/** Pesan ramah pengguna untuk kegagalan Firestore pada fitur izin. */
+export function getPermitErrorMessage(error: unknown): string {
+  if (error instanceof PermitOperationError) {
+    return error.message;
+  }
+
+  switch (firebaseErrorCode(error)) {
+    case 'permission-denied':
+      return 'Firestore menolak aksi ini. Pastikan akunmu punya peran yang sesuai.';
+    case 'unavailable':
+    case 'deadline-exceeded':
+    case 'network-request-failed':
+      return 'Koneksi ke Firebase bermasalah. Periksa internet lalu coba lagi.';
+    default:
+      return 'Terjadi kesalahan saat menghubungi server. Silakan coba lagi.';
+  }
+}
+
 /**
- * Penyimpanan lokal pengganti koleksi Firestore `permits`.
- * Data dan listener bersifat in-memory, sehingga perubahan langsung terlihat
- * di semua layar dan kembali ke data awal saat aplikasi dimuat ulang.
+ * Menyimpan pengajuan izin ke koleksi Firestore `permits`.
+ * Alasan izin tidak dianalisis sentimen; sentimen hanya dipakai untuk ulasan
+ * pasca-praktikum di `reviewService`.
  */
-let permits: Permit[] = [...dummyPermits];
-const listeners = new Set<() => void>();
-let sequence = 0;
-
-function notify() {
-  listeners.forEach((listener) => listener());
-}
-
-export function getPermits(): Permit[] {
-  return permits;
-}
-
-export function getPermitById(permitId: string): Permit | undefined {
-  return permits.find((permit) => permit.id === permitId);
-}
-
-export function subscribePermits(listener: () => void): () => void {
-  listeners.add(listener);
-  return () => {
-    listeners.delete(listener);
-  };
-}
-
 export async function submitPermit(input: SubmitPermitInput): Promise<PermitMutationResult> {
   const reason = input.reason.trim();
 
@@ -58,55 +90,101 @@ export async function submitPermit(input: SubmitPermitInput): Promise<PermitMuta
     return { ok: false, reason: `Alasan izin minimal ${MIN_REASON_LENGTH} karakter.` };
   }
 
-  const { sentiment, source } = await analyzePermitSentiment(reason);
-  const permit: Permit = {
-    id: `perm-${Date.now()}-${sequence}`,
+  const user = auth.currentUser;
+  if (!user) {
+    return { ok: false, reason: 'Sesi login berakhir. Masuk kembali untuk mengajukan izin.' };
+  }
+  if (user.uid !== input.studentId) {
+    return { ok: false, reason: 'Identitas pengajuan tidak cocok dengan akun yang sedang masuk.' };
+  }
+
+  const payload = {
     sessionId: input.sessionId,
-    studentId: input.studentId,
+    studentId: user.uid,
     studentName: input.studentName,
     reason,
-    sentiment,
-    sentimentSource: source,
-    status: 'pending',
+    status: 'pending' as const,
     createdAt: new Date().toISOString(),
   };
 
-  sequence += 1;
-  permits = [permit, ...permits];
-  notify();
-
-  return { ok: true, permit };
+  try {
+    const reference = await addDoc(collection(db, PERMITS_COLLECTION), payload);
+    return { ok: true, permit: { id: reference.id, ...payload } };
+  } catch (error) {
+    return { ok: false, reason: getPermitErrorMessage(error) };
+  }
 }
 
+/**
+ * Menyetujui atau menolak izin yang masih `pending`. Transaksi memastikan
+ * status tidak direview dua kali oleh dua asisten sekaligus.
+ */
 export async function reviewPermit(
   permitId: string,
   status: ReviewStatus,
   reviewedBy?: string,
 ): Promise<PermitMutationResult> {
-  const current = permits.find((permit) => permit.id === permitId);
-  if (!current) {
+  if (!permitId) {
     return { ok: false, reason: 'Pengajuan izin tidak ditemukan.' };
   }
-  if (current.status !== 'pending') {
-    return { ok: false, reason: 'Pengajuan izin ini sudah direview.' };
+
+  const reviewedAt = new Date().toISOString();
+  const reviewer = reviewedBy?.trim();
+
+  try {
+    const permit = await runTransaction(db, async (transaction) => {
+      const reference = doc(db, PERMITS_COLLECTION, permitId);
+      const snapshot = await transaction.get(reference);
+
+      if (!snapshot.exists()) {
+        throw new PermitOperationError('not-found', 'Pengajuan izin tidak ditemukan.');
+      }
+
+      const current = toPermit(snapshot.id, snapshot.data() as Record<string, unknown>);
+      if (current.status !== 'pending') {
+        throw new PermitOperationError('already-reviewed', 'Pengajuan izin ini sudah direview.');
+      }
+
+      const updates: Pick<Permit, 'status' | 'reviewedAt' | 'reviewedBy'> = {
+        status,
+        reviewedAt,
+        ...(reviewer ? { reviewedBy: reviewer } : {}),
+      };
+      transaction.update(reference, updates);
+
+      return { ...current, ...updates };
+    });
+
+    return { ok: true, permit };
+  } catch (error) {
+    return { ok: false, reason: getPermitErrorMessage(error) };
   }
-
-  const updated: Permit = {
-    ...current,
-    status,
-    reviewedAt: new Date().toISOString(),
-    reviewedBy,
-  };
-
-  permits = permits.map((permit) => (permit.id === permitId ? updated : permit));
-  notify();
-
-  return { ok: true, permit: updated };
 }
 
-/** Mengembalikan penyimpanan ke kondisi awal. Dipakai oleh unit test. */
-export function __resetPermitsForTests(seed: Permit[] = dummyPermits) {
-  permits = [...seed];
-  sequence = 0;
-  notify();
+/**
+ * Berlangganan izin secara realtime lewat `onSnapshot`.
+ * Asisten memakai `{}` untuk membaca semua izin, praktikan mengirim
+ * `{ studentId }` agar query-nya sesuai Firestore security rules.
+ */
+export function subscribePermits(
+  scope: PermitSubscriptionScope,
+  onPermits: (permits: Permit[]) => void,
+  onError?: (message: string) => void,
+): () => void {
+  const permitsQuery = scope.studentId
+    ? query(collection(db, PERMITS_COLLECTION), where('studentId', '==', scope.studentId))
+    : query(collection(db, PERMITS_COLLECTION));
+
+  return onSnapshot(
+    permitsQuery,
+    (snapshot) => {
+      const permits = snapshot.docs
+        .map((item) => toPermit(item.id, item.data()))
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+      onPermits(permits);
+    },
+    (error) => {
+      onError?.(getPermitErrorMessage(error));
+    },
+  );
 }

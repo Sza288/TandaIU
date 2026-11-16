@@ -1,13 +1,40 @@
-import { useSyncExternalStore } from 'react';
+import { useEffect, useState } from 'react';
 import { Permit } from '../features/permit/permit.types';
-import { getPermits, subscribePermits } from '../services/permitService';
+import { useAuthSession } from '../features/auth/AuthSessionContext';
+import { subscribePermits } from '../services/permitService';
+
+type PermitSnapshot = {
+  key: string | null;
+  permits: Permit[];
+};
 
 /**
- * Berlangganan seluruh pengajuan izin. Setiap perubahan dari
- * `permitService` langsung memicu render ulang (status realtime).
+ * Berlangganan izin secara realtime. Asisten menerima seluruh izin,
+ * praktikan hanya menerima izin miliknya sendiri (sesuai security rules).
  */
 export function usePermits(): Permit[] {
-  return useSyncExternalStore(subscribePermits, getPermits, getPermits);
+  const session = useAuthSession();
+  const profile = session?.status === 'authenticated' ? session.profile : null;
+  const uid = profile?.uid ?? null;
+  const role = profile?.role ?? null;
+  const key = uid && role ? `${role}:${uid}` : null;
+  const [snapshot, setSnapshot] = useState<PermitSnapshot>({ key: null, permits: [] });
+
+  useEffect(() => {
+    if (!key || !uid || !role) return;
+
+    const scope = role === 'asisten' ? {} : { studentId: uid };
+    return subscribePermits(
+      scope,
+      (next) => setSnapshot({ key, permits: next }),
+      (message) => {
+        console.warn('[permit] Gagal memuat izin:', message);
+        setSnapshot({ key, permits: [] });
+      },
+    );
+  }, [key, role, uid]);
+
+  return snapshot.key === key ? snapshot.permits : [];
 }
 
 /** Memantau satu pengajuan izin berdasarkan id. */
