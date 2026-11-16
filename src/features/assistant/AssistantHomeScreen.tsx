@@ -69,6 +69,8 @@ export default function AssistantHomeScreen() {
 
   const goToRiwayat = () => router.push('/assistant/riwayat');
 
+  const goToKelola = () => router.push('/assistant/manage');
+
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
@@ -137,6 +139,12 @@ export default function AssistantHomeScreen() {
             title="Riwayat"
             caption="Praktikum yang telah selesai"
             onPress={goToRiwayat}
+          />
+          <QuickCard
+            icon="settings-outline"
+            title="Kelola Praktikum"
+            caption="Atur kelas, jadwal, dan sesi"
+            onPress={goToKelola}
           />
         </View>
 
