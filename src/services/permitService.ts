@@ -1,5 +1,4 @@
 import {
-  addDoc,
   collection,
   doc,
   onSnapshot,
@@ -34,7 +33,12 @@ export type PermitSubscriptionScope = {
 const PERMITS_COLLECTION = 'permits';
 const MIN_REASON_LENGTH = 10;
 
-type PermitOperationErrorCode = 'not-found' | 'already-reviewed';
+/** ID dokumen izin: satu pengajuan per pasangan sesi + praktikan. */
+export function getPermitId(sessionId: string, studentId: string): string {
+  return `${sessionId}_${studentId}`;
+}
+
+type PermitOperationErrorCode = 'not-found' | 'already-reviewed' | 'already-submitted';
 
 class PermitOperationError extends Error {
   constructor(public readonly code: PermitOperationErrorCode, message: string) {
@@ -107,9 +111,25 @@ export async function submitPermit(input: SubmitPermitInput): Promise<PermitMuta
     createdAt: new Date().toISOString(),
   };
 
+  const permitId = getPermitId(input.sessionId, user.uid);
+
   try {
-    const reference = await addDoc(collection(db, PERMITS_COLLECTION), payload);
-    return { ok: true, permit: { id: reference.id, ...payload } };
+    const reference = doc(db, PERMITS_COLLECTION, permitId);
+    const saved = await runTransaction(db, async (transaction) => {
+      const snapshot = await transaction.get(reference);
+
+      if (snapshot.exists()) {
+        throw new PermitOperationError(
+          'already-submitted',
+          'Kamu sudah mengajukan izin untuk sesi ini.',
+        );
+      }
+
+      transaction.set(reference, payload);
+      return { id: permitId, ...payload };
+    });
+
+    return { ok: true, permit: saved };
   } catch (error) {
     return { ok: false, reason: getPermitErrorMessage(error) };
   }
