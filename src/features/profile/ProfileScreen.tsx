@@ -1,27 +1,38 @@
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
-import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useState } from 'react';
+import { Alert, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import BottomNav from '../../components/BottomNav';
-import { assistantIdentity } from '../../data/assistantIdentity';
+import ConfirmationModal from '../../components/ConfirmationModal';
 import AssistantIllustration from '../role/illustrations/AssistantIllustration';
 import PraktikanIllustration from '../role/illustrations/PraktikanIllustration';
-import { useAttendance } from '../../state/AttendanceContext';
 import { colors, fonts, radius, shadows, spacing } from '../../theme';
-import { getPraktikanById } from '../../utils/academic';
+import { getAuthErrorMessage, signOut } from '../../services/authService';
+import { useAuthSession } from '../auth/AuthSessionContext';
 
 export default function ProfileScreen() {
-  const { activeRole, activePraktikanId } = useAttendance();
-  const praktikan = getPraktikanById(activePraktikanId);
-  const isAssistant = activeRole === 'assistant';
-  const name = isAssistant ? assistantIdentity.name : praktikan?.name ?? 'Pilih identitas';
-  const code = isAssistant ? assistantIdentity.studentCode : praktikan?.studentCode ?? 'Belum tersedia';
-  const role = isAssistant
-    ? assistantIdentity.role
-    : activeRole === 'praktikan'
+  const [confirmLogout, setConfirmLogout] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
+  const session = useAuthSession();
+  const authProfile = session?.status === 'authenticated' ? session.profile : null;
+  const isAssistant = authProfile?.role === 'asisten';
+  const name = authProfile?.name ?? 'Belum tersedia';
+  const code = authProfile?.studentCode ?? 'Belum tersedia';
+  const role = authProfile?.role === 'asisten'
+    ? 'Asisten'
+    : authProfile?.role === 'praktikan'
       ? 'Praktikan'
-      : 'Belum memilih peran';
-  const openRoleSelection = () => router.push({ pathname: '/role', params: { from: 'switch' } });
+      : 'Belum tersedia';
+  const handleLogout = async () => {
+    setConfirmLogout(false);
+    setLoggingOut(true);
+    try {
+      await signOut();
+    } catch (error) {
+      Alert.alert('Logout gagal', getAuthErrorMessage(error));
+      setLoggingOut(false);
+    }
+  };
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
@@ -46,29 +57,35 @@ export default function ProfileScreen() {
               label={isAssistant ? 'NIM Asisten' : 'NIM Praktikan'}
               value={code}
             />
-            <ProfileRow icon="school-outline" label="Program Studi" value="S1-Informatika" />
-            {!isAssistant && praktikan ? (
-              <ProfileRow icon="library-outline" label="Semester" value={`${praktikan.semester}`} />
-            ) : null}
+            <ProfileRow icon="mail-outline" label="Email" value={authProfile?.email ?? 'Belum tersedia'} />
             <ProfileRow icon="ribbon-outline" label="Peran" value={role} />
           </View>
         </View>
 
         <TouchableOpacity
           style={styles.switchButton}
-          onPress={openRoleSelection}
+          onPress={() => setConfirmLogout(true)}
+          disabled={loggingOut}
           activeOpacity={0.8}
           accessibilityRole="button"
+          accessibilityLabel="Logout"
         >
-          <Ionicons name="swap-horizontal-outline" size={20} color={colors.primaryDark} />
-          <Text style={styles.switchText}>
-            {isAssistant ? 'Ganti Peran' : praktikan ? 'Ganti Identitas / Peran' : 'Pilih Peran'}
-          </Text>
+          <Ionicons name="log-out-outline" size={20} color={colors.primaryDark} />
+          <Text style={styles.switchText}>{loggingOut ? 'Keluar...' : 'Logout'}</Text>
           <Ionicons name="chevron-forward" size={18} color={colors.primaryDark} />
         </TouchableOpacity>
       </View>
       <Text style={styles.brand}>TandaIU</Text>
       <BottomNav />
+      <ConfirmationModal
+        visible={confirmLogout}
+        title="Keluar dari TandaIU?"
+        message="Sesi akan diakhiri. Profil dan data Anda tetap tersimpan."
+        confirmLabel="Logout"
+        destructive
+        onCancel={() => setConfirmLogout(false)}
+        onConfirm={() => void handleLogout()}
+      />
     </SafeAreaView>
   );
 }

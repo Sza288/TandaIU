@@ -1,0 +1,115 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Memeriksa apakah pengguna sudah login.
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Mengambil role dari dokumen users/{uid}, bukan dari custom token.
+    function userRole() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+    }
+
+    // Asisten adalah pengguna login dengan role 'asisten'.
+    function isAssistant() {
+      return isSignedIn() && userRole() == 'asisten';
+    }
+
+    // Pengguna hanya dapat membaca profil miliknya
+    match /users/{userId} {
+      allow get: if request.auth != null
+                 && request.auth.uid == userId;
+
+      // Tidak boleh membaca seluruh koleksi users
+      allow list: if false;
+
+      // Praktikan maupun asisten boleh membuat profil sendiri
+      allow create: if request.auth != null
+                    && request.auth.uid == userId
+                    && request.resource.data.role in ['praktikan', 'asisten']
+                    && request.resource.data.authProvider in ['google', 'password']
+                    && request.resource.data.email is string
+                    && request.resource.data.name is string;
+
+      // Profil dan role tidak boleh diubah langsung oleh pengguna
+      allow update, delete: if false;
+    }
+
+    // Semua pengguna terautentikasi boleh membaca kelas; hanya asisten yang boleh menulis.
+    match /classes/{classId} {
+      allow read: if isSignedIn();
+      allow write: if isAssistant();
+    }
+
+    // Semua pengguna terautentikasi boleh membaca jadwal; hanya asisten yang boleh menulis.
+    match /schedules/{scheduleId} {
+      allow read: if isSignedIn();
+      allow write: if isAssistant();
+    }
+
+    // Semua pengguna terautentikasi boleh membaca sesi; hanya asisten yang boleh menulis.
+    match /sessions/{sessionId} {
+      allow read: if isSignedIn();
+      allow write: if isAssistant();
+    }
+
+    // Presensi: ID = sessionId + '_' + uid, hanya praktikan untuk dirinya saat sesi dibuka.
+    match /attendances/{attendanceId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn()
+        && userRole() == 'praktikan'
+        && request.resource.data.praktikanId == request.auth.uid
+        && attendanceId == request.resource.data.sessionId + '_' + request.auth.uid
+        && request.resource.data.status == 'hadir'
+        && request.resource.data.keys().hasAll(['sessionId', 'praktikanId', 'praktikanName', 'attendedAt', 'status'])
+        && get(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId)).data.status == 'dibuka';
+      allow update, delete: if false;
+    }
+
+    // Izin: ID = sessionId + '_' + uid, satu pengajuan per sesi per praktikan.
+    // Praktikan mengajukan 'pending', asisten mereview jadi 'approved'/'rejected'.
+    match /permits/{permitId} {
+      allow read: if isSignedIn()
+        && (resource.data.studentId == request.auth.uid || isAssistant());
+      allow create: if isSignedIn()
+        && userRole() == 'praktikan'
+        && request.resource.data.studentId == request.auth.uid
+        && permitId == request.resource.data.sessionId + '_' + request.auth.uid
+        && request.resource.data.status == 'pending'
+        && !request.resource.data.keys().hasAny(['reviewedAt', 'reviewedBy'])
+        && request.resource.data.keys().hasAll(['sessionId', 'studentId', 'studentName', 'reason', 'status', 'createdAt']);
+      allow update: if isAssistant()
+        && resource.data.status == 'pending'
+        && request.resource.data.status in ['approved', 'rejected']
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'reviewedAt', 'reviewedBy']);
+      allow delete: if false;
+    }
+
+    // Ulasan pasca-praktikum: ID = sessionId + '_' + uid, satu ulasan per sesi.
+    // Bila sesi tersedia di Firestore, statusnya wajib sudah 'ditutup'.
+    match /reviews/{reviewId} {
+      allow read: if isSignedIn()
+        && (resource.data.studentId == request.auth.uid || isAssistant());
+      allow create: if isSignedIn()
+        && userRole() == 'praktikan'
+        && request.resource.data.studentId == request.auth.uid
+        && reviewId == request.resource.data.sessionId + '_' + request.auth.uid
+        && request.resource.data.sentiment in ['positif', 'netral', 'negatif']
+        && request.resource.data.sentimentSource in ['model', 'fallback']
+        && request.resource.data.keys().hasAll(['sessionId', 'studentId', 'studentName', 'comment', 'sentiment', 'sentimentSource', 'createdAt'])
+        && (
+          !exists(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId))
+          || get(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId)).data.status == 'ditutup'
+        );
+      allow update, delete: if false;
+    }
+
+    // Koleksi lain ditolak secara default.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

@@ -4,28 +4,35 @@
 
 Aplikasi memakai dua sudut pandang dalam satu aplikasi:
 
-- **Asisten** — membuka/menutup sesi praktikum dan melihat rekap presensi.
-- **Praktikan** — melakukan presensi pada sesi yang dibuka dan melihat riwayat kehadiran sendiri.
+- **Asisten** — membuka/menutup sesi praktikum, melihat rekap presensi, meninjau pengajuan izin, dan membaca ulasan pasca-praktikum beserta sentimen AI.
+- **Praktikan** — melakukan presensi pada sesi yang dibuka, melihat riwayat kehadiran, mengajukan izin, dan menulis ulasan setelah sesi ditutup.
 
-Data bersifat **lokal/dummy** (tanpa backend, autentikasi, atau persistensi). Rincian kebutuhan, pembagian tugas, dan kriteria penerimaan ada di [`SRS.md`](./SRS.md).
+Autentikasi dan data fitur Sprint 2 memakai **Firebase** (Auth + Firestore). Analisis sentimen berjalan **on-device**. Pada desain Sprint 2, sentimen dipakai untuk **ulasan pasca-praktikum**, bukan untuk menilai alasan izin. Rincian kebutuhan, pembagian tugas, dan kriteria penerimaan ada di [`SRS.md`](./SRS.md) dan [`PembagianSprint2.md`](./PembagianSprint2.md).
 
 ## Alur pengguna
 
 ```text
-Pemilihan peran
+Login / registrasi (email atau Google)
 ├─ Asisten → Daftar jadwal → Detail sesi → Buka/Tutup sesi
-│                                   └→ Rekap presensi
-└─ Praktikan (pilih identitas) → Daftar jadwal → Detail sesi → Presensi
-                                             └→ Riwayat pribadi
+│                                   ├→ Rekap presensi
+│                                   ├→ Review izin (setujui/tolak)
+│                                   └→ Lihat ulasan + sentimen AI
+└─ Praktikan → Daftar jadwal → Detail sesi → Presensi
+                                             ├→ Riwayat pribadi
+                                             ├→ Ajukan izin → Status izin realtime
+                                             └→ Ulasan (sesi ditutup) → Sentimen AI
 ```
 
 Status sesi bertransisi `terjadwal` → `dibuka` → `ditutup`. Presensi hanya dapat dilakukan saat sesi `dibuka`, dan presensi ganda untuk praktikan yang sama pada satu sesi ditolak.
+
+Pengajuan izin menyimpan alasan praktikan **tanpa** analisis sentimen. Setiap praktikan hanya dapat mengajukan **satu izin per sesi** (ID dokumen `permits/{sessionId}_{uid}`); pengajuan kedua untuk sesi yang sama ditolak, baik di UI maupun di security rules. Setelah sesi ditutup, praktikan dapat menulis **ulasan pasca-praktikum**; teks ulasan itulah yang dianalisis sentimennya **di perangkat** memakai model lokal. Asisten dapat menyetujui atau menolak izin, dan status izin langsung terlihat oleh praktikan.
 
 ## Teknologi
 
 - **Expo SDK 58** / **React Native 0.88** / **React 19**
 - **TypeScript** (strict)
 - **Expo Router** (routing berbasis berkas di `src/app/`)
+- **Firebase** (`firebase` v13) — Auth email/password + Google, Firestore realtime, security rules
 - `@expo-google-fonts/comfortaa`, `@expo-google-fonts/nunito-sans` — tipografi
 - `@expo/vector-icons` (`Ionicons`) — ikon
 - `react-native-safe-area-context`, `react-native-screens`, `react-native-svg`
@@ -66,18 +73,31 @@ Setelah dev server berjalan, buka pada perangkat/emulator:
 src/
 ├─ app/              # Rute Expo Router (setiap berkas = satu layar)
 │  ├─ _layout.tsx    # Stack navigator + provider global
-│  ├─ index.tsx      # Halaman pendarat (pemilihan peran)
-│  ├─ home.tsx, profile.tsx, role.tsx
+│  ├─ index.tsx, home.tsx, profile.tsx      # Landing, beranda, profil
+│  ├─ auth/login.tsx, auth/register.tsx     # Login & registrasi
 │  ├─ assistant.tsx
-│  ├─ assistant/rekap/[sessionId].tsx   # Rekap presensi (asisten)
+│  ├─ assistant/manage/                     # CRUD kelas, jadwal, sesi (asisten)
+│  ├─ assistant/rekap/[sessionId].tsx       # Rekap presensi (asisten)
+│  ├─ assistant/permits.tsx                 # Review izin (asisten)
+│  ├─ assistant/reviews.tsx                 # Ulasan + sentimen AI (asisten)
 │  ├─ praktikan.tsx
-│  ├─ praktikan/riwayat.tsx             # Riwayat presensi (praktikan)
+│  ├─ praktikan/riwayat.tsx                 # Riwayat presensi (praktikan)
+│  ├─ praktikan/permit.tsx                  # Form pengajuan izin (praktikan)
+│  ├─ praktikan/review.tsx                  # Form ulasan pasca-praktikum (praktikan)
 │  ├─ schedule.tsx
-│  └─ schedule/[id].tsx                 # Detail sesi
-├─ features/         # Implementasi layar per domain (assistant, praktikan, schedule, role, landing, home)
-├─ components/       # Komponen bersama (header, kartu sesi, badge status, navigasi bawah, placeholder)
-├─ state/            # AttendanceContext + fungsi mutasi state lokal
-├─ data/             # Data dummy (sessions, attendances, praktikans, courses)
+│  └─ schedule/[id].tsx                     # Detail sesi
+├─ features/
+│  ├─ auth/          # Layar, context sesi, guard, tipe auth
+│  ├─ crud/          # Form & daftar CRUD praktikum
+│  ├─ permit/        # Form izin, review izin, badge
+│  ├─ review/        # Ulasan pasca-praktikum, badge sentimen, model AI on-device
+│  └─ ...            # assistant, praktikan, schedule, profile, landing
+├─ components/       # Komponen bersama (header, kartu sesi, badge, navigasi bawah)
+├─ state/            # AttendanceContext + fungsi mutasi presensi
+├─ services/         # authService, practicumService, permitService, reviewService
+├─ hooks/            # useClasses, useSchedules, useSessions, usePermit, useReview
+├─ lib/              # firebase, aiClient, currentSession
+├─ data/             # Data dummy (sessions, attendances, praktikans, courses, permits, reviews)
 ├─ types/            # Kontrak tipe (PracticumSession, Attendance, Praktikan, Role, dst.)
 ├─ utils/            # Helper akademik, format waktu, sesi
 ├─ config/           # Konfigurasi term akademik aktif
@@ -86,18 +106,48 @@ src/
 
 Aturan singkat: kode non-rute (komponen, hook, util) disimpan **di luar** `src/app/`.
 
+> Model sentimen berada di `src/features/review/ai/` dan hanya menganalisis **ulasan pasca-praktikum**. Alasan izin tidak melewati model ini.
+
 ## Ruang lingkup dan batasan
 
-- Data jadwal, sesi, dan praktikan bersifat lokal/dummy; perubahan dikelola dengan state React.
-- Tidak ada server, basis data, login sungguhan, atau sinkronisasi antarperangkat.
-- State kembali ke kondisi awal saat aplikasi dimuat ulang (tanpa persistensi).
-- Di luar ruang lingkup: autentikasi produksi, GPS/QR, bukti foto, persetujuan izin/sakit, ekspor laporan, notifikasi, dan administrasi jadwal.
+- Autentikasi, kelas, jadwal, sesi, izin, dan ulasan memakai **Firebase**; data pendukung lain masih dummy.
+- Presensi pada branch ini masih memakai state lokal (`AttendanceContext`); sinkronisasi presensi ke Firestore termasuk pekerjaan lanjutan.
+- Analisis sentimen berjalan **on-device** (tanpa panggilan jaringan) dan hanya dipakai untuk **ulasan pasca-praktikum**. Bila model tidak mengenali teks atau gagal, sistem memakai fallback `src/lib/aiClient.ts` dan UI menampilkan “Analisis cadangan”.
+- Ulasan hanya dapat dikirim untuk sesi yang sudah **ditutup**, satu ulasan per pasangan sesi + praktikan (ID dokumen `reviews/{sessionId}_{uid}`).
+- Izin hanya dapat diajukan satu kali per pasangan sesi + praktikan (ID dokumen `permits/{sessionId}_{uid}`); pengajuan ulang untuk sesi yang sama ditolak.
+- Di luar ruang lingkup: GPS/QR, bukti foto, ekspor laporan, notifikasi, dan administrasi jadwal lanjutan.
 
 ## Dokumentasi
 
 - [`SRS.md`](./SRS.md) — kebutuhan fungsional (FR), kebutuhan UI/NFR, skenario uji penerimaan (AT), pembagian tugas, dan jadwal sprint.
 - [`AGENTS.md`](./AGENTS.md) — panduan kontribusi, perintah, dan catatan navigasi/Expo.
 
+## Hasil pengerjaan Sprint 2
+
+Periode 13–17 Nov 2026. Ringkasan status per modul:
+
+| Modul | PIC | Status | Bukti implementasi |
+|---|---|---|---|
+| Auth & role management | Husni | **Selesai** (PR #15) | `src/services/authService.ts`, `src/features/auth/*`, `src/app/auth/*`; login email/Google, registrasi profil `users/{uid}`, guard rute, reset kata sandi, logout. |
+| CRUD kelas/jadwal/sesi + security rules | Nadia | **Selesai** (PR #16) | `src/services/practicumService.ts`, `src/hooks/useClasses`, `useSchedules`, `useSessions`, `src/features/crud/*`, `firestore.rules`; validasi input dan listener realtime. |
+| Pengajuan & review izin | Khanza | **Selesai di branch `feature/sprint-2-izin-ai`** | `src/services/permitService.ts`, `src/hooks/usePermit.ts`, `src/features/permit/*`; simpan izin (satu izin per sesi, ID `permits/{sessionId}_{uid}`), transaksi approve/reject, status realtime. |
+| Ulasan pasca-praktikum + sentimen AI | Khanza | **Selesai di branch `feature/sprint-2-izin-ai`** | `src/features/review/*`, `src/services/reviewService.ts`, `src/hooks/useReview.ts`, `src/data/reviews.ts`; satu ulasan per sesi, sentimen on-device, tampilan asisten. |
+| Presensi realtime | Olivia | **Belum tergabung di branch ini** | State presensi lokal: `src/state/AttendanceContext.tsx`, `src/state/attendanceMutations.ts`; sinkronisasi Firestore belum ada. |
+| Perbaikan UX form izin | Khanza | **Selesai** | `PraktikanPermitScreen` memakai `KeyboardAvoidingView` + `keyboardDismissMode` agar tombol kirim dan daftar sesi tidak tertutup keyboard. |
+
+### Kualitas
+
+- `npx tsc --noEmit` — bersih.
+- `npx expo lint` — bersih.
+- `npm test` — 130 dari 130 tes lulus (14 suite), termasuk `permit.test.ts` dan `review.test.ts`.
+
+### Catatan desain AI
+
+- Alasan izin **tidak** dianalisis sentimen.
+- Model sentimen on-device (`model-edom.json`, `sentiment.js`) dilatih dari data ulasan EDOM, bukan alasan izin. Label positif/netral/negatif hanya bermakna untuk **ulasan pasca-praktikum**.
+- Baseline EDOM masih bisa salah pada sebagian kata negatif (mis. “buruk” dapat terbaca positif). Model perlu dilatih ulang dengan data ulasan praktikum agar akurat.
+- Fallback `src/lib/aiClient.ts` dipakai bila kosakata model tidak dikenali; UI menandai “Analisis cadangan”.
+
 ## Status
 
-Fondasi proyek sudah tersedia (navigasi, pemilihan peran, kontrak tipe, data dummy, dan state bersama). Layar fitur untuk daftar jadwal, detail sesi, buka/tutup sesi, rekap, presensi, dan riwayat masih berupa *placeholder* dan dikerjakan oleh pemilik fitur masing-masing (lihat [`SRS.md`](./SRS.md) §11–13).
+Sprint 2 sudah menggabungkan Auth/Role (PR #15) dan CRUD praktikum (PR #16) ke `main`. Branch `feature/sprint-2-izin-ai` menambahkan pengajuan + review izin realtime serta **ulasan pasca-praktikum dengan sentimen AI on-device**. Pekerjaan tersisa: menyinkronkan presensi ke Firestore dan melatih ulang model sentimen dengan data ulasan praktikum.

@@ -1,6 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
-import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useState } from 'react';
+import { Alert, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import ConfirmationModal from './ConfirmationModal';
+import { getAuthErrorMessage, signOut } from '../services/authService';
 import { colors, fonts, radius, shadows, spacing } from '../theme';
 
 type Props = {
@@ -11,8 +13,18 @@ type Props = {
 };
 
 export default function RoleScreenHeader({ title, eyebrow, subtitle, onBack }: Props) {
-  const handleChangeRole = () => {
-    router.push({ pathname: '/role', params: { from: 'switch' } });
+  const [confirmLogout, setConfirmLogout] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
+
+  const handleLogout = async () => {
+    setConfirmLogout(false);
+    setLoggingOut(true);
+    try {
+      await signOut();
+    } catch (error) {
+      Alert.alert('Logout gagal', getAuthErrorMessage(error));
+      setLoggingOut(false);
+    }
   };
 
   return (
@@ -34,13 +46,14 @@ export default function RoleScreenHeader({ title, eyebrow, subtitle, onBack }: P
 
         <TouchableOpacity
           accessibilityRole="button"
-          accessibilityLabel="Ganti peran"
+          accessibilityLabel="Logout"
           style={styles.switchButton}
-          onPress={handleChangeRole}
+          onPress={() => setConfirmLogout(true)}
+          disabled={loggingOut}
           activeOpacity={0.85}
         >
-          <Ionicons name="swap-horizontal" size={16} color={colors.primary} />
-          <Text style={styles.switchLabel}>Ganti Peran</Text>
+          <Ionicons name="log-out-outline" size={16} color={colors.primary} />
+          <Text style={styles.switchLabel}>{loggingOut ? 'Keluar...' : 'Logout'}</Text>
         </TouchableOpacity>
       </View>
 
@@ -53,6 +66,15 @@ export default function RoleScreenHeader({ title, eyebrow, subtitle, onBack }: P
           </Text>
         ) : null}
       </View>
+      <ConfirmationModal
+        visible={confirmLogout}
+        title="Keluar dari TandaIU?"
+        message="Sesi akan diakhiri. Profil dan data Anda tetap tersimpan."
+        confirmLabel="Logout"
+        destructive
+        onCancel={() => setConfirmLogout(false)}
+        onConfirm={() => void handleLogout()}
+      />
     </View>
   );
 }
