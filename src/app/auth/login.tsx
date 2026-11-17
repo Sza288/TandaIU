@@ -12,6 +12,11 @@ import {
   AuthTextField,
 } from '../../features/auth/AuthScreen';
 import { useRefreshAuthSession } from '../../features/auth/AuthSessionContext';
+import PraktikanAccountPicker from '../../features/auth/PraktikanAccountPicker';
+import {
+  praktikanAccounts,
+  type PraktikanAccount,
+} from '../../features/auth/praktikanAccounts';
 import {
   getAuthErrorMessage,
   isGoogleSignInAvailable,
@@ -29,7 +34,15 @@ export default function LoginScreen() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [noticeMessage, setNoticeMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState<'email' | 'google' | 'reset' | null>(null);
+  const [accountPickerVisible, setAccountPickerVisible] = useState(false);
   const googleSignInAvailable = isGoogleSignInAvailable();
+
+  const handleSelectAccount = (account: PraktikanAccount) => {
+    setEmail(account.email);
+    setAccountPickerVisible(false);
+    setErrorMessage(null);
+    setNoticeMessage(null);
+  };
 
   const handleLogin = async () => {
     setErrorMessage(null);
@@ -111,11 +124,14 @@ export default function LoginScreen() {
 
       <AuthTextField
         accessibilityLabel="Email"
+        actionIcon="people-outline"
+        actionLabel="Pilih akun praktikan"
         autoCapitalize="none"
         icon="mail-outline"
         keyboardType="email-address"
         label="Email"
         onChangeText={setEmail}
+        onPressAction={() => setAccountPickerVisible(true)}
         placeholder="nama@email.com"
         returnKeyType="next"
         textContentType="emailAddress"
@@ -163,6 +179,13 @@ export default function LoginScreen() {
       {!googleSignInAvailable ? (
         <AuthNotice message="Google Sign-In perlu development build. Masuk dengan email tetap bisa digunakan." />
       ) : null}
+
+      <PraktikanAccountPicker
+        accounts={praktikanAccounts}
+        onClose={() => setAccountPickerVisible(false)}
+        onSelect={handleSelectAccount}
+        visible={accountPickerVisible}
+      />
     </AuthScreen>
   );
 }

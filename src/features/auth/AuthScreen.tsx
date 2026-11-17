@@ -72,6 +72,9 @@ type AuthTextFieldProps = {
   returnKeyType?: 'done' | 'next' | 'go';
   onSubmitEditing?: () => void;
   editable?: boolean;
+  actionIcon?: keyof typeof Ionicons.glyphMap;
+  actionLabel?: string;
+  onPressAction?: () => void;
 };
 
 export function AuthTextField({
@@ -88,6 +91,9 @@ export function AuthTextField({
   returnKeyType = 'next',
   onSubmitEditing,
   editable = true,
+  actionIcon,
+  actionLabel,
+  onPressAction,
 }: AuthTextFieldProps) {
   const [passwordVisible, setPasswordVisible] = usePasswordVisibility(secureTextEntry);
   const [focused, setFocused] = useState(false);
@@ -127,6 +133,16 @@ export function AuthTextField({
               size={19}
               color={colors.textSecondary}
             />
+          </Pressable>
+        ) : null}
+        {actionIcon && onPressAction ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={actionLabel ?? 'Buka pilihan'}
+            hitSlop={8}
+            onPress={onPressAction}
+          >
+            <Ionicons name={actionIcon} size={19} color={colors.primary} />
           </Pressable>
         ) : null}
       </View>
