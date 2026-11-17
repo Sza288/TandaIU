@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -13,13 +13,16 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import ConfirmationModal from '../../components/ConfirmationModal';
 import ScreenHeader from '../../components/ScreenHeader';
 import StatusBadge from '../../components/StatusBadge';
-import { getSessionIdsForPraktikan } from '../../data/sessionEnrollments';
+import { useAuthSession } from '../../features/auth/AuthSessionContext';
+import { usePraktikanAttendance } from '../../hooks/useAttendanceRecords';
+import { useEnrollments } from '../../hooks/useEnrollments';
+import { useSessions } from '../../hooks/useSessions';
+import type { CurrentUser } from '../../lib/currentSession';
 import {
   attendanceServiceMode,
+  buildAttendanceEnrollmentScope,
+  checkEnrollmentEligibility,
   checkIn,
-  getAttendanceUser,
-  subscribeToPraktikanAttendance,
-  subscribeToSessions,
   type AttendanceRecord,
 } from '../../services/attendanceService';
 import { colors, fonts, radius, shadows, spacing } from '../../theme';
@@ -38,50 +41,30 @@ type Feedback = {
 };
 
 export default function PraktikanAttendanceScreen() {
-  const currentUser = useMemo(() => getAttendanceUser(), []);
-  const [sessions, setSessions] = useState<PracticumSession[]>([]);
-  const [attendances, setAttendances] = useState<AttendanceRecord[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [reloadKey, setReloadKey] = useState(0);
+  const authSession = useAuthSession();
+  const profile = authSession?.status === 'authenticated' ? authSession.profile : null;
+  const currentUser = useMemo<CurrentUser | null>(() => {
+    if (profile?.role === 'praktikan') {
+      return {
+        uid: profile.uid,
+        name: profile.name,
+        email: profile.email,
+        role: 'praktikan',
+        ...(profile.studentCode ? { studentCode: profile.studentCode } : {}),
+      };
+    }
+    return null;
+  }, [profile]);
+  const sessionResult = useSessions();
+  const enrollmentResult = useEnrollments(
+    currentUser ? { praktikanId: currentUser.uid } : undefined,
+  );
+  const attendanceResult = usePraktikanAttendance(currentUser?.uid);
+  const sessions = sessionResult.data;
+  const attendances = attendanceResult.data;
   const [selectedSession, setSelectedSession] = useState<PracticumSession | null>(null);
   const [submittingSessionId, setSubmittingSessionId] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<Feedback | null>(null);
-
-  useEffect(() => {
-    let active = true;
-
-    const unsubscribeSessions = subscribeToSessions(
-      (records) => {
-        if (!active) return;
-        setSessions(records);
-        setLoading(false);
-      },
-      (message) => {
-        if (!active) return;
-        setError(message);
-        setLoading(false);
-      },
-    );
-
-    const unsubscribeAttendance = subscribeToPraktikanAttendance(
-      currentUser.uid,
-      (records) => {
-        if (!active) return;
-        setAttendances(records);
-      },
-      (message) => {
-        if (!active) return;
-        setError(message);
-      },
-    );
-
-    return () => {
-      active = false;
-      unsubscribeSessions();
-      unsubscribeAttendance();
-    };
-  }, [currentUser.uid, reloadKey]);
 
   const attendanceBySession = useMemo(() => {
     const map = new Map<string, AttendanceRecord>();
@@ -89,18 +72,41 @@ export default function PraktikanAttendanceScreen() {
     return map;
   }, [attendances]);
 
-  const visibleSessions = useMemo(() => {
-    const enrolledIds = getSessionIdsForPraktikan(currentUser.uid);
-    const scoped = enrolledIds.length > 0
-      ? sessions.filter((session) => enrolledIds.includes(session.id))
-      : sessions;
+  const enrolledClassIds = useMemo(
+    () => new Set(enrollmentResult.data.map((enrollment) => enrollment.classId)),
+    [enrollmentResult.data],
+  );
 
-    return [...scoped].sort((a, b) => {
-      const byStatus = statusRank[a.status] - statusRank[b.status];
-      if (byStatus !== 0) return byStatus;
-      return a.startsAt.localeCompare(b.startsAt);
-    });
-  }, [currentUser.uid, sessions]);
+  const enrolledSessions = useMemo(
+    () => sessions.filter((session) => session.classId && enrolledClassIds.has(session.classId)),
+    [enrolledClassIds, sessions],
+  );
+
+  const enrollmentScope = useMemo(
+    () => buildAttendanceEnrollmentScope(enrolledSessions.map((session) => session.id)),
+    [enrolledSessions],
+  );
+
+  const hasEnrollment = enrollmentResult.data.length > 0;
+
+  const visibleSessions = useMemo(
+    () =>
+      [...enrolledSessions].sort((a, b) => {
+        const byStatus = statusRank[a.status] - statusRank[b.status];
+        if (byStatus !== 0) return byStatus;
+        return a.startsAt.localeCompare(b.startsAt);
+      }),
+    [enrolledSessions],
+  );
+
+  const loading = sessionResult.loading || enrollmentResult.loading || attendanceResult.loading;
+  const error = sessionResult.error ?? enrollmentResult.error ?? attendanceResult.error;
+
+  const retryData = () => {
+    sessionResult.retry();
+    enrollmentResult.retry();
+    attendanceResult.retry();
+  };
 
   const handleBack = () => {
     if (router.canGoBack()) {
@@ -112,6 +118,23 @@ export default function PraktikanAttendanceScreen() {
 
   const handleConfirmCheckIn = async () => {
     if (!selectedSession || submittingSessionId) return;
+    if (!currentUser) {
+      setSelectedSession(null);
+      setFeedback({
+        tone: 'error',
+        message: 'Identitas tidak valid. Masuk kembali dengan akun praktikan yang terdaftar.',
+      });
+      return;
+    }
+    const eligibility = checkEnrollmentEligibility(enrollmentScope, selectedSession.id);
+    if (!eligibility.ok) {
+      setSelectedSession(null);
+      setFeedback({
+        tone: 'error',
+        message: eligibility.reason ?? 'Enrollment sesi ini belum terverifikasi, presensi tidak dapat dilakukan.',
+      });
+      return;
+    }
     const session = selectedSession;
     setSelectedSession(null);
     setSubmittingSessionId(session.id);
@@ -144,13 +167,17 @@ export default function PraktikanAttendanceScreen() {
         <View style={styles.identityCard}>
           <View style={styles.avatar}>
             <Text style={styles.avatarText}>
-              {currentUser.name.charAt(0).toUpperCase()}
+              {currentUser ? currentUser.name.charAt(0).toUpperCase() : '?'}
             </Text>
           </View>
           <View style={styles.identityCopy}>
-            <Text style={styles.identityName}>{currentUser.name}</Text>
+            <Text style={styles.identityName}>{currentUser?.name ?? 'Identitas belum tersedia'}</Text>
             <Text style={styles.identityMeta}>
-              {currentUser.studentCode ? `NIM ${currentUser.studentCode}` : currentUser.email}
+              {currentUser
+                ? currentUser.studentCode
+                  ? `NIM ${currentUser.studentCode}`
+                  : currentUser.email
+                : 'Masuk kembali dengan akun praktikan untuk melakukan presensi.'}
             </Text>
           </View>
           <View style={styles.rolePill}>
@@ -199,10 +226,18 @@ export default function PraktikanAttendanceScreen() {
           </View>
         </View>
 
-        {loading ? (
+        {!currentUser ? (
+          <View style={styles.stateCard}>
+            <Ionicons name="person-outline" size={32} color={colors.textSecondary} />
+            <Text style={styles.stateTitle}>Identitas praktikan belum siap</Text>
+            <Text style={styles.stateText}>
+              Masuk kembali dengan akun praktikan agar presensi bisa dicatat.
+            </Text>
+          </View>
+        ) : loading ? (
           <View style={styles.stateCard}>
             <ActivityIndicator color={colors.primary} />
-            <Text style={styles.stateText}>Memuat sesi...</Text>
+            <Text style={styles.stateText}>Memuat sesi dan data pendaftaran...</Text>
           </View>
         ) : error ? (
           <View style={styles.stateCard}>
@@ -212,15 +247,20 @@ export default function PraktikanAttendanceScreen() {
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="Coba muat ulang data presensi"
-              onPress={() => {
-                setLoading(true);
-                setError(null);
-                setReloadKey((value) => value + 1);
-              }}
+              onPress={retryData}
               style={({ pressed }) => [styles.retryButton, pressed && styles.pressed]}
             >
               <Text style={styles.retryText}>Coba Lagi</Text>
             </Pressable>
+          </View>
+        ) : !hasEnrollment ? (
+          <View style={styles.stateCard}>
+            <Ionicons name="link-outline" size={32} color={colors.textSecondary} />
+            <Text style={styles.stateTitle}>Enrollment belum tersedia</Text>
+            <Text style={styles.stateText}>
+              Akunmu belum terhubung ke kelas praktikum mana pun, jadi daftar sesi presensi
+              dikosongkan. Hubungi asisten untuk menyiapkan enrollment akun.
+            </Text>
           </View>
         ) : visibleSessions.length === 0 ? (
           <View style={styles.stateCard}>
@@ -331,7 +371,7 @@ export default function PraktikanAttendanceScreen() {
       <ConfirmationModal
         visible={selectedSession !== null}
         title="Konfirmasi presensi"
-        message={`Presensi ${selectedSession?.practicumName ?? 'praktikum'} sebagai ${currentUser.name}? Presensi hanya dapat dilakukan satu kali.`}
+        message={`Presensi ${selectedSession?.practicumName ?? 'praktikum'} sebagai ${currentUser?.name ?? 'akun ini'}? Presensi hanya dapat dilakukan satu kali.`}
         confirmLabel="Presensi"
         onCancel={() => setSelectedSession(null)}
         onConfirm={() => void handleConfirmCheckIn()}

@@ -25,6 +25,7 @@ export type ScheduleDoc = {
 };
 
 export type SessionDoc = PracticumSession & {
+  classId: string;
   lecturerId?: LecturerId;
   lecturer?: string;
 };
@@ -34,6 +35,7 @@ export type ClassInput = Omit<ClassDoc, 'id'>;
 export type ScheduleInput = Omit<ScheduleDoc, 'id'>;
 
 export type SessionInput = {
+  classId: string;
   courseId: string;
   practicumName: string;
   className: string;

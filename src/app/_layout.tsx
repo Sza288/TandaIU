@@ -8,7 +8,6 @@ import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { AuthProvider } from '../features/auth/AuthSessionContext';
 import AuthNavigationGate from '../features/auth/AuthNavigationGate';
-import { AttendanceProvider } from '../state/AttendanceContext';
 import { colors, fonts } from '../theme';
 
 export default function RootLayout() {
@@ -25,10 +24,9 @@ export default function RootLayout() {
   }
 
   return (
-    <AttendanceProvider>
-      <AuthProvider>
-        <StatusBar style="dark" />
-        <AuthNavigationGate>
+    <AuthProvider>
+      <StatusBar style="dark" />
+      <AuthNavigationGate>
           <Stack
             screenOptions={{
               headerStyle: { backgroundColor: colors.background },
@@ -75,8 +73,7 @@ export default function RootLayout() {
             <Stack.Screen name="auth/login" options={{ headerShown: false }} />
             <Stack.Screen name="auth/register" options={{ headerShown: false }} />
           </Stack>
-        </AuthNavigationGate>
-      </AuthProvider>
-    </AttendanceProvider>
+      </AuthNavigationGate>
+    </AuthProvider>
   );
 }
