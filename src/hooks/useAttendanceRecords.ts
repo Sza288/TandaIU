@@ -1,0 +1,90 @@
+import { useCallback, useEffect, useState } from 'react';
+
+import {
+  subscribeToAttendance,
+  subscribeToPraktikanAttendance,
+  type AttendanceRecord,
+} from '../services/attendanceService';
+
+type AttendanceListenerState = {
+  data: AttendanceRecord[];
+  loading: boolean;
+  error: string | null;
+  retry: () => void;
+};
+
+const EMPTY_ATTENDANCE: AttendanceRecord[] = [];
+
+function useAttendanceSubscription(
+  key: string | null,
+  subscribe: (
+    onData: (records: AttendanceRecord[]) => void,
+    onError: (message: string) => void,
+  ) => () => void,
+): AttendanceListenerState {
+  const [dataState, setData] = useState<AttendanceRecord[]>([]);
+  const [errorState, setErrorState] = useState<string | null>(null);
+  const [resolvedKey, setResolvedKey] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
+
+  const data = key ? dataState : EMPTY_ATTENDANCE;
+  const loading = Boolean(key) && resolvedKey !== `${key}::${reloadKey}`;
+  const error = Boolean(key) && resolvedKey === `${key}::${reloadKey}` ? errorState : null;
+
+  useEffect(() => {
+    if (!key) {
+      return undefined;
+    }
+
+    const activeKey = `${key}::${reloadKey}`;
+    const unsubscribe = subscribe(
+      (records) => {
+        setData(records);
+        setErrorState(null);
+        setResolvedKey(activeKey);
+      },
+      (message) => {
+        setData([]);
+        setErrorState(message);
+        setResolvedKey(activeKey);
+      },
+    );
+
+    return unsubscribe;
+  }, [key, reloadKey, subscribe]);
+
+  const retry = useCallback(() => {
+    setData([]);
+    setErrorState(null);
+    setResolvedKey(null);
+    setReloadKey((value) => value + 1);
+  }, []);
+
+  return { data, loading, error, retry };
+}
+
+export function usePraktikanAttendance(praktikanId?: string | null): AttendanceListenerState {
+  const normalizedId = praktikanId?.trim() ?? '';
+  const subscribe = useCallback(
+    (
+      onData: (records: AttendanceRecord[]) => void,
+      onError: (message: string) => void,
+    ) => subscribeToPraktikanAttendance(normalizedId, onData, onError),
+    [normalizedId],
+  );
+
+  return useAttendanceSubscription(normalizedId || null, subscribe);
+}
+
+export function useSessionAttendance(sessionId?: string | null): AttendanceListenerState {
+  const normalizedId = sessionId?.trim() ?? '';
+  const subscribe = useCallback(
+    (
+      onData: (records: AttendanceRecord[]) => void,
+      onError: (message: string) => void,
+    ) => subscribeToAttendance(normalizedId, onData, onError),
+    [normalizedId],
+  );
+
+  return useAttendanceSubscription(normalizedId || null, subscribe);
+}

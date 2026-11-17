@@ -1,11 +1,19 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, Stack } from 'expo-router';
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import {
+  ActivityIndicator,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import BottomNav from '../../components/BottomNav';
 import PracticumIcon from '../../components/PracticumIcon';
 import ScreenHeader from '../../components/ScreenHeader';
-import { useAttendance } from '../../state/AttendanceContext';
+import { usePraktikanAttendance } from '../../hooks/useAttendanceRecords';
+import { useSessions } from '../../hooks/useSessions';
 import { useAuthSession } from '../auth/AuthSessionContext';
 import { colors, fonts, radius, shadows, spacing } from '../../theme';
 import { formatDateTime, getInitials } from '../../utils/format';
@@ -13,13 +21,18 @@ import { deriveRiwayat, RiwayatRecord } from './praktikan.utils';
 import { getAuthenticatedPraktikanIdentity } from './authenticatedIdentity';
 
 export default function RiwayatScreen() {
-  const { attendances, sessions } = useAttendance();
-  const session = useAuthSession();
-  const profile = session?.status === 'authenticated' ? session.profile : null;
+  const authSession = useAuthSession();
+  const profile = authSession?.status === 'authenticated' ? authSession.profile : null;
   const activePraktikan = getAuthenticatedPraktikanIdentity(profile);
-  const activePraktikanId = activePraktikan?.localScheduleId ?? null;
-
-  const records = deriveRiwayat(attendances, sessions, activePraktikanId);
+  const attendanceResult = usePraktikanAttendance(profile?.uid);
+  const sessionResult = useSessions();
+  const records = deriveRiwayat(
+    attendanceResult.data,
+    sessionResult.data,
+    profile?.uid ?? null,
+  );
+  const loading = attendanceResult.loading || sessionResult.loading;
+  const error = attendanceResult.error ?? sessionResult.error;
 
   const handleBack = () => {
     if (router.canGoBack()) {
@@ -48,13 +61,29 @@ export default function RiwayatScreen() {
             title="Profil praktikan belum tersedia"
             description="Data profil akun belum tersedia. Coba muat ulang sesi atau masuk kembali."
           />
+        ) : loading ? (
+          <View style={styles.loadingState}>
+            <ActivityIndicator color={colors.primary} />
+            <Text style={styles.loadingText}>Memuat riwayat presensi dari Firestore...</Text>
+          </View>
+        ) : error ? (
+          <EmptyState
+            icon="cloud-offline-outline"
+            title="Riwayat presensi tidak dapat dimuat"
+            description={error}
+            actionLabel="Coba Lagi"
+            onAction={() => {
+              attendanceResult.retry();
+              sessionResult.retry();
+            }}
+          />
         ) : records.length === 0 ? (
           <EmptyState
             icon="time-outline"
             title="Belum ada riwayat presensi"
             description={`${
               activePraktikan?.name ?? 'Praktikan ini'
-            } belum memiliki catatan presensi yang terhubung. Riwayat demo lokal tidak ditampilkan untuk akun ini.`}
+            } belum memiliki catatan presensi di Firestore. Presensi yang berhasil dicatat akan muncul di sini secara realtime.`}
           />
         ) : (
           <>
@@ -193,6 +222,19 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.xl,
     paddingTop: spacing.sm,
     paddingBottom: spacing.xxxl,
+  },
+  loadingState: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    paddingVertical: spacing.xxxl,
+  },
+  loadingText: {
+    color: colors.textSecondary,
+    fontFamily: fonts.regular,
+    fontSize: 13,
+    textAlign: 'center',
   },
   summaryCard: {
     width: '100%',

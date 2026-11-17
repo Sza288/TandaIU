@@ -1,19 +1,19 @@
 import { useEffect } from 'react';
 import { router } from 'expo-router';
-import { useAttendance } from '../../state/AttendanceContext';
+import { getDashboardPath } from '../auth/authTypes';
+import { useAuthSession } from '../auth/AuthSessionContext';
 
 export default function HomeLandingScreen() {
-  const { activeRole } = useAttendance();
+  const session = useAuthSession();
 
   useEffect(() => {
-    if (activeRole === 'asisten') {
-      router.replace('/assistant');
-    } else if (activeRole === 'praktikan') {
-      router.replace('/praktikan');
-    } else {
-      router.replace('/');
+    if (!session || session.status === 'loading') return;
+    if (session.status === 'authenticated') {
+      router.replace(getDashboardPath(session.profile.role));
+      return;
     }
-  }, [activeRole]);
+    router.replace('/');
+  }, [session]);
 
   return null;
 }

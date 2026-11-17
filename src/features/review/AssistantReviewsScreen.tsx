@@ -11,9 +11,8 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import BottomNav from '../../components/BottomNav';
 import ScreenHeader from '../../components/ScreenHeader';
-import { praktikans } from '../../data/praktikans';
 import { useReviews } from '../../hooks/useReview';
-import { useAttendance } from '../../state/AttendanceContext';
+import { useSessions } from '../../hooks/useSessions';
 import { colors, fonts, radius, shadows, spacing } from '../../theme';
 import { PracticumSession } from '../../types';
 import { formatDateTime } from '../../utils/format';
@@ -30,7 +29,7 @@ const FILTERS: { key: FilterKey; label: string }[] = [
 ];
 
 export default function AssistantReviewsScreen() {
-  const { sessions } = useAttendance();
+  const { data: sessions } = useSessions();
   const reviews = useReviews();
   const [filter, setFilter] = useState<FilterKey>('all');
 
@@ -120,7 +119,6 @@ export default function AssistantReviewsScreen() {
                 key={review.id}
                 review={review}
                 session={sessionById.get(review.sessionId)}
-                studentCode={praktikans.find((item) => item.id === review.studentId)?.studentCode}
               />
             ))}
           </View>
@@ -135,11 +133,9 @@ export default function AssistantReviewsScreen() {
 function ReviewCard({
   review,
   session,
-  studentCode,
 }: {
   review: Review;
   session?: PracticumSession;
-  studentCode?: string;
 }) {
   return (
     <View style={styles.card}>
@@ -152,7 +148,6 @@ function ReviewCard({
             {review.studentName}
           </Text>
           <Text style={styles.cardMeta}>
-            {studentCode ? `${studentCode} · ` : ''}
             {session?.practicumName ?? 'Sesi tidak ditemukan'}
             {session ? ` · Kelas ${session.className}` : ''}
           </Text>

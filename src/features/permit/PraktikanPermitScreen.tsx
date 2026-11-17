@@ -15,10 +15,10 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import BottomNav from '../../components/BottomNav';
 import ScreenHeader from '../../components/ScreenHeader';
-import { getSessionIdsForPraktikan } from '../../data/sessionEnrollments';
+import { useEnrollments } from '../../hooks/useEnrollments';
 import { usePermits } from '../../hooks/usePermit';
+import { useSessions } from '../../hooks/useSessions';
 import { submitPermit } from '../../services/permitService';
-import { useAttendance } from '../../state/AttendanceContext';
 import { colors, fonts, radius, shadows, spacing } from '../../theme';
 import { PracticumSession } from '../../types';
 import { formatDateTime } from '../../utils/format';
@@ -43,30 +43,38 @@ const FEEDBACK_COLORS = {
 };
 
 export default function PraktikanPermitScreen() {
-  const { sessions } = useAttendance();
   const permits = usePermits();
   const authSession = useAuthSession();
   const profile = authSession?.status === 'authenticated' ? authSession.profile : null;
   const activePraktikan = getAuthenticatedPraktikanIdentity(profile);
   const studentId = activePraktikan?.id ?? null;
-  const localPraktikanId = activePraktikan?.localScheduleId ?? null;
   const studentName = activePraktikan?.name ?? profile?.name ?? null;
   const hasIdentity = Boolean(studentId && studentName);
+  const sessionResult = useSessions();
+  const enrollmentResult = useEnrollments(
+    studentId ? { praktikanId: studentId } : undefined,
+  );
+  const sessions = sessionResult.data;
+  const enrolledClassIds = useMemo(
+    () => new Set(enrollmentResult.data.map((enrollment) => enrollment.classId)),
+    [enrollmentResult.data],
+  );
+  const sessionsLoading = sessionResult.loading || enrollmentResult.loading;
+  const sessionsError = sessionResult.error ?? enrollmentResult.error;
 
-  const eligibleSessions = useMemo(() => {
-    const enrolledIds = localPraktikanId
-      ? new Set(getSessionIdsForPraktikan(localPraktikanId))
-      : null;
-    return sessions
-      .filter((session) => !enrolledIds || enrolledIds.has(session.id))
-      .sort((a, b) => {
-        if (a.status !== b.status) {
-          if (a.status === 'dibuka') return -1;
-          if (b.status === 'dibuka') return 1;
-        }
-        return b.startsAt.localeCompare(a.startsAt);
-      });
-  }, [localPraktikanId, sessions]);
+  const eligibleSessions = useMemo(
+    () =>
+      sessions
+        .filter((session) => session.classId && enrolledClassIds.has(session.classId))
+        .sort((a, b) => {
+          if (a.status !== b.status) {
+            if (a.status === 'dibuka') return -1;
+            if (b.status === 'dibuka') return 1;
+          }
+          return b.startsAt.localeCompare(a.startsAt);
+        }),
+    [enrolledClassIds, sessions],
+  );
 
   const myPermits = useMemo(
     () =>
@@ -221,7 +229,14 @@ export default function PraktikanPermitScreen() {
                   Pilih sesi yang ingin diajukan izinnya.
                 </Text>
 
-                {eligibleSessions.length === 0 ? (
+                {sessionsLoading ? (
+                  <View style={styles.inlineLoading}>
+                    <ActivityIndicator color={colors.primary} />
+                    <Text style={styles.hintText}>Memuat sesi dari Firestore...</Text>
+                  </View>
+                ) : sessionsError ? (
+                  <Text style={styles.hintText}>{sessionsError}</Text>
+                ) : eligibleSessions.length === 0 ? (
                   <Text style={styles.hintText}>
                     Belum ada sesi praktikum untuk kelasmu.
                   </Text>
@@ -452,6 +467,12 @@ const styles = StyleSheet.create({
   },
   sessionList: {
     gap: spacing.sm,
+  },
+  inlineLoading: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingVertical: spacing.sm,
   },
   sessionOption: {
     flexDirection: 'row',

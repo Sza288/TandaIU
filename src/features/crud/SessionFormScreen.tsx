@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 
 import { courses } from '../../data/courses';
 import { dosen } from '../../data/dosen';
+import { useClasses } from '../../hooks/useClasses';
 import {
   createSession,
   getSessionById,
@@ -18,6 +19,7 @@ import {
   addHoursToDateTime,
   combineDateTime,
   fieldForMessage,
+  getCourseName,
   getErrorMessage,
   returnToManage,
   splitDateTimeInput,
@@ -26,27 +28,22 @@ import {
 } from './crud.utils';
 import { DateField, TimeField } from './DateTimeField';
 import FormScaffold, { FormLoadingScreen } from './FormScaffold';
-import {
-  FormNote,
-  FormPickerField,
-  FormReadOnlyField,
-  FormTextField,
-} from './FormField';
+import { FormNote, FormPickerField, FormReadOnlyField } from './FormField';
 import OptionPicker from './OptionPicker';
 
 type SessionField =
+  | 'classId'
   | 'courseId'
   | 'practicumName'
-  | 'className'
   | 'startsAt'
   | 'endsAt'
   | 'status'
   | 'lecturerId';
 
 const SESSION_FIELDS: { field: SessionField; prefix: string }[] = [
+  { field: 'classId', prefix: 'Kelas' },
   { field: 'courseId', prefix: 'Mata kuliah' },
   { field: 'practicumName', prefix: 'Nama praktikum' },
-  { field: 'className', prefix: 'Kelas' },
   { field: 'startsAt', prefix: 'Waktu mulai' },
   { field: 'endsAt', prefix: 'Waktu selesai' },
   { field: 'status', prefix: 'Status sesi' },
@@ -59,10 +56,12 @@ export default function SessionFormScreen() {
   const id = Array.isArray(params.id) ? params.id[0] : params.id;
   const isEdit = Boolean(id);
 
+  const classes = useClasses();
+
   const [ready, setReady] = useState(!id);
+  const [classId, setClassId] = useState('');
   const [courseId, setCourseId] = useState('');
   const [practicumName, setPracticumName] = useState('');
-  const [className, setClassName] = useState('');
   const [lecturerId, setLecturerId] = useState('');
   const [startDate, setStartDate] = useState(() => todayDateValue());
   const [startTime, setStartTime] = useState('08:00');
@@ -70,6 +69,7 @@ export default function SessionFormScreen() {
   const [endTime, setEndTime] = useState('10:00');
   const [status, setStatus] = useState('terjadwal');
   const [coursePickerVisible, setCoursePickerVisible] = useState(false);
+  const [classPickerVisible, setClassPickerVisible] = useState(false);
   const [lecturerPickerVisible, setLecturerPickerVisible] = useState(false);
   const [statusPickerVisible, setStatusPickerVisible] = useState(false);
   const [errors, setErrors] = useState<Partial<Record<SessionField, string>>>({});
@@ -86,9 +86,9 @@ export default function SessionFormScreen() {
         if (!session) {
           setFormError('Sesi tidak ditemukan.');
         } else {
+          setClassId(session.classId ?? '');
           setCourseId(session.courseId);
           setPracticumName(session.practicumName);
-          setClassName(session.className);
           setLecturerId(session.lecturerId ?? '');
           const startParts = splitDateTimeInput(session.startsAt);
           const endParts = splitDateTimeInput(session.endsAt);
@@ -112,7 +112,45 @@ export default function SessionFormScreen() {
   }, [id]);
 
   const selectedCourse = courses.find((course) => course.id === courseId);
+  const selectedClass = classes.data.find((classDoc) => classDoc.id === classId);
   const selectedLecturer = dosen.find((lecturer) => lecturer.id === lecturerId);
+
+  const availableClasses = courseId
+    ? classes.data.filter((classDoc) => classDoc.courseId === courseId)
+    : classes.data;
+
+  const classOptions = availableClasses.map((classDoc) => ({
+    value: classDoc.id,
+    label: `Kelas ${classDoc.className}`,
+    description: getCourseName(classDoc.courseId),
+  }));
+
+  const classHint = classes.loading
+    ? 'Memuat daftar kelas...'
+    : classes.error
+      ? classes.error
+      : availableClasses.length === 0
+        ? courseId
+          ? 'Belum ada kelas untuk mata kuliah ini.'
+          : 'Pilih mata kuliah atau tambahkan kelas terlebih dahulu.'
+        : 'Kelas menentukan mata kuliah dan nama kelas sesi.';
+
+  const handleSelectCourse = (value: string) => {
+    setCourseId(value);
+    setErrors((current) => ({ ...current, courseId: undefined }));
+    if (!selectedClass || selectedClass.courseId !== value) {
+      setClassId('');
+    }
+  };
+
+  const handleSelectClass = (value: string) => {
+    const classDoc = classes.data.find((item) => item.id === value);
+    setClassId(value);
+    setErrors((current) => ({ ...current, classId: undefined }));
+    if (classDoc) {
+      setCourseId(classDoc.courseId);
+    }
+  };
 
   const handleStartDateChange = (nextDate: string) => {
     if (endDate === startDate) {
@@ -137,15 +175,26 @@ export default function SessionFormScreen() {
     setErrors({});
     setFormError(null);
 
+    if (!selectedClass) {
+      setErrors({ classId: 'Kelas wajib dipilih.' });
+      return;
+    }
+
+    if (!selectedCourse) {
+      setErrors({ courseId: 'Mata kuliah wajib dipilih.' });
+      return;
+    }
+
     if (!selectedLecturer) {
       setErrors({ lecturerId: 'Dosen pengampu wajib dipilih.' });
       return;
     }
 
     const input: SessionInput = {
-      courseId,
-      practicumName: selectedCourse?.name ?? practicumName,
-      className: className.trim(),
+      classId: selectedClass.id,
+      courseId: selectedClass.courseId,
+      practicumName: selectedCourse.name,
+      className: selectedClass.className,
       startsAt: combineDateTime(startDate, startTime),
       endsAt: combineDateTime(endDate, endTime),
       status: status as SessionStatus,
@@ -211,13 +260,14 @@ export default function SessionFormScreen() {
         hint="Nama praktikum mengikuti mata kuliah yang dipilih."
       />
 
-      <FormTextField
-        label="Nama kelas"
-        value={className}
-        onChangeText={setClassName}
-        placeholder="Contoh: A1"
-        autoCapitalize="characters"
-        error={errors.className}
+      <FormPickerField
+        label="Kelas"
+        value={selectedClass ? `Kelas ${selectedClass.className}` : ''}
+        placeholder="Pilih kelas"
+        error={errors.classId}
+        hint={classHint}
+        disabled={classes.loading}
+        onPress={() => setClassPickerVisible(true)}
       />
 
       <FormPickerField
@@ -269,8 +319,8 @@ export default function SessionFormScreen() {
       />
 
       <FormNote>
-        Waktu menggunakan zona waktu perangkat. Dosen wajib dipilih untuk sesi baru maupun
-        perubahan.
+        Kelas dan dosen wajib dipilih untuk sesi baru maupun perubahan. Waktu menggunakan
+        zona waktu perangkat.
       </FormNote>
 
       <OptionPicker
@@ -278,8 +328,17 @@ export default function SessionFormScreen() {
         title="Pilih Mata Kuliah"
         options={COURSE_OPTIONS}
         selectedValue={courseId}
-        onSelect={setCourseId}
+        onSelect={handleSelectCourse}
         onClose={() => setCoursePickerVisible(false)}
+      />
+
+      <OptionPicker
+        visible={classPickerVisible}
+        title="Pilih Kelas"
+        options={classOptions}
+        selectedValue={classId}
+        onSelect={handleSelectClass}
+        onClose={() => setClassPickerVisible(false)}
       />
 
       <OptionPicker
