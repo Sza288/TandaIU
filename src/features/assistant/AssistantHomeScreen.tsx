@@ -12,7 +12,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import BottomNav from '../../components/BottomNav';
 import RoleScreenHeader from '../../components/RoleScreenHeader';
-import { assistantIdentity } from '../../data/assistantIdentity';
+import { useAuthSession } from '../auth/AuthSessionContext';
 import { useAttendance } from '../../state/AttendanceContext';
 import { colors, fonts, radius, shadows, spacing } from '../../theme';
 
@@ -27,6 +27,9 @@ function getInitials(name: string) {
 
 export default function AssistantHomeScreen() {
   const { sessions } = useAttendance();
+  const session = useAuthSession();
+  const profile = session?.status === 'authenticated' ? session.profile : null;
+  const name = profile?.name ?? 'Akun asisten';
 
   const activeSessions = useMemo(
     () => sessions.filter((s) => s.status === 'dibuka'),
@@ -65,6 +68,10 @@ export default function AssistantHomeScreen() {
   };
 
   const goToRiwayat = () => router.push('/assistant/riwayat');
+  const goToPermits = () => router.push('/assistant/permits');
+  const goToReviews = () => router.push('/assistant/reviews');
+
+  const goToKelola = () => router.push('/assistant/manage');
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
@@ -77,12 +84,15 @@ export default function AssistantHomeScreen() {
 
         <View style={styles.identityCard}>
           <View style={styles.identityCopy}>
-            <Text style={styles.greeting}>Halo, {assistantIdentity.name}!</Text>
-            <Text style={styles.identityMeta}>{assistantIdentity.studentCode}</Text>
-            <Text style={styles.identityMeta}>{assistantIdentity.role}</Text>
+            <Text style={styles.greeting}>Halo, {name}!</Text>
+            {profile?.studentCode ? (
+              <Text style={styles.identityMeta}>{profile.studentCode}</Text>
+            ) : null}
+            {profile?.email ? <Text style={styles.identityMeta}>{profile.email}</Text> : null}
+            <Text style={styles.identityMeta}>Asisten</Text>
           </View>
           <View style={styles.avatar}>
-            <Text style={styles.avatarText}>{getInitials(assistantIdentity.name)}</Text>
+            <Text style={styles.avatarText}>{getInitials(name)}</Text>
           </View>
         </View>
 
@@ -131,6 +141,24 @@ export default function AssistantHomeScreen() {
             title="Riwayat"
             caption="Praktikum yang telah selesai"
             onPress={goToRiwayat}
+          />
+          <QuickCard
+            icon="document-text-outline"
+            title="Review Izin"
+            caption="Tinjau pengajuan izin praktikan"
+            onPress={goToPermits}
+          />
+          <QuickCard
+            icon="chatbubbles-outline"
+            title="Ulasan Praktikan"
+            caption="Baca ulasan beserta sentimen AI"
+            onPress={goToReviews}
+          />
+          <QuickCard
+            icon="settings-outline"
+            title="Kelola Praktikum"
+            caption="Atur kelas, jadwal, dan sesi"
+            onPress={goToKelola}
           />
         </View>
 

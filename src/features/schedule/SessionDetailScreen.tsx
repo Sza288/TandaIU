@@ -1,7 +1,7 @@
 import * as Linking from 'expo-linking';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import {
   Alert,
   Platform,
@@ -19,12 +19,14 @@ import BottomNav from '../../components/BottomNav';
 import ConfirmationModal from '../../components/ConfirmationModal';
 import { SupportContactCard } from '../../components/DashboardWidgets';
 import StatusBadge from '../../components/StatusBadge';
-import { getPraktikanIdsForSession } from '../../data/sessionEnrollments';
+import { getPraktikanIdsForSession, getSessionIdsForPraktikan } from '../../data/sessionEnrollments';
 import { praktikans } from '../../data/praktikans';
 import { useAttendance } from '../../state/AttendanceContext';
+import { useAuthSession } from '../auth/AuthSessionContext';
+import { getAuthenticatedPraktikanIdentity } from '../praktikan/authenticatedIdentity';
 import { formatDateLong, formatTime } from '../../utils/format';
 import { getLabLabel, getMeetingNumber } from '../../utils/session';
-import { getCourseById, getPraktikanById } from '../../utils/academic';
+import { getCourseById } from '../../utils/academic';
 import { colors, fonts, radius, shadows, spacing } from '../../theme';
 import { Attendance, ExcuseReason, Praktikan } from '../../types';
 
@@ -77,27 +79,25 @@ function InfoRow({
 }
 
 export default function SessionDetailScreen() {
-  const params = useLocalSearchParams<{ id: string | string[]; role?: string | string[] }>();
+  const params = useLocalSearchParams<{ id: string | string[] }>();
   const sessionId = Array.isArray(params.id) ? params.id[0] : params.id;
-  const {
-    sessions,
-    attendances,
-    activeRole,
-    activePraktikanId,
-    setActiveRole,
-    openSession,
-    closeSession,
-    checkIn,
-    markExcused,
-  } = useAttendance();
+  const { sessions, attendances, openSession, closeSession, checkIn, markExcused } = useAttendance();
+  const authSession = useAuthSession();
+  const profile = authSession?.status === 'authenticated' ? authSession.profile : null;
+  const activeRole = profile?.role ?? null;
+  const activePraktikan = getAuthenticatedPraktikanIdentity(profile);
+  const activePraktikanId = activePraktikan?.localScheduleId ?? null;
   const session = sessions.find((item) => item.id === sessionId);
   const sessionCourse = session ? getCourseById(session.courseId) : undefined;
-  const linkedRole = Array.isArray(params.role) ? params.role[0] : params.role;
-  const activePraktikan = getPraktikanById(activePraktikanId);
-  const isAssistant = activeRole === 'assistant';
+  const isAssistant = activeRole === 'asisten';
   const activeAttendance = attendances.find(
     (attendance) =>
       attendance.sessionId === sessionId && attendance.praktikanId === activePraktikanId,
+  );
+  const isEnrolledPraktikan = Boolean(
+    activePraktikanId
+    && sessionId
+    && getSessionIdsForPraktikan(activePraktikanId).includes(sessionId),
   );
   const detailScrollRef = useRef<ScrollViewInstance | null>(null);
   const rosterOffset = useRef(0);
@@ -139,12 +139,6 @@ export default function SessionDetailScreen() {
   const [pendingAction, setPendingAction] = useState<PendingSessionAction | null>(null);
   const [actionFeedback, setActionFeedback] = useState<ActionFeedback | null>(null);
 
-  useEffect(() => {
-    if (linkedRole === 'praktikan' && activeRole !== 'praktikan') {
-      setActiveRole('praktikan');
-    }
-  }, [activeRole, linkedRole, setActiveRole]);
-
   const handleBack = () => {
     if (router.canGoBack()) {
       router.back();
@@ -183,7 +177,7 @@ export default function SessionDetailScreen() {
       !session
       || session.status !== 'dibuka'
       || !activePraktikanId
-      || !activePraktikan
+      || !isEnrolledPraktikan
       || alreadyCheckedIn
     ) return;
     setActionFeedback(null);
@@ -328,9 +322,11 @@ export default function SessionDetailScreen() {
         ? 'Tutup Sesi Presensi'
         : 'Sesi Telah Ditutup'
     : activeRole === null
-      ? 'Pilih Peran'
+      ? 'Masuk kembali untuk melanjutkan'
     : !activePraktikanId
-      ? 'Pilih Identitas Praktikan'
+      ? 'Data pendaftaran akun belum tersedia'
+    : !isEnrolledPraktikan
+      ? 'Tidak terdaftar di sesi ini'
       : alreadyCheckedIn
         ? activeAttendance?.status === 'izin' ? 'Izin Tercatat' : 'Sudah Presensi'
         : session?.status === 'dibuka'
@@ -341,9 +337,14 @@ export default function SessionDetailScreen() {
   const actionDisabled = !session
     || activeRole === null
     || (isAssistant && session.status === 'ditutup')
-    || (!isAssistant && (!activePraktikanId || alreadyCheckedIn || session.status !== 'dibuka'));
+    || (!isAssistant && (
+      !activePraktikanId
+      || !isEnrolledPraktikan
+      || alreadyCheckedIn
+      || session.status !== 'dibuka'
+    ));
   const actionHint = activeRole === null
-    ? 'Pilih peran terlebih dahulu untuk melihat aksi sesi.'
+    ? 'Sesi autentikasi belum tersedia. Silakan masuk kembali.'
     : isAssistant
       ? session?.status === 'terjadwal'
         ? 'Buka sesi saat praktikum dimulai.'
@@ -351,7 +352,9 @@ export default function SessionDetailScreen() {
           ? 'Tutup sesi setelah praktikum selesai.'
           : 'Sesi ini sudah ditutup.'
       : !activePraktikanId
-        ? 'Pilih identitas praktikan dari menu Profil terlebih dahulu.'
+        ? 'Data enrollment akun belum tersedia untuk dihubungkan ke sesi lokal.'
+      : !isEnrolledPraktikan
+        ? 'Akun ini tidak terdaftar pada praktikum tersebut.'
         : alreadyCheckedIn
           ? activeAttendance?.status === 'izin'
             ? 'Status izinnya sudah tercatat untuk sesi ini.'

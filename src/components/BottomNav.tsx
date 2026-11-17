@@ -1,8 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, usePathname } from 'expo-router';
-import { Alert, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useAttendance } from '../state/AttendanceContext';
+import { useAuthSession } from '../features/auth/AuthSessionContext';
+import { getDashboardPath } from '../features/auth/authTypes';
 import { colors, fonts } from '../theme';
 
 type MainTab = 'beranda' | 'jadwal' | 'riwayat' | 'profil';
@@ -39,25 +40,20 @@ export default function BottomNav() {
   const routerPath = usePathname();
   const active = getActiveTab(routerPath);
   const insets = useSafeAreaInsets();
-  const { activeRole } = useAttendance();
+  const session = useAuthSession();
+  const role = session?.status === 'authenticated' ? session.profile.role : null;
 
   const handlePress = (tab: MainTab) => {
     if (tab === active) return;
 
     if (tab === 'beranda') {
-      if (activeRole === 'assistant') {
-        router.replace('/assistant');
-      } else if (activeRole === 'praktikan') {
-        router.replace('/praktikan');
-      } else {
-        router.replace('/role');
-      }
+      router.replace(role ? getDashboardPath(role) : '/');
       return;
     }
 
     if (tab === 'jadwal') {
-      if (!activeRole) {
-        router.replace('/role');
+      if (!role) {
+        router.replace('/');
         return;
       }
       router.replace('/schedule');
@@ -65,19 +61,18 @@ export default function BottomNav() {
     }
 
     if (tab === 'riwayat') {
-      if (activeRole === 'assistant') {
+      if (role === 'asisten') {
         router.replace('/assistant/riwayat');
-      } else if (activeRole === 'praktikan') {
+      } else if (role === 'praktikan') {
         router.replace('/praktikan/riwayat');
       } else {
-        router.replace('/role');
+        router.replace('/');
       }
       return;
     }
 
-    if (!activeRole) {
-      Alert.alert('Profil', 'Pilih peran terlebih dahulu.');
-      router.replace('/role');
+    if (!role) {
+      router.replace('/');
       return;
     }
     router.replace('/profile');
