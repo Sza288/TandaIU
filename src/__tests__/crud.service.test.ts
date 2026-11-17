@@ -1,4 +1,4 @@
-import { addDoc, deleteDoc, getDocs, setDoc } from 'firebase/firestore';
+import { addDoc, deleteDoc, getDoc, getDocs, setDoc } from 'firebase/firestore';
 
 import { dosen } from '../data/dosen';
 import {
@@ -31,6 +31,7 @@ jest.mock('firebase/firestore', () => ({
 jest.mock('../lib/firebase', () => ({ db: {} }));
 
 const validSession: SessionInput = {
+  classId: 'c1',
   courseId: 'struktur-data',
   practicumName: 'Praktikum Struktur Data',
   className: 'A1',
@@ -89,6 +90,8 @@ describe('validateSessionInput', () => {
   });
 
   it('rejects empty or whitespace-only fields', () => {
+    expect(() => validateSessionInput({ ...validSession, classId: '' })).toThrow();
+    expect(() => validateSessionInput({ ...validSession, classId: '   ' })).toThrow();
     expect(() => validateSessionInput({ ...validSession, courseId: '' })).toThrow();
     expect(() => validateSessionInput({ ...validSession, courseId: '   ' })).toThrow();
     expect(() =>
@@ -121,6 +124,15 @@ describe('createSession lecturer validation', () => {
   });
 
   it('writes once for a valid session input', async () => {
+    (getDoc as jest.Mock).mockResolvedValue({
+      id: validSession.classId,
+      exists: () => true,
+      data: () => ({
+        courseId: validSession.courseId,
+        className: validSession.className,
+        createdAt: '2026-10-01T00:00:00+07:00',
+      }),
+    });
     (addDoc as jest.Mock).mockResolvedValue({ id: 's1' });
 
     await expect(createSession(validSession)).resolves.toMatchObject({ id: 's1' });
