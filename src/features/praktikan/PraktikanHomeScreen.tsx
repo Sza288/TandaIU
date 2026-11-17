@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import {
+  ActivityIndicator,
   ScrollView,
   StyleSheet,
   Text,
@@ -11,9 +12,11 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import BottomNav from '../../components/BottomNav';
 import PracticumIcon from '../../components/PracticumIcon';
 import RoleScreenHeader from '../../components/RoleScreenHeader';
+import SessionCard from '../../components/SessionCard';
 import StatusBadge from '../../components/StatusBadge';
-import { getSessionIdsForPraktikan } from '../../data/sessionEnrollments';
-import { useAttendance } from '../../state/AttendanceContext';
+import { usePraktikanAttendance } from '../../hooks/useAttendanceRecords';
+import { useEnrollments } from '../../hooks/useEnrollments';
+import { useSessions } from '../../hooks/useSessions';
 import { useAuthSession } from '../auth/AuthSessionContext';
 import { colors, fonts, radius, shadows, spacing } from '../../theme';
 import { PracticumSession } from '../../types';
@@ -22,20 +25,31 @@ import { getAuthenticatedPraktikanIdentity } from './authenticatedIdentity';
 import { deriveOpenSessions } from './praktikan.utils';
 
 export default function PraktikanHomeScreen() {
-  const { sessions, attendances } = useAttendance();
-  const session = useAuthSession();
-  const profile = session?.status === 'authenticated' ? session.profile : null;
+  const authSession = useAuthSession();
+  const profile = authSession?.status === 'authenticated' ? authSession.profile : null;
   const activePraktikan = getAuthenticatedPraktikanIdentity(profile);
-  const activePraktikanId = activePraktikan?.localScheduleId ?? null;
-
-  const openSessions = activePraktikanId
-    ? deriveOpenSessions(
-        sessions,
-        attendances,
-        activePraktikanId,
-        new Set(getSessionIdsForPraktikan(activePraktikanId)),
-      )
-    : [];
+  const activePraktikanId = profile?.role === 'praktikan' ? profile.uid : null;
+  const sessionResult = useSessions();
+  const enrollmentResult = useEnrollments(
+    activePraktikanId ? { praktikanId: activePraktikanId } : undefined,
+  );
+  const attendanceResult = usePraktikanAttendance(activePraktikanId);
+  const enrolledClassIds = new Set(
+    enrollmentResult.data.map((enrollment) => enrollment.classId),
+  );
+  const enrolledSessions = sessionResult.data.filter(
+    (session) => session.classId && enrolledClassIds.has(session.classId),
+  );
+  const enrolledSessionIds = new Set(enrolledSessions.map((session) => session.id));
+  const openSessions = deriveOpenSessions(
+    enrolledSessions,
+    attendanceResult.data,
+    activePraktikanId,
+    enrolledSessionIds,
+  );
+  const enrollmentLoading = enrollmentResult.loading || sessionResult.loading;
+  const enrollmentError = enrollmentResult.error ?? sessionResult.error ?? attendanceResult.error;
+  const hasEnrollment = enrollmentResult.data.length > 0;
 
   const handleOpenSchedule = () => router.push('/schedule');
   const handleOpenHistory = () => router.push('/praktikan/riwayat');
@@ -99,7 +113,35 @@ export default function PraktikanHomeScreen() {
                 </View>
               </View>
 
-              {openSessions.length === 0 ? (
+              {enrollmentLoading ? (
+                <View style={styles.emptySessionCard}>
+                  <ActivityIndicator color={colors.primary} />
+                  <Text style={styles.emptySessionDescription}>
+                    Memuat sesi dan data pendaftaran dari Firestore...
+                  </Text>
+                </View>
+              ) : enrollmentError ? (
+                <View style={styles.emptySessionCard}>
+                  <View style={styles.emptySessionIcon}>
+                    <Ionicons name="cloud-offline-outline" size={24} color={colors.danger} />
+                  </View>
+                  <Text style={styles.emptySessionTitle}>Jadwal tidak dapat dimuat</Text>
+                  <Text style={styles.emptySessionDescription}>{enrollmentError}</Text>
+                  <TouchableOpacity
+                    style={styles.secondaryAction}
+                    onPress={() => {
+                      sessionResult.retry();
+                      enrollmentResult.retry();
+                      attendanceResult.retry();
+                    }}
+                    activeOpacity={0.85}
+                    accessibilityRole="button"
+                    accessibilityLabel="Coba muat ulang jadwal"
+                  >
+                    <Text style={styles.secondaryActionText}>Coba Lagi</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : openSessions.length === 0 ? (
                 <View style={styles.emptySessionCard}>
                   <View style={styles.emptySessionIcon}>
                     <Ionicons name="calendar-clear-outline" size={24} color={colors.primary} />
@@ -108,7 +150,9 @@ export default function PraktikanHomeScreen() {
                     Tidak ada sesi terbuka yang menunggu presensi
                   </Text>
                   <Text style={styles.emptySessionDescription}>
-                    Data enrollment akun belum tersedia. Jadwal demo lokal tidak ditampilkan sebagai sesi terdaftar.
+                    {hasEnrollment
+                      ? 'Saat ini tidak ada sesi terbuka yang belum kamu ikuti.'
+                      : 'Data enrollment akun belum tersedia. Hubungi asisten untuk menghubungkan akun ke kelas praktikum.'}
                   </Text>
                   <TouchableOpacity
                     style={styles.secondaryAction}
@@ -128,6 +172,40 @@ export default function PraktikanHomeScreen() {
                       session={session}
                       onPress={() => handleOpenSession(session.id)}
                     />
+                  ))}
+                </View>
+              )}
+            </View>
+          ) : null}
+
+          {activePraktikan && hasEnrollment ? (
+            <View style={styles.section}>
+              <View style={styles.sectionHeading}>
+                <View style={styles.sectionCopy}>
+                  <Text style={styles.sectionTitle}>Sesi Praktikum Saya</Text>
+                  <Text style={styles.sectionSubtitle}>
+                    Seluruh sesi dari kelas yang kamu ikuti.
+                  </Text>
+                </View>
+                <View style={styles.countBadge}>
+                  <Text style={styles.countText}>{enrolledSessions.length}</Text>
+                </View>
+              </View>
+
+              {enrolledSessions.length === 0 ? (
+                <View style={styles.emptySessionCard}>
+                  <View style={styles.emptySessionIcon}>
+                    <Ionicons name="calendar-clear-outline" size={24} color={colors.primary} />
+                  </View>
+                  <Text style={styles.emptySessionTitle}>Belum ada sesi untuk kelasmu</Text>
+                  <Text style={styles.emptySessionDescription}>
+                    Sesi akan muncul di sini setelah asisten membuatnya untuk kelas yang kamu ikuti.
+                  </Text>
+                </View>
+              ) : (
+                <View style={styles.sessionList}>
+                  {enrolledSessions.map((item) => (
+                    <SessionCard key={item.id} session={item} role="praktikan" />
                   ))}
                 </View>
               )}

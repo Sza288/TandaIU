@@ -1,29 +1,44 @@
 import { useState } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Circle, Path } from 'react-native-svg';
 import BottomNav from '../../components/BottomNav';
 import SessionCard from '../../components/SessionCard';
-import { getSessionIdsForPraktikan } from '../../data/sessionEnrollments';
-import { useAttendance } from '../../state/AttendanceContext';
+import { usePraktikanAttendance } from '../../hooks/useAttendanceRecords';
+import { useEnrollments } from '../../hooks/useEnrollments';
+import { useSessions } from '../../hooks/useSessions';
 import { useAuthSession } from '../auth/AuthSessionContext';
 import { getAuthenticatedPraktikanIdentity } from '../praktikan/authenticatedIdentity';
 import { colors, fonts, radius, shadows, spacing } from '../../theme';
 
 export default function ScheduleListScreen() {
-  const { sessions, attendances } = useAttendance();
-  const session = useAuthSession();
-  const profile = session?.status === 'authenticated' ? session.profile : null;
+  const authSession = useAuthSession();
+  const profile = authSession?.status === 'authenticated' ? authSession.profile : null;
   const activeRole = profile?.role ?? null;
   const activePraktikan = getAuthenticatedPraktikanIdentity(profile);
-  const activePraktikanId = activePraktikan?.localScheduleId ?? null;
+  const activePraktikanId = activeRole === 'praktikan' ? profile?.uid ?? null : null;
   const [query, setQuery] = useState('');
-  const enrolledSessionIds = new Set(
-    activePraktikanId ? getSessionIdsForPraktikan(activePraktikanId) : [],
+
+  const sessionResult = useSessions();
+  const enrollmentResult = useEnrollments(
+    activePraktikanId ? { praktikanId: activePraktikanId } : undefined,
   );
-  const enrolledSessions = sessions.filter((session) => enrolledSessionIds.has(session.id));
+  const attendanceResult = usePraktikanAttendance(activePraktikanId);
+  const sessions = sessionResult.data;
+  const enrolledClassIds = new Set(enrollmentResult.data.map((enrollment) => enrollment.classId));
+  const enrolledSessions = sessions.filter(
+    (session) => session.classId && enrolledClassIds.has(session.classId),
+  );
   const roleSessions = activeRole === 'asisten'
     ? sessions
     : activeRole === 'praktikan'
@@ -34,17 +49,25 @@ export default function ScheduleListScreen() {
     [session.practicumName, session.className]
       .some((value) => value.toLocaleLowerCase('id-ID').includes(normalizedQuery)),
   );
+  const attendedSessionIds = new Set(
+    attendanceResult.data.map((attendance) => attendance.sessionId),
+  );
   const outstandingAttendanceCount = activeRole === 'praktikan' && activePraktikanId
-    ? enrolledSessions.filter((session) =>
-      !attendances.some((attendance) =>
-        attendance.sessionId === session.id && attendance.praktikanId === activePraktikanId,
-      ),
-    ).length
+    ? enrolledSessions.filter((session) => !attendedSessionIds.has(session.id)).length
     : 0;
   const assistantScheduledCount = activeRole === 'asisten'
     ? sessions.filter((session) => session.status === 'terjadwal').length
     : 0;
-  const missingEnrollmentMapping = activeRole === 'praktikan' && !activePraktikanId;
+  const loading = sessionResult.loading
+    || (activeRole === 'praktikan' && enrollmentResult.loading)
+    || (activeRole === 'praktikan' && attendanceResult.loading);
+  const dataError = sessionResult.error
+    ?? (activeRole === 'praktikan' ? enrollmentResult.error : null)
+    ?? (activeRole === 'praktikan' ? attendanceResult.error : null);
+  const missingEnrollmentMapping = activeRole === 'praktikan'
+    && !loading
+    && !dataError
+    && enrollmentResult.data.length === 0;
   const missingRole = activeRole === null;
 
   const handleBack = () => {
@@ -133,11 +156,15 @@ export default function ScheduleListScreen() {
               {missingRole
                 ? 'Sesi autentikasi belum tersedia. Silakan masuk kembali.'
                 : activeRole === 'praktikan'
-                ? missingEnrollmentMapping
-                  ? 'Data pendaftaran akun belum terhubung ke jadwal praktikum.'
-                  : outstandingAttendanceCount > 0
-                    ? `Ada ${outstandingAttendanceCount} sesi terdaftar yang belum kamu ikuti.`
-                    : 'Kamu sudah mengikuti semua sesi yang terdaftar.'
+                ? loading
+                  ? 'Memuat data pendaftaran dan jadwal praktikum...'
+                  : dataError
+                    ? 'Data pendaftaran atau jadwal belum dapat dimuat.'
+                    : missingEnrollmentMapping
+                      ? 'Data pendaftaran akun belum terhubung ke jadwal praktikum.'
+                      : outstandingAttendanceCount > 0
+                        ? `Ada ${outstandingAttendanceCount} sesi terdaftar yang belum kamu ikuti.`
+                        : 'Kamu sudah mengikuti semua sesi yang terdaftar.'
                 : assistantScheduledCount > 0
                   ? `${assistantScheduledCount} sesi masih terjadwal dan menunggu dibuka.`
                   : 'Tidak ada sesi terjadwal saat ini.'}
@@ -165,7 +192,15 @@ export default function ScheduleListScreen() {
           <View>
             <Text style={styles.sectionTitle}>Jadwal Praktikum</Text>
             <Text style={styles.sectionSubtitle}>
-              {missingRole ? 'Peran diperlukan' : missingEnrollmentMapping ? 'Pendaftaran belum tersedia' : `${visibleSessions.length} sesi tersedia`}
+              {missingRole
+                ? 'Peran diperlukan'
+                : loading
+                  ? 'Memuat jadwal'
+                  : dataError
+                    ? 'Jadwal tidak dapat dimuat'
+                    : missingEnrollmentMapping
+                      ? 'Pendaftaran belum tersedia'
+                      : `${visibleSessions.length} sesi tersedia`}
             </Text>
           </View>
         </View>
@@ -174,6 +209,16 @@ export default function ScheduleListScreen() {
           <EmptyScheduleState
             title="Sesi belum tersedia"
             description="Silakan kembali ke Landing Page dan masuk kembali."
+          />
+        ) : loading ? (
+          <View style={styles.loadingState}>
+            <ActivityIndicator color={colors.primary} />
+            <Text style={styles.loadingText}>Memuat jadwal dari Firestore...</Text>
+          </View>
+        ) : dataError ? (
+          <EmptyScheduleState
+            title="Jadwal tidak dapat dimuat"
+            description={dataError}
           />
         ) : missingEnrollmentMapping ? (
           <EmptyScheduleState
@@ -216,6 +261,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.xl,
     paddingTop: spacing.sm,
     paddingBottom: spacing.xl,
+  },
+  loadingState: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    paddingVertical: spacing.xxxl,
+  },
+  loadingText: {
+    color: colors.textSecondary,
+    fontFamily: fonts.regular,
+    fontSize: 13,
   },
   header: {
     minHeight: 50,

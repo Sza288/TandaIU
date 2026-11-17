@@ -1,8 +1,9 @@
 import * as Linking from 'expo-linking';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   Platform,
   Pressable,
@@ -19,16 +20,23 @@ import BottomNav from '../../components/BottomNav';
 import ConfirmationModal from '../../components/ConfirmationModal';
 import { SupportContactCard } from '../../components/DashboardWidgets';
 import StatusBadge from '../../components/StatusBadge';
-import { getPraktikanIdsForSession, getSessionIdsForPraktikan } from '../../data/sessionEnrollments';
-import { praktikans } from '../../data/praktikans';
-import { useAttendance } from '../../state/AttendanceContext';
+import { useSessionAttendance } from '../../hooks/useAttendanceRecords';
+import { useEnrollments } from '../../hooks/useEnrollments';
+import { useSessions } from '../../hooks/useSessions';
+import type { CurrentUser } from '../../lib/currentSession';
+import {
+  checkIn,
+  closeSession,
+  openSession,
+  type AttendanceRecord,
+} from '../../services/attendanceService';
+import type { EnrollmentRecord } from '../../services/enrollmentService';
 import { useAuthSession } from '../auth/AuthSessionContext';
-import { getAuthenticatedPraktikanIdentity } from '../praktikan/authenticatedIdentity';
 import { formatDateLong, formatTime } from '../../utils/format';
 import { getLabLabel, getMeetingNumber } from '../../utils/session';
 import { getCourseById } from '../../utils/academic';
 import { colors, fonts, radius, shadows, spacing } from '../../theme';
-import { Attendance, ExcuseReason, Praktikan } from '../../types';
+import type { MutationResult } from '../../types';
 
 type PendingSessionAction = 'open' | 'close' | 'checkin';
 
@@ -81,63 +89,136 @@ function InfoRow({
 export default function SessionDetailScreen() {
   const params = useLocalSearchParams<{ id: string | string[] }>();
   const sessionId = Array.isArray(params.id) ? params.id[0] : params.id;
-  const { sessions, attendances, openSession, closeSession, checkIn, markExcused } = useAttendance();
   const authSession = useAuthSession();
   const profile = authSession?.status === 'authenticated' ? authSession.profile : null;
   const activeRole = profile?.role ?? null;
-  const activePraktikan = getAuthenticatedPraktikanIdentity(profile);
-  const activePraktikanId = activePraktikan?.localScheduleId ?? null;
-  const session = sessions.find((item) => item.id === sessionId);
+  const activePraktikanId = activeRole === 'praktikan' ? profile?.uid ?? null : null;
+  const sessionResult = useSessions();
+  const session = sessionResult.data.find((item) => item.id === sessionId);
   const sessionCourse = session ? getCourseById(session.courseId) : undefined;
   const isAssistant = activeRole === 'asisten';
-  const activeAttendance = attendances.find(
-    (attendance) =>
-      attendance.sessionId === sessionId && attendance.praktikanId === activePraktikanId,
+  const praktikanEnrollmentResult = useEnrollments(
+    activePraktikanId ? { praktikanId: activePraktikanId } : undefined,
+  );
+  const classEnrollmentResult = useEnrollments(
+    isAssistant && session?.classId ? { classId: session.classId } : undefined,
+  );
+  const attendanceResult = useSessionAttendance(sessionId);
+  const currentUser = useMemo<CurrentUser | null>(() => {
+    if (!profile) return null;
+    return {
+      uid: profile.uid,
+      name: profile.name,
+      email: profile.email,
+      role: profile.role,
+      ...(profile.studentCode ? { studentCode: profile.studentCode } : {}),
+    };
+  }, [profile]);
+  const activeAttendance = attendanceResult.data.find(
+    (attendance) => attendance.praktikanId === activePraktikanId,
   );
   const isEnrolledPraktikan = Boolean(
     activePraktikanId
-    && sessionId
-    && getSessionIdsForPraktikan(activePraktikanId).includes(sessionId),
+    && session?.classId
+    && praktikanEnrollmentResult.data.some(
+      (enrollment) => enrollment.classId === session.classId,
+    ),
   );
   const detailScrollRef = useRef<ScrollViewInstance | null>(null);
   const rosterOffset = useRef(0);
   const [statusCardSize, setStatusCardSize] = useState({ width: 0, height: 0 });
-  const enrolledPraktikans = session
-    ? getPraktikanIdsForSession(session.id)
-      .map((praktikanId) => praktikans.find((praktikan) => praktikan.id === praktikanId))
-      .filter((praktikan): praktikan is Praktikan => praktikan !== undefined)
-    : [];
-  const enrolledIds = new Set(enrolledPraktikans.map((praktikan) => praktikan.id));
-  const attendanceByPraktikan = new Map<string, Attendance>();
-  attendances.forEach((attendance) => {
-    if (attendance.sessionId === sessionId && enrolledIds.has(attendance.praktikanId)) {
-      attendanceByPraktikan.set(attendance.praktikanId, attendance);
-    }
-  });
-  const presentPraktikans = enrolledPraktikans.filter((praktikan) => {
-    const attendance = attendanceByPraktikan.get(praktikan.id);
+  const enrolledPraktikans: EnrollmentRecord[] = classEnrollmentResult.data;
+  const enrolledIds = new Set(enrolledPraktikans.map((praktikan) => praktikan.praktikanId));
+  const attendanceByPraktikan = useMemo(() => {
+    const map = new Map<string, AttendanceRecord>();
+    attendanceResult.data.forEach((attendance) => {
+      if (!enrolledIds.size || enrolledIds.has(attendance.praktikanId)) {
+        map.set(attendance.praktikanId, attendance);
+      }
+    });
+    return map;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [attendanceResult.data, enrolledPraktikans]);
+  /**
+   * Roster asisten. Data utama dari enrollment kelas; bila query enrollment
+   * ditolak Firestore Rules, presensi yang sudah tercatat tetap ditampilkan
+   * agar check-in praktikan tidak tampak hilang.
+   */
+  const rosterEntries = useMemo(() => {
+    const entries: {
+      praktikanId: string;
+      praktikanName: string;
+      semester?: number;
+    }[] = enrolledPraktikans.map((praktikan) => ({
+      praktikanId: praktikan.praktikanId,
+      praktikanName: praktikan.praktikanName,
+      semester: praktikan.semester,
+    }));
+    const known = new Set(entries.map((entry) => entry.praktikanId));
+    attendanceByPraktikan.forEach((attendance, praktikanId) => {
+      if (known.has(praktikanId)) return;
+      entries.push({
+        praktikanId,
+        praktikanName: attendance.praktikanName,
+      });
+    });
+    return entries;
+  }, [enrolledPraktikans, attendanceByPraktikan]);
+  const presentPraktikans = rosterEntries.filter((praktikan) => {
+    const attendance = attendanceByPraktikan.get(praktikan.praktikanId);
     return attendance !== undefined && attendance.status !== 'izin';
   });
-  const sickPraktikans = enrolledPraktikans.filter((praktikan) => {
-    const attendance = attendanceByPraktikan.get(praktikan.id);
+  const sickPraktikans = rosterEntries.filter((praktikan) => {
+    const attendance = attendanceByPraktikan.get(praktikan.praktikanId);
     return attendance?.status === 'izin' && attendance.excuseReason === 'sakit';
   });
-  const excusedPraktikans = enrolledPraktikans.filter((praktikan) => {
-    const attendance = attendanceByPraktikan.get(praktikan.id);
+  const excusedPraktikans = rosterEntries.filter((praktikan) => {
+    const attendance = attendanceByPraktikan.get(praktikan.praktikanId);
     return attendance?.status === 'izin' && attendance.excuseReason !== 'sakit';
   });
-  const notRecordedPraktikans = enrolledPraktikans.filter(
-    (praktikan) => !attendanceByPraktikan.has(praktikan.id),
+  const notRecordedPraktikans = rosterEntries.filter(
+    (praktikan) => !attendanceByPraktikan.has(praktikan.praktikanId),
   );
+  const enrollmentTotalKnown = enrolledPraktikans.length > 0;
   const presentPercentage = enrolledPraktikans.length === 0
     ? 0
     : (presentPraktikans.length / enrolledPraktikans.length) * 100;
   const recordedPercentage = enrolledPraktikans.length === 0
     ? 0
     : ((presentPraktikans.length + excusedPraktikans.length) / enrolledPraktikans.length) * 100;
+
+  const diagKey = `${sessionId ?? ''}|${attendanceResult.data.length}|${enrolledPraktikans.length}|${rosterEntries.length}`;
+  useEffect(() => {
+    if (!isAssistant) return;
+    if (typeof console === 'undefined') return;
+    console.log('[detail-sesi]', {
+      sessionId,
+      sesiStatus: session?.status ?? null,
+      attendanceDiterima: attendanceResult.data.length,
+      attendanceLoading: attendanceResult.loading,
+      attendanceError: attendanceResult.error,
+      enrollmentDiterima: enrolledPraktikans.length,
+      enrollmentLoading: classEnrollmentResult.loading,
+      enrollmentError: classEnrollmentResult.error,
+      lolosFilter: attendanceByPraktikan.size,
+      rosterTerbentuk: rosterEntries.length,
+      hadir: presentPraktikans.length,
+      izin: excusedPraktikans.length,
+      sakit: sickPraktikans.length,
+      belum: notRecordedPraktikans.length,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [diagKey]);
   const alreadyCheckedIn = activeAttendance !== undefined;
+  const enrollmentLoading = isAssistant
+    ? classEnrollmentResult.loading
+    : praktikanEnrollmentResult.loading;
+  const enrollmentError = isAssistant
+    ? classEnrollmentResult.error
+    : praktikanEnrollmentResult.error;
   const [pendingAction, setPendingAction] = useState<PendingSessionAction | null>(null);
   const [actionFeedback, setActionFeedback] = useState<ActionFeedback | null>(null);
+  const [submittingAction, setSubmittingAction] = useState(false);
 
   const handleBack = () => {
     if (router.canGoBack()) {
@@ -148,7 +229,7 @@ export default function SessionDetailScreen() {
   };
 
   const showActionResult = (
-    result: ReturnType<typeof openSession>,
+    result: MutationResult,
     successTitle: string,
     successMessage: string,
   ) => {
@@ -160,7 +241,7 @@ export default function SessionDetailScreen() {
   };
 
   const handleAssistantAction = () => {
-    if (!session) return;
+    if (!session || submittingAction) return;
     if (session.status === 'terjadwal') {
       setActionFeedback(null);
       setPendingAction('open');
@@ -179,104 +260,47 @@ export default function SessionDetailScreen() {
       || !activePraktikanId
       || !isEnrolledPraktikan
       || alreadyCheckedIn
+      || enrollmentLoading
+      || enrollmentError
+      || attendanceResult.loading
+      || submittingAction
     ) return;
     setActionFeedback(null);
     setPendingAction('checkin');
   };
 
-  const handleConfirmAction = () => {
+  const handleConfirmAction = async () => {
     const action = pendingAction;
-    if (!session || !action) return;
+    if (!session || !action || submittingAction) return;
     setPendingAction(null);
 
     if (action === 'open') {
-      showActionResult(
-        openSession(session.id),
-        'Sesi dibuka',
-        'Status sesi sudah diperbarui.',
-      );
+      setSubmittingAction(true);
+      const result = await openSession(session.id);
+      setSubmittingAction(false);
+      showActionResult(result, 'Sesi dibuka', 'Status sesi sudah diperbarui.');
       return;
     }
     if (action === 'close') {
+      setSubmittingAction(true);
+      const result = await closeSession(session.id);
+      setSubmittingAction(false);
+      showActionResult(result, 'Sesi ditutup', 'Sesi praktikum berhasil ditutup.');
+      return;
+    }
+    if (!currentUser || !isEnrolledPraktikan) {
       showActionResult(
-        closeSession(session.id),
-        'Sesi ditutup',
-        'Sesi praktikum berhasil ditutup.',
+        { ok: false, reason: 'Enrollment sesi ini belum terverifikasi.' },
+        '',
+        '',
       );
       return;
     }
-    if (activePraktikanId) {
-      showActionResult(
-        checkIn(session.id, activePraktikanId),
-        'Presensi berhasil.',
-        '',
-      );
-    }
-  };
 
-  const handleMarkExcused = (praktikan: Praktikan) => {
-    if (!session) return;
-    const confirmExcused = (reason: ExcuseReason) => {
-      const result = markExcused(session.id, praktikan.id, reason);
-      Alert.alert(
-        result.ok ? 'Status izin diperbarui' : 'Status izin tidak berhasil',
-        result.ok
-          ? `${praktikan.name} dicatat ${reason === 'sakit' ? 'sakit' : 'izin lainnya'}.`
-          : result.reason ?? 'Silakan coba lagi.',
-      );
-    };
-
-    Alert.alert(
-      'Konfirmasi status izin',
-      `Tetapkan status izin untuk ${praktikan.name}? Pilih alasan untuk menyimpan perubahan.`,
-      [
-        { text: 'Batal', style: 'cancel' },
-        { text: 'Sakit', onPress: () => confirmExcused('sakit') },
-        { text: 'Izin lainnya', onPress: () => confirmExcused('izin-lainnya') },
-      ],
-    );
-  };
-
-  const handleManualAttendance = (praktikan: Praktikan) => {
-    if (!session || session.status !== 'dibuka' || attendanceByPraktikan.has(praktikan.id)) return;
-
-    const saveExcusedStatus = (reason: ExcuseReason) => {
-      const result = markExcused(session.id, praktikan.id, reason);
-      Alert.alert(
-        result.ok ? 'Status presensi dicatat' : 'Status presensi tidak berhasil',
-        result.ok
-          ? `${praktikan.name} dicatat ${reason === 'sakit' ? 'sakit' : 'izin lainnya'}.`
-          : result.reason ?? 'Silakan coba lagi.',
-      );
-    };
-
-    Alert.alert(
-      'Presensi Manual',
-      `Pilih keterangan presensi untuk ${praktikan.name}.`,
-      [
-        { text: 'Batal', style: 'cancel' },
-        {
-          text: 'Hadir',
-          onPress: () => showActionResult(
-            checkIn(session.id, praktikan.id),
-            'Presensi berhasil dicatat',
-            `${praktikan.name} dicatat hadir.`,
-          ),
-        },
-        {
-          text: 'Izin / Sakit',
-          onPress: () => Alert.alert(
-            'Pilih Keterangan',
-            `Pilih keterangan untuk ${praktikan.name}.`,
-            [
-              { text: 'Batal', style: 'cancel' },
-              { text: 'Sakit', onPress: () => saveExcusedStatus('sakit') },
-              { text: 'Izin lainnya', onPress: () => saveExcusedStatus('izin-lainnya') },
-            ],
-          ),
-        },
-      ],
-    );
+    setSubmittingAction(true);
+    const result = await checkIn(session.id, currentUser);
+    setSubmittingAction(false);
+    showActionResult(result, 'Presensi berhasil.', '');
   };
 
   const shareAttendanceLink = async () => {
@@ -316,15 +340,21 @@ export default function SessionDetailScreen() {
   };
 
   const buttonLabel = isAssistant
-    ? session?.status === 'terjadwal'
-      ? 'Buka Sesi Praktikum'
-      : session?.status === 'dibuka'
-        ? 'Tutup Sesi Presensi'
-        : 'Sesi Telah Ditutup'
+    ? submittingAction
+      ? 'Memproses...'
+      : session?.status === 'terjadwal'
+        ? 'Buka Sesi Praktikum'
+        : session?.status === 'dibuka'
+          ? 'Tutup Sesi Presensi'
+          : 'Sesi Telah Ditutup'
     : activeRole === null
       ? 'Masuk kembali untuk melanjutkan'
     : !activePraktikanId
       ? 'Data pendaftaran akun belum tersedia'
+    : enrollmentLoading || attendanceResult.loading
+      ? 'Memeriksa data presensi...'
+    : enrollmentError
+      ? 'Data pendaftaran tidak dapat dimuat'
     : !isEnrolledPraktikan
       ? 'Tidak terdaftar di sesi ini'
       : alreadyCheckedIn
@@ -336,9 +366,13 @@ export default function SessionDetailScreen() {
             : 'Sesi Telah Ditutup';
   const actionDisabled = !session
     || activeRole === null
+    || submittingAction
     || (isAssistant && session.status === 'ditutup')
     || (!isAssistant && (
       !activePraktikanId
+      || enrollmentLoading
+      || Boolean(enrollmentError)
+      || attendanceResult.loading
       || !isEnrolledPraktikan
       || alreadyCheckedIn
       || session.status !== 'dibuka'
@@ -352,9 +386,15 @@ export default function SessionDetailScreen() {
           ? 'Tutup sesi setelah praktikum selesai.'
           : 'Sesi ini sudah ditutup.'
       : !activePraktikanId
-        ? 'Data enrollment akun belum tersedia untuk dihubungkan ke sesi lokal.'
+        ? 'Data enrollment akun belum tersedia untuk dihubungkan ke sesi.'
+      : enrollmentLoading
+        ? 'Memeriksa pendaftaran akun ke kelas sesi ini...'
+      : enrollmentError
+        ? enrollmentError
+      : attendanceResult.loading
+        ? 'Memeriksa apakah presensi sudah tercatat...'
       : !isEnrolledPraktikan
-        ? 'Akun ini tidak terdaftar pada praktikum tersebut.'
+        ? 'Akun ini tidak terdaftar pada kelas praktikum tersebut.'
         : alreadyCheckedIn
           ? activeAttendance?.status === 'izin'
             ? 'Status izinnya sudah tercatat untuk sesi ini.'
@@ -381,7 +421,7 @@ export default function SessionDetailScreen() {
       : pendingAction === 'checkin'
         ? {
           title: 'Konfirmasi presensi',
-          message: `Presensi sebagai ${activePraktikan?.name ?? 'praktikan'}? Waktu kehadiran akan dicatat.`,
+          message: `Presensi sebagai ${currentUser?.name ?? 'praktikan'}? Waktu kehadiran akan dicatat.`,
           confirmLabel: 'Konfirmasi',
           destructive: false,
         }
@@ -389,12 +429,24 @@ export default function SessionDetailScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
-      {!session ? (
+      {sessionResult.loading ? (
+        <View style={styles.missing}>
+          <View style={styles.missingCard}>
+            <ActivityIndicator color={colors.primary} />
+            <Text style={styles.missingTitle}>Memuat sesi...</Text>
+            <Text style={styles.missingCopy}>Detail sesi diambil langsung dari Firestore.</Text>
+          </View>
+        </View>
+      ) : !session ? (
         <View style={styles.missing}>
           <View style={styles.missingCard}>
             <Ionicons name="calendar-outline" size={38} color={colors.primary} />
-            <Text style={styles.missingTitle}>Sesi tidak ditemukan</Text>
-            <Text style={styles.missingCopy}>Sesi ini mungkin sudah tidak tersedia. Kembali ke jadwal untuk memilih sesi lain.</Text>
+            <Text style={styles.missingTitle}>
+              {sessionResult.error ? 'Sesi tidak dapat dimuat' : 'Sesi tidak ditemukan'}
+            </Text>
+            <Text style={styles.missingCopy}>
+              {sessionResult.error ?? 'Sesi ini mungkin sudah tidak tersedia. Kembali ke jadwal untuk memilih sesi lain.'}
+            </Text>
             <Pressable onPress={handleBack} style={styles.primaryButton} accessibilityRole="button">
               <Text style={styles.primaryButtonText}>Kembali ke jadwal</Text>
             </Pressable>
@@ -498,7 +550,9 @@ export default function SessionDetailScreen() {
                     <View>
                       <Text style={styles.attendanceTitle}>Statistik Presensi</Text>
                       <Text style={styles.attendanceSubtitle}>
-                        {enrolledPraktikans.length} mahasiswa terdaftar
+                        {enrollmentTotalKnown
+                          ? `${enrolledPraktikans.length} mahasiswa terdaftar`
+                          : `${presentPraktikans.length + excusedPraktikans.length} presensi tercatat`}
                       </Text>
                     </View>
                     <Pressable
@@ -523,20 +577,29 @@ export default function SessionDetailScreen() {
                       value={notRecordedPraktikans.length}
                       tone="warning"
                     />
-                    <AttendanceStat label="Total" value={enrolledPraktikans.length} />
+                    <AttendanceStat label="Total" value={enrollmentTotalKnown ? enrolledPraktikans.length : rosterEntries.length} />
                   </View>
 
-                  <View style={styles.percentageRow}>
-                    <Text style={styles.percentageLabel}>Persentase Hadir</Text>
-                    <Text style={styles.percentageValue}>{presentPercentage.toFixed(1)}%</Text>
-                  </View>
-                  <View style={styles.percentageRow}>
-                    <Text style={styles.percentageLabel}>Presensi Tercatat (Hadir + Izin + Sakit)</Text>
-                    <Text style={styles.percentageValue}>{recordedPercentage.toFixed(1)}%</Text>
-                  </View>
-                  <View style={styles.progressTrack}>
-                    <View style={[styles.progressFill, { width: `${recordedPercentage}%` }]} />
-                  </View>
+                  {enrollmentTotalKnown ? (
+                    <>
+                      <View style={styles.percentageRow}>
+                        <Text style={styles.percentageLabel}>Persentase Hadir</Text>
+                        <Text style={styles.percentageValue}>{presentPercentage.toFixed(1)}%</Text>
+                      </View>
+                      <View style={styles.percentageRow}>
+                        <Text style={styles.percentageLabel}>Presensi Tercatat (Hadir + Izin + Sakit)</Text>
+                        <Text style={styles.percentageValue}>{recordedPercentage.toFixed(1)}%</Text>
+                      </View>
+                      <View style={styles.progressTrack}>
+                        <View style={[styles.progressFill, { width: `${recordedPercentage}%` }]} />
+                      </View>
+                    </>
+                  ) : (
+                    <Text style={styles.actionHint}>
+                      Persentase kehadiran belum dapat dihitung karena daftar enrollment kelas
+                      belum dapat dibaca.
+                    </Text>
+                  )}
                 </View>
 
                 {session.status === 'dibuka' ? (
@@ -563,10 +626,18 @@ export default function SessionDetailScreen() {
                 >
                   <View style={styles.rosterHeading}>
                     <Text style={styles.rosterTitle}>Daftar Praktikan</Text>
-                    <Text style={styles.rosterCount}>{enrolledPraktikans.length} mahasiswa</Text>
+                    <Text style={styles.rosterCount}>
+                      {enrollmentLoading ? 'Memuat...' : `${rosterEntries.length} mahasiswa`}
+                    </Text>
                   </View>
-                  {enrolledPraktikans.map((praktikan) => {
-                    const attendance = attendanceByPraktikan.get(praktikan.id);
+                  {enrollmentError ? (
+                    <Text style={styles.actionHint}>
+                      Daftar praktikan lengkap belum dapat dimuat. Presensi yang sudah tercatat
+                      tetap ditampilkan di bawah.
+                    </Text>
+                  ) : null}
+                  {rosterEntries.map((praktikan) => {
+                    const attendance = attendanceByPraktikan.get(praktikan.praktikanId);
                     const isExcused = attendance?.status === 'izin';
                     const hasAttended = attendance !== undefined && !isExcused;
                     const statusLabel = isExcused
@@ -576,14 +647,16 @@ export default function SessionDetailScreen() {
                         : session.status === 'ditutup' ? 'Alpha' : 'Belum melakukan presensi';
 
                     return (
-                      <View key={praktikan.id} style={styles.personRow}>
+                      <View key={praktikan.praktikanId} style={styles.personRow}>
                         <View style={styles.personAvatar}>
-                          <Text style={styles.personInitial}>{praktikan.name.charAt(0)}</Text>
+                          <Text style={styles.personInitial}>
+                            {praktikan.praktikanName.charAt(0)}
+                          </Text>
                         </View>
                         <View style={styles.personCopy}>
-                          <Text style={styles.personName}>{praktikan.name}</Text>
+                          <Text style={styles.personName}>{praktikan.praktikanName}</Text>
                           <Text style={styles.personDetail}>
-                            Semester {praktikan.semester} · {statusLabel}
+                            {praktikan.semester ? `Semester ${praktikan.semester} · ` : ''}{statusLabel}
                           </Text>
                         </View>
                         <Ionicons
@@ -591,25 +664,6 @@ export default function SessionDetailScreen() {
                           size={20}
                           color={isExcused ? colors.primary : hasAttended ? colors.success : colors.warning}
                         />
-                        {session.status === 'dibuka' && (isExcused ? (
-                          <Pressable
-                            accessibilityRole="button"
-                            accessibilityLabel={`Ubah alasan izin untuk ${praktikan.name}`}
-                            onPress={() => handleMarkExcused(praktikan)}
-                            style={styles.excuseButton}
-                          >
-                            <Text style={styles.excuseButtonText}>Ubah</Text>
-                          </Pressable>
-                        ) : !hasAttended ? (
-                          <Pressable
-                            accessibilityRole="button"
-                            accessibilityLabel={`Catat presensi manual untuk ${praktikan.name}`}
-                            onPress={() => handleManualAttendance(praktikan)}
-                            style={styles.excuseButton}
-                          >
-                            <Text style={styles.excuseButtonText}>Catat</Text>
-                          </Pressable>
-                        ) : null)}
                       </View>
                     );
                   })}
@@ -693,7 +747,7 @@ export default function SessionDetailScreen() {
         confirmLabel={actionConfirmation?.confirmLabel ?? 'Konfirmasi'}
         destructive={actionConfirmation?.destructive ?? false}
         onCancel={() => setPendingAction(null)}
-        onConfirm={handleConfirmAction}
+        onConfirm={() => void handleConfirmAction()}
       />
       <BottomNav />
     </SafeAreaView>
