@@ -1,0 +1,22 @@
+{
+  "accounts": [
+    {
+      "label": "husni-testing-1",
+      "email": "",
+      "uid": "",
+      "studentCode": ""
+    },
+    {
+      "label": "husni-testing-2",
+      "email": "",
+      "uid": "",
+      "studentCode": ""
+    },
+    {
+      "label": "husni-testing-3",
+      "email": "",
+      "uid": "",
+      "studentCode": ""
+    }
+  ]
+}

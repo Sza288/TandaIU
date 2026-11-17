@@ -6,14 +6,14 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import BottomNav from '../../components/BottomNav';
 import StatusBadge from '../../components/StatusBadge';
 import AssistantPageHeader from './AssistantPageHeader';
-import { useAttendance } from '../../state/AttendanceContext';
+import { useSessions } from '../../hooks/useSessions';
 import { colors, fonts, radius, shadows, spacing } from '../../theme';
 import { formatDateLong, formatTimeRange } from '../../utils/format';
 import { getCourseById } from '../../utils/academic';
 import { getMeetingNumber } from '../../utils/session';
 
 export default function AssistantHistoryScreen() {
-  const { sessions } = useAttendance();
+  const { data: sessions } = useSessions();
 
   const closedSessions = useMemo(
     () =>

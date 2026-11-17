@@ -12,8 +12,9 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import BottomNav from '../../components/BottomNav';
 import RoleScreenHeader from '../../components/RoleScreenHeader';
+import SessionCard from '../../components/SessionCard';
 import { useAuthSession } from '../auth/AuthSessionContext';
-import { useAttendance } from '../../state/AttendanceContext';
+import { useSessions } from '../../hooks/useSessions';
 import { colors, fonts, radius, shadows, spacing } from '../../theme';
 
 function getInitials(name: string) {
@@ -26,7 +27,8 @@ function getInitials(name: string) {
 }
 
 export default function AssistantHomeScreen() {
-  const { sessions } = useAttendance();
+  const sessionResult = useSessions();
+  const sessions = sessionResult.data;
   const session = useAuthSession();
   const profile = session?.status === 'authenticated' ? session.profile : null;
   const name = profile?.name ?? 'Akun asisten';
@@ -112,6 +114,26 @@ export default function AssistantHomeScreen() {
             label="Selesai"
             value={String(closedSessions.length)}
           />
+        </View>
+
+        <View style={styles.sectionRow}>
+          <Text style={styles.sectionTitle}>Sesi Praktikum</Text>
+          <Text style={styles.sectionCount}>{sessions.length} sesi</Text>
+        </View>
+        <View style={styles.sessionList}>
+          {sessionResult.loading ? (
+            <Text style={styles.sessionHint}>Memuat sesi dari Firestore...</Text>
+          ) : sessionResult.error ? (
+            <Text style={styles.sessionError}>{sessionResult.error}</Text>
+          ) : sessions.length === 0 ? (
+            <Text style={styles.sessionHint}>
+              Belum ada sesi praktikum. Buat sesi dari menu Kelola Praktikum.
+            </Text>
+          ) : (
+            sessions.map((item) => (
+              <SessionCard key={item.id} session={item} role="asisten" />
+            ))
+          )}
         </View>
 
         <View style={styles.sectionRow}>
@@ -302,6 +324,29 @@ const styles = StyleSheet.create({
     fontSize: 17,
   },
 
+  sectionCount: {
+    color: colors.textMuted,
+    fontFamily: fonts.regular,
+    fontSize: 11,
+  },
+  sessionList: {
+    gap: spacing.sm,
+    paddingHorizontal: spacing.xl,
+  },
+  sessionHint: {
+    color: colors.textSecondary,
+    fontFamily: fonts.regular,
+    fontSize: 12,
+    lineHeight: 18,
+    paddingVertical: spacing.md,
+  },
+  sessionError: {
+    color: colors.danger,
+    fontFamily: fonts.semiBold,
+    fontSize: 12,
+    lineHeight: 18,
+    paddingVertical: spacing.md,
+  },
   quickGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',

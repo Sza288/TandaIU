@@ -14,11 +14,10 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import BottomNav from '../../components/BottomNav';
 import ScreenHeader from '../../components/ScreenHeader';
 import { assistantIdentity } from '../../data/assistantIdentity';
-import { praktikans } from '../../data/praktikans';
 import { useAuthSession } from '../auth/AuthSessionContext';
 import { usePermits } from '../../hooks/usePermit';
+import { useSessions } from '../../hooks/useSessions';
 import { reviewPermit, ReviewStatus } from '../../services/permitService';
-import { useAttendance } from '../../state/AttendanceContext';
 import { colors, fonts, radius, shadows, spacing } from '../../theme';
 import { PracticumSession } from '../../types';
 import { formatDateTime } from '../../utils/format';
@@ -41,7 +40,7 @@ const STATUS_BY_FILTER: Record<Exclude<FilterKey, 'all'>, PermitStatus> = {
 };
 
 export default function AssistantPermitsScreen() {
-  const { sessions } = useAttendance();
+  const { data: sessions } = useSessions();
   const permits = usePermits();
   const authSession = useAuthSession();
   const reviewerName =
@@ -187,7 +186,6 @@ export default function AssistantPermitsScreen() {
           <View style={styles.list}>
             {visiblePermits.map((permit) => {
               const session = sessionById.get(permit.sessionId);
-              const student = praktikans.find((item) => item.id === permit.studentId);
               const isReviewing = reviewingId === permit.id;
 
               return (
@@ -195,7 +193,6 @@ export default function AssistantPermitsScreen() {
                   key={permit.id}
                   permit={permit}
                   session={session}
-                  studentCode={student?.studentCode}
                   isReviewing={isReviewing}
                   onApprove={() => confirmReview(permit, 'approved')}
                   onReject={() => confirmReview(permit, 'rejected')}
@@ -214,14 +211,12 @@ export default function AssistantPermitsScreen() {
 function PermitReviewCard({
   permit,
   session,
-  studentCode,
   isReviewing,
   onApprove,
   onReject,
 }: {
   permit: Permit;
   session?: PracticumSession;
-  studentCode?: string;
   isReviewing: boolean;
   onApprove: () => void;
   onReject: () => void;
@@ -237,7 +232,6 @@ function PermitReviewCard({
             {permit.studentName}
           </Text>
           <Text style={styles.cardMeta}>
-            {studentCode ? `${studentCode} · ` : ''}
             {session?.practicumName ?? 'Sesi tidak ditemukan'}
             {session ? ` · Kelas ${session.className}` : ''}
           </Text>

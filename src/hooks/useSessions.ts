@@ -1,5 +1,5 @@
 import { collection, onSnapshot } from 'firebase/firestore';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 import { db } from '../lib/firebase';
 import type { SessionStatus } from '../types';
@@ -14,6 +14,7 @@ export type UseSessionsResult = {
   data: SessionDoc[];
   loading: boolean;
   error: string | null;
+  retry: () => void;
 };
 
 function mapLoadError(error: unknown): string {
@@ -38,6 +39,7 @@ export function useSessions(filter?: SessionsFilter): UseSessionsResult {
   const [data, setData] = useState<SessionDoc[]>([]);
   const [errorState, setErrorState] = useState<string | null>(null);
   const [resolvedKey, setResolvedKey] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
   const loading = resolvedKey !== filterKey;
   const error = resolvedKey === filterKey ? errorState : null;
@@ -69,7 +71,14 @@ export function useSessions(filter?: SessionsFilter): UseSessionsResult {
     );
 
     return unsubscribe;
-  }, [courseId, status, filterKey]);
+  }, [courseId, status, filterKey, reloadKey]);
 
-  return { data, loading, error };
+  const retry = useCallback(() => {
+    setData([]);
+    setErrorState(null);
+    setResolvedKey(null);
+    setReloadKey((value) => value + 1);
+  }, []);
+
+  return { data, loading, error, retry };
 }

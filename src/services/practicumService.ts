@@ -14,6 +14,10 @@ import {
 import { dosen } from '../data/dosen';
 import { initialSessions } from '../data/sessions';
 import { db } from '../lib/firebase';
+import {
+  buildClassKey,
+  ensureClassesForInitialSessions,
+} from '../migrations/classesSessions';
 import type { SessionStatus } from '../types';
 import {
   COLLECTIONS,
@@ -87,9 +91,10 @@ export function validateScheduleInput(input: ScheduleInput): void {
 }
 
 export function validateSessionInput(input: SessionInput): void {
+  requireNonEmpty(input.classId, 'Kelas');
   requireNonEmpty(input.courseId, 'Mata kuliah');
   requireNonEmpty(input.practicumName, 'Nama praktikum');
-  requireNonEmpty(input.className, 'Kelas');
+  requireNonEmpty(input.className, 'Nama kelas');
 
   const startTimestamp = parseIsoDateTime(input.startsAt, 'Waktu mulai');
   const endTimestamp = parseIsoDateTime(input.endsAt, 'Waktu selesai');
@@ -112,6 +117,20 @@ function resolveLecturer(lecturerId: LecturerId, lecturer: string): string {
     throw new Error('Nama dosen harus sesuai dengan dosen yang dipilih.');
   }
   return selected.name;
+}
+
+async function resolveSessionClass(
+  classId: string,
+  courseId: string,
+): Promise<ClassDoc> {
+  const selected = await getClassById(classId);
+  if (!selected) {
+    throw new Error('Kelas tidak ditemukan.');
+  }
+  if (selected.courseId !== courseId) {
+    throw new Error('Kelas tidak sesuai dengan mata kuliah yang dipilih.');
+  }
+  return selected;
 }
 
 type FirestoreErrorLike = {
@@ -254,10 +273,12 @@ export async function getAllSchedules(): Promise<ScheduleDoc[]> {
 export async function createSession(input: SessionInput): Promise<SessionDoc> {
   validateSessionInput(input);
   const lecturer = resolveLecturer(input.lecturerId, input.lecturer);
+  const classDoc = await resolveSessionClass(input.classId, input.courseId);
   const payload: Omit<SessionDoc, 'id'> = {
-    courseId: input.courseId,
+    classId: classDoc.id,
+    courseId: classDoc.courseId,
     practicumName: input.practicumName,
-    className: input.className,
+    className: classDoc.className,
     startsAt: input.startsAt,
     endsAt: input.endsAt,
     status: input.status,
@@ -277,10 +298,12 @@ export async function updateSession(
 ): Promise<SessionDoc> {
   validateSessionInput(input);
   const lecturer = resolveLecturer(input.lecturerId, input.lecturer);
+  const classDoc = await resolveSessionClass(input.classId, input.courseId);
   const payload: Omit<SessionDoc, 'id'> = {
-    courseId: input.courseId,
+    classId: classDoc.id,
+    courseId: classDoc.courseId,
     practicumName: input.practicumName,
-    className: input.className,
+    className: classDoc.className,
     startsAt: input.startsAt,
     endsAt: input.endsAt,
     status: input.status,
@@ -330,9 +353,21 @@ export async function seedInitialSessions(): Promise<number> {
       return 0;
     }
 
+    const classSeed = await ensureClassesForInitialSessions(initialSessions);
+
     for (const session of initialSessions) {
+      const classDoc = classSeed.classByKey.get(
+        buildClassKey(session.courseId, session.className),
+      );
+      if (!classDoc) {
+        throw new Error(`Kelas untuk sesi ${session.id} tidak ditemukan.`);
+      }
+
       const { id, ...payload } = session;
-      await setDoc(doc(db, COLLECTIONS.sessions, id), payload);
+      await setDoc(doc(db, COLLECTIONS.sessions, id), {
+        ...payload,
+        classId: classDoc.id,
+      });
     }
 
     return initialSessions.length;

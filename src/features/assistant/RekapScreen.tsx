@@ -1,13 +1,20 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useMemo } from 'react';
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import {
+  ActivityIndicator,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import BottomNav from '../../components/BottomNav';
 import StatusBadge from '../../components/StatusBadge';
-import { getPraktikanIdsForSession } from '../../data/sessionEnrollments';
-import { praktikans } from '../../data/praktikans';
-import { useAttendance } from '../../state/AttendanceContext';
+import { useSessionAttendance } from '../../hooks/useAttendanceRecords';
+import { useEnrollments } from '../../hooks/useEnrollments';
+import { useSessions } from '../../hooks/useSessions';
 import { colors, fonts, radius, shadows, spacing } from '../../theme';
 import { formatDateLong, formatTimeRange } from '../../utils/format';
 import { getCourseById } from '../../utils/academic';
@@ -18,17 +25,26 @@ export default function RekapScreen() {
   const { sessionId: rawParam } = useLocalSearchParams<{ sessionId?: string | string[] }>();
   const sessionId = Array.isArray(rawParam) ? rawParam[0] : rawParam;
 
-  const { sessions, attendances } = useAttendance();
-  const session = sessions.find((s) => s.id === sessionId);
+  const sessionResult = useSessions();
+  const session = sessionResult.data.find((s) => s.id === sessionId);
   const course = session ? getCourseById(session.courseId) : undefined;
+  const enrollmentResult = useEnrollments(
+    session?.classId ? { classId: session.classId } : undefined,
+  );
+  const attendanceResult = useSessionAttendance(sessionId);
+  const summaryLoading = enrollmentResult.loading || attendanceResult.loading;
+  const summaryError = enrollmentResult.error ?? attendanceResult.error;
 
-  const enrolledPraktikans = useMemo(() => {
-    if (!session) return [];
-    const ids = getPraktikanIdsForSession(session.id);
-    return ids
-      .map((id) => praktikans.find((p) => p.id === id))
-      .filter((p): p is NonNullable<typeof p> => p !== undefined);
-  }, [session]);
+  const enrolledPraktikans = useMemo(
+    () =>
+      enrollmentResult.data.map((enrollment) => ({
+        id: enrollment.praktikanId,
+        name: enrollment.praktikanName,
+        studentCode: enrollment.studentCode,
+        semester: enrollment.semester,
+      })),
+    [enrollmentResult.data],
+  );
 
   const handleBack = () => {
     if (router.canGoBack()) { router.back(); return; }
@@ -38,7 +54,26 @@ export default function RekapScreen() {
   return (
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        {session?.status === 'ditutup' ? (
+        {sessionResult.loading ? (
+          <View style={styles.emptyCard}>
+            <ActivityIndicator color={colors.primary} />
+            <Text style={styles.emptyTitle}>Memuat sesi...</Text>
+            <Text style={styles.emptyBody}>Rekap diambil langsung dari Firestore.</Text>
+          </View>
+        ) : sessionResult.error ? (
+          <View style={styles.emptyCard}>
+            <Ionicons name="cloud-offline-outline" size={36} color={colors.danger} />
+            <Text style={styles.emptyTitle}>Rekap tidak dapat dimuat</Text>
+            <Text style={styles.emptyBody}>{sessionResult.error}</Text>
+            <TouchableOpacity
+              style={styles.backBtn}
+              onPress={handleBack}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.backBtnText}>Kembali</Text>
+            </TouchableOpacity>
+          </View>
+        ) : session?.status === 'ditutup' ? (
           <>
             <View style={styles.sessionCard}>
               <View style={styles.sessionTop}>
@@ -69,12 +104,25 @@ export default function RekapScreen() {
               </View>
             </View>
 
-            <AssistantAttendanceSummary
-              sessionId={session.id}
-              sessionStatus={session.status}
-              attendances={attendances}
-              enrolledPraktikans={enrolledPraktikans}
-            />
+            {summaryLoading ? (
+              <View style={styles.emptyCard}>
+                <ActivityIndicator color={colors.primary} />
+                <Text style={styles.emptyBody}>Memuat data pendaftaran dan presensi...</Text>
+              </View>
+            ) : summaryError ? (
+              <View style={styles.emptyCard}>
+                <Ionicons name="cloud-offline-outline" size={36} color={colors.danger} />
+                <Text style={styles.emptyTitle}>Rekap tidak dapat dimuat</Text>
+                <Text style={styles.emptyBody}>{summaryError}</Text>
+              </View>
+            ) : (
+              <AssistantAttendanceSummary
+                sessionId={session.id}
+                sessionStatus={session.status}
+                attendances={attendanceResult.data}
+                enrolledPraktikans={enrolledPraktikans}
+              />
+            )}
           </>
         ) : (
           <View style={styles.emptyCard}>
