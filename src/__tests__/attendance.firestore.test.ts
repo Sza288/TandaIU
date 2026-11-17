@@ -9,6 +9,8 @@ import {
 } from 'firebase/firestore';
 import type { CurrentUser } from '../lib/currentSession';
 import {
+  ATTENDANCE_ENROLLMENT_UNVERIFIED_REASON,
+  ATTENDANCE_IDENTITY_INVALID_REASON,
   createAttendanceService,
   type AttendanceRecord,
 } from '../services/attendanceService';
@@ -35,6 +37,14 @@ const user: CurrentUser = {
   role: 'praktikan',
 };
 
+const validProfile = {
+  uid: 'u1',
+  name: 'User Satu Profil',
+  email: 'user.satu@students.undip.ac.id',
+  role: 'praktikan',
+  studentCode: '24060124120001',
+};
+
 const fixedNow = new Date('2026-11-15T10:15:00+07:00');
 
 const mockedCollection = jest.mocked(collection);
@@ -53,11 +63,32 @@ function makeService() {
   });
 }
 
-function sessionSnapshot(status: string | null) {
+function sessionSnapshot(status: string | null, classId = 'class-1') {
   return {
     id: 's5',
     exists: () => status !== null,
-    data: () => ({ status }),
+    data: () => ({ status, classId }),
+  };
+}
+
+function profileSnapshot(profile: Record<string, unknown> | null) {
+  return {
+    id: 'u1',
+    exists: () => profile !== null,
+    data: () => profile,
+  };
+}
+
+function enrollmentSnapshot(
+  enrollment: Record<string, unknown> | null = {
+    praktikanId: 'u1',
+    classId: 'class-1',
+  },
+) {
+  return {
+    id: 'class-1_u1',
+    exists: () => enrollment !== null,
+    data: () => enrollment,
   };
 }
 
@@ -69,7 +100,14 @@ function attendanceSnapshot(exists: boolean) {
   };
 }
 
-function makeTransaction(results: (ReturnType<typeof sessionSnapshot> | ReturnType<typeof attendanceSnapshot>)[]) {
+function makeTransaction(
+  results: (
+    | ReturnType<typeof sessionSnapshot>
+    | ReturnType<typeof enrollmentSnapshot>
+    | ReturnType<typeof profileSnapshot>
+    | ReturnType<typeof attendanceSnapshot>
+  )[],
+) {
   const get = jest.fn();
   results.forEach((result) => get.mockResolvedValueOnce(result));
   return {
@@ -129,17 +167,27 @@ describe('attendanceService (Firestore mode)', () => {
   it('creates attendances/{sessionId}_{uid} for a check-in (SRS-09)', async () => {
     const service = makeService();
     const transaction = useTransaction(
-      makeTransaction([sessionSnapshot('dibuka'), attendanceSnapshot(false)]),
+      makeTransaction([
+        sessionSnapshot('dibuka'),
+        enrollmentSnapshot(),
+        profileSnapshot(validProfile),
+        attendanceSnapshot(false),
+      ]),
     );
 
     await expect(service.checkIn('s5', user)).resolves.toEqual({ ok: true });
 
+    expect(mockedDoc).toHaveBeenCalledWith(
+      expect.anything(),
+      'users',
+      'u1',
+    );
     expect(transaction.set).toHaveBeenCalledWith(
       expect.objectContaining({ path: 'attendances/s5_u1' }),
       {
         sessionId: 's5',
         praktikanId: 'u1',
-        praktikanName: 'User Satu',
+        praktikanName: 'User Satu Profil',
         attendedAt: fixedNow.toISOString(),
         status: 'hadir',
       },
@@ -149,7 +197,12 @@ describe('attendanceService (Firestore mode)', () => {
   it('rejects a duplicate check-in atomically (SRS-11)', async () => {
     const service = makeService();
     const transaction = useTransaction(
-      makeTransaction([sessionSnapshot('dibuka'), attendanceSnapshot(true)]),
+      makeTransaction([
+        sessionSnapshot('dibuka'),
+        enrollmentSnapshot(),
+        profileSnapshot(validProfile),
+        attendanceSnapshot(true),
+      ]),
     );
 
     await expect(service.checkIn('s5', user)).resolves.toEqual({
@@ -170,13 +223,140 @@ describe('attendanceService (Firestore mode)', () => {
     expect(transaction.set).not.toHaveBeenCalled();
   });
 
-  it('maps Firestore permission errors to a readable reason', async () => {
+  it('rejects check-in when the session has no enrollment class', async () => {
+    const service = makeService();
+    const transaction = useTransaction(
+      makeTransaction([sessionSnapshot('dibuka', '')]),
+    );
+
+    await expect(service.checkIn('s5', user)).resolves.toEqual({
+      ok: false,
+      reason: ATTENDANCE_ENROLLMENT_UNVERIFIED_REASON,
+    });
+    expect(transaction.set).not.toHaveBeenCalled();
+  });
+
+  it('rejects check-in when the enrollment document is missing', async () => {
+    const service = makeService();
+    const transaction = useTransaction(
+      makeTransaction([
+        sessionSnapshot('dibuka'),
+        enrollmentSnapshot(null),
+      ]),
+    );
+
+    await expect(service.checkIn('s5', user)).resolves.toEqual({
+      ok: false,
+      reason: ATTENDANCE_ENROLLMENT_UNVERIFIED_REASON,
+    });
+    expect(transaction.set).not.toHaveBeenCalled();
+  });
+
+  it('rejects check-in when the enrollment class does not match the session', async () => {
+    const service = makeService();
+    const transaction = useTransaction(
+      makeTransaction([
+        sessionSnapshot('dibuka'),
+        enrollmentSnapshot({ praktikanId: 'u1', classId: 'class-2' }),
+      ]),
+    );
+
+    await expect(service.checkIn('s5', user)).resolves.toEqual({
+      ok: false,
+      reason: ATTENDANCE_ENROLLMENT_UNVERIFIED_REASON,
+    });
+    expect(transaction.set).not.toHaveBeenCalled();
+  });
+
+  it('rejects check-in when the users/{uid} profile is missing', async () => {
+    const service = makeService();
+    const transaction = useTransaction(
+      makeTransaction([
+        sessionSnapshot('dibuka'),
+        enrollmentSnapshot(),
+        profileSnapshot(null),
+      ]),
+    );
+
+    await expect(service.checkIn('s5', user)).resolves.toEqual({
+      ok: false,
+      reason: ATTENDANCE_IDENTITY_INVALID_REASON,
+    });
+    expect(transaction.set).not.toHaveBeenCalled();
+  });
+
+  it('rejects check-in when the profile role is not praktikan', async () => {
+    const service = makeService();
+    const transaction = useTransaction(
+      makeTransaction([
+        sessionSnapshot('dibuka'),
+        enrollmentSnapshot(),
+        profileSnapshot({ ...validProfile, role: 'asisten' }),
+      ]),
+    );
+
+    await expect(service.checkIn('s5', user)).resolves.toEqual({
+      ok: false,
+      reason: ATTENDANCE_IDENTITY_INVALID_REASON,
+    });
+    expect(transaction.set).not.toHaveBeenCalled();
+  });
+
+  it('rejects a dummy p1..p31 identity in Firestore mode', async () => {
+    const service = makeService();
+    const dummy: CurrentUser = { ...user, uid: 'p1' };
+
+    await expect(service.checkIn('s5', dummy)).resolves.toEqual({
+      ok: false,
+      reason: ATTENDANCE_IDENTITY_INVALID_REASON,
+    });
+    expect(mockedRunTransaction).not.toHaveBeenCalled();
+  });
+
+  it('rejects check-in when there is no authenticated identity', async () => {
+    const service = createAttendanceService({
+      mode: 'firestore',
+      database: {} as never,
+      getCurrentUser: () => null,
+      now: () => fixedNow,
+    });
+
+    await expect(service.checkIn('s5', user)).resolves.toEqual({
+      ok: false,
+      reason: ATTENDANCE_IDENTITY_INVALID_REASON,
+    });
+    expect(mockedRunTransaction).not.toHaveBeenCalled();
+  });
+
+  it('maps Firestore permission errors on openSession to the sessions collection', async () => {
     const service = makeService();
     mockedRunTransaction.mockRejectedValueOnce({ code: 'permission-denied' });
 
-    await expect(service.openSession('s5')).resolves.toEqual({
+    const result = await service.openSession('s5');
+
+    expect(result.ok).toBe(false);
+    expect(result.reason).toContain('sessions');
+    expect(result.reason).not.toContain('attendances');
+  });
+
+  it('maps Firestore permission errors on closeSession to the sessions collection', async () => {
+    const service = makeService();
+    mockedRunTransaction.mockRejectedValueOnce({ code: 'permission-denied' });
+
+    const result = await service.closeSession('s5');
+
+    expect(result.ok).toBe(false);
+    expect(result.reason).toContain('sessions');
+    expect(result.reason).not.toContain('attendances');
+  });
+
+  it('maps check-in permission errors to the enrollment reason (BUG-01)', async () => {
+    const service = makeService();
+    mockedRunTransaction.mockRejectedValueOnce({ code: 'permission-denied' });
+
+    await expect(service.checkIn('s5', user)).resolves.toEqual({
       ok: false,
-      reason: 'Akses ditolak. Periksa Firestore Security Rules untuk koleksi attendances.',
+      reason: ATTENDANCE_ENROLLMENT_UNVERIFIED_REASON,
     });
   });
 
@@ -221,6 +401,79 @@ describe('attendanceService (Firestore mode)', () => {
 
     stop();
     expect(unsubscribe).toHaveBeenCalledTimes(1);
+  });
+
+  it('subscribes to the whole attendances collection without a where filter', () => {
+    const service = makeService();
+    const onData = jest.fn<void, [AttendanceRecord[]]>();
+    let emit: ((snapshot: unknown) => void) | undefined;
+
+    mockedOnSnapshot.mockImplementationOnce((_reference, next) => {
+      emit = next as (snapshot: unknown) => void;
+      return jest.fn();
+    });
+
+    service.subscribeToAllAttendance(onData);
+
+    expect(mockedCollection).toHaveBeenCalledWith(expect.anything(), 'attendances');
+    expect(mockedWhere).not.toHaveBeenCalled();
+
+    emit?.({
+      docs: [
+        {
+          id: 's6_u2',
+          data: (): DocumentData => ({
+            sessionId: 's6',
+            praktikanId: 'u2',
+            praktikanName: 'User Dua',
+            attendedAt: '2026-11-15T11:00:00+07:00',
+            status: 'hadir',
+          }),
+        },
+        {
+          id: 's5_u1',
+          data: (): DocumentData => ({
+            sessionId: 's5',
+            praktikanId: 'u1',
+            praktikanName: 'User Satu',
+            attendedAt: '2026-11-15T10:15:00+07:00',
+            status: 'hadir',
+          }),
+        },
+      ],
+    });
+
+    expect(onData).toHaveBeenCalledTimes(1);
+    expect(onData.mock.calls[0][0].map((record) => record.id)).toEqual(['s5_u1', 's6_u2']);
+  });
+
+  it('returns the all-attendance unsubscribe function', () => {
+    const service = makeService();
+    const unsubscribe = jest.fn();
+    mockedOnSnapshot.mockReturnValueOnce(unsubscribe);
+
+    const stop = service.subscribeToAllAttendance(jest.fn());
+
+    stop();
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
+  });
+
+  it('forwards all-attendance listener errors to the screen', () => {
+    const service = makeService();
+    const onError = jest.fn();
+    let emitError: ((error: unknown) => void) | undefined;
+
+    mockedOnSnapshot.mockImplementationOnce((_reference, _next, error) => {
+      emitError = error as (error: unknown) => void;
+      return jest.fn();
+    });
+
+    service.subscribeToAllAttendance(jest.fn(), onError);
+    emitError?.({ code: 'permission-denied' });
+
+    expect(onError).toHaveBeenCalledWith(
+      'Akses ditolak. Periksa Firestore Security Rules untuk koleksi attendances.',
+    );
   });
 
   it('forwards listener errors to the screen', () => {
