@@ -32,7 +32,7 @@ export type AttendanceService = {
   mode: ServiceMode;
   openSession: (sessionId: string) => Promise<MutationResult>;
   closeSession: (sessionId: string) => Promise<MutationResult>;
-  checkIn: (sessionId: string, user?: CurrentUser) => Promise<MutationResult>;
+  checkIn: (sessionId: string, user?: CurrentUser | null) => Promise<MutationResult>;
   subscribeToAttendance: (
     sessionId: string,
     onData: AttendanceListener,
@@ -52,12 +52,16 @@ export type AttendanceService = {
     onData: AttendanceListener,
     onError?: ListenerErrorHandler,
   ) => AttendanceUnsubscribe;
+  subscribeToAllAttendance: (
+    onData: AttendanceListener,
+    onError?: ListenerErrorHandler,
+  ) => AttendanceUnsubscribe;
 };
 
 export type AttendanceServiceOptions = {
   mode?: ServiceMode;
   database?: Firestore;
-  getCurrentUser?: () => CurrentUser;
+  getCurrentUser?: () => CurrentUser | null;
   now?: () => Date;
   sessions?: PracticumSession[];
   attendances?: Attendance[];
@@ -69,6 +73,77 @@ const GENERIC_LISTENER_ERROR =
   'Gagal memuat data presensi. Periksa koneksi dan konfigurasi Firebase.';
 const FIREBASE_NOT_CONFIGURED_MESSAGE =
   'Firebase belum dikonfigurasi. Isi variabel EXPO_PUBLIC_FIREBASE_* pada .env.';
+
+/**
+ * Kontrak hasil mutasi presensi: setiap operasi selalu mengembalikan
+ * `{ ok: true }` saat berhasil atau `{ ok: false, reason }` saat ditolak.
+ * Layar wajib menampilkan `reason` apa adanya agar praktikan tahu sebabnya.
+ *
+ * Alasan kegagalan `checkIn` (urutan pemeriksaan):
+ * 1. `ATTENDANCE_IDENTITY_INVALID_REASON` — tidak ada sesi Firebase Auth,
+ *    identitas tidak cocok dengan akun aktif, `name` kosong, profil
+ *    `users/{uid}` tidak ada/tidak cocok, role profil bukan `praktikan`,
+ *    atau UID masih berupa ID demo `p1..p31` (mode Firestore).
+ * 2. `"Hanya praktikan yang dapat melakukan presensi."` — role akun asisten.
+ * 3. `"Sesi tidak ditemukan."` — `sessions/{sessionId}` tidak ada.
+ * 4. `ATTENDANCE_SESSION_NOT_OPEN_REASON` — status sesi bukan `dibuka`.
+ * 5. `ATTENDANCE_ENROLLMENT_UNVERIFIED_REASON` — `sessions/{sessionId}.classId`
+ *    kosong atau `enrollments/{classId}_{uid}` tidak ada/tidak cocok. Validasi
+ *    ini berada di transaksi yang sama agar check-in tidak dapat melewati
+ *    relasi enrollment.
+ * 6. `ATTENDANCE_ALREADY_CHECKED_IN_REASON` — dokumen
+ *    `attendances/{sessionId}_{uid}` sudah ada (SRS-11).
+ * 7. Pesan Firestore generik / `permission-denied` bila transaksi gagal.
+ *
+ * Catatan cakupan: layar juga memakai `checkEnrollmentEligibility` untuk
+ * menyembunyikan sesi yang tidak terdaftar, tetapi keputusan akhir tetap
+ * dilakukan di transaksi Firestore. Enrollment kosong TIDAK boleh diartikan
+ * "semua sesi".
+ */
+export const ATTENDANCE_IDENTITY_INVALID_REASON =
+  'Identitas tidak valid. Masuk kembali dengan akun praktikan yang terdaftar.';
+export const ATTENDANCE_SESSION_NOT_OPEN_REASON =
+  'Presensi hanya tersedia saat sesi dibuka.';
+export const ATTENDANCE_ALREADY_CHECKED_IN_REASON =
+  'Kamu sudah melakukan presensi pada sesi ini.';
+export const ATTENDANCE_ENROLLMENT_UNVERIFIED_REASON =
+  'Enrollment sesi ini belum terverifikasi, presensi tidak dapat dilakukan.';
+
+/**
+ * Cakupan sesi yang boleh dipresensi oleh satu praktikan. `verified` hanya
+ * bernilai true bila ada minimal satu sesi hasil enrollment; kondisi kosong
+ * berarti enrollment belum diketahui dan TIDAK boleh jatuh ke "semua sesi".
+ */
+export type AttendanceEnrollmentScope = {
+  verified: boolean;
+  sessionIds: readonly string[];
+};
+
+export function buildAttendanceEnrollmentScope(
+  sessionIds: readonly string[],
+): AttendanceEnrollmentScope {
+  return { verified: sessionIds.length > 0, sessionIds: [...sessionIds] };
+}
+
+export function isSessionEnrolled(
+  scope: AttendanceEnrollmentScope,
+  sessionId: string,
+): boolean {
+  return scope.verified && scope.sessionIds.includes(sessionId);
+}
+
+/**
+ * Hasil `{ ok, reason }` untuk pemeriksaan enrollment sebelum check-in.
+ * Dipakai layar agar penolakan terjadi sebelum transaksi Firestore.
+ */
+export function checkEnrollmentEligibility(
+  scope: AttendanceEnrollmentScope,
+  sessionId: string,
+): MutationResult {
+  return isSessionEnrolled(scope, sessionId)
+    ? { ok: true }
+    : { ok: false, reason: ATTENDANCE_ENROLLMENT_UNVERIFIED_REASON };
+}
 
 /**
  * Firebase reads EXPO_PUBLIC_* at build time, so the variables must be
@@ -103,22 +178,41 @@ const MOCK_USER: CurrentUser = {
  * `src/lib/firebase.ts` eagerly calls `getAuth()`, which throws when the
  * environment variables are empty. The shared helper must therefore only be
  * loaded when Firebase is configured; otherwise the app would crash before
- * the mock-mode demo can start. This delegates to getCurrentUser() as soon as
- * the real configuration is available.
+ * the mock-mode demo can start.
+ *
+ * In Firestore mode the identity must come from Firebase Auth. Returning
+ * `null` here is deliberate: a missing session must fail the check-in with
+ * "identitas tidak valid" instead of silently writing attendance for the
+ * dummy `p1` account.
  */
-export function getAttendanceUser(): CurrentUser {
+export function getAttendanceUser(): CurrentUser | null {
   if (!isFirebaseConfigured) return MOCK_USER;
 
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const session = require('../lib/currentSession') as typeof import('../lib/currentSession');
-    return session.getCurrentUser();
+    const firebase = require('../lib/firebase') as typeof import('../lib/firebase');
+    const firebaseUser = firebase.auth.currentUser;
+    if (!firebaseUser) return null;
+
+    return {
+      uid: firebaseUser.uid,
+      name: firebaseUser.displayName ?? '',
+      email: firebaseUser.email ?? '',
+      role: 'praktikan',
+    };
   } catch (error) {
     if (typeof console !== 'undefined' && typeof console.warn === 'function') {
-      console.warn('[attendanceService] getCurrentUser gagal, memakai identitas demo.', error);
+      console.warn('[attendanceService] Firebase Auth gagal dibaca.', error);
     }
-    return MOCK_USER;
+    return null;
   }
+}
+
+const DUMMY_PRACTIKAN_ID = /^p\d+$/;
+
+/** IDs `p1..p31` are local demo identities, never real Firebase Auth UIDs. */
+export function isDummyPraktikanId(id: string): boolean {
+  return DUMMY_PRACTIKAN_ID.test(id);
 }
 
 function getConfiguredDatabase(): Firestore | undefined {
@@ -138,7 +232,24 @@ function getConfiguredDatabase(): Firestore | undefined {
 
 class AttendanceServiceError extends Error {}
 
-function toMutationFailure(error: unknown): MutationResult {
+/**
+ * Jenis operasi memengaruhi pesan kegagalan. Sebelumnya semua operasi memakai
+ * satu pesan yang menyebut koleksi `attendances`, sehingga kegagalan pada
+ * `sessions` (buka/tutup sesi) menyesatkan pengguna.
+ */
+type MutationOperation = 'openSession' | 'closeSession' | 'checkIn';
+
+const SESSION_PERMISSION_DENIED_REASON: Record<'openSession' | 'closeSession', string> = {
+  openSession:
+    'Akses ditolak. Hanya asisten yang dapat membuka sesi. Periksa Firestore Security Rules untuk koleksi sessions.',
+  closeSession:
+    'Akses ditolak. Hanya asisten yang dapat menutup sesi. Periksa Firestore Security Rules untuk koleksi sessions.',
+};
+
+function toMutationFailure(
+  error: unknown,
+  operation: MutationOperation = 'checkIn',
+): MutationResult {
   if (error instanceof AttendanceServiceError) {
     return { ok: false, reason: error.message };
   }
@@ -149,10 +260,14 @@ function toMutationFailure(error: unknown): MutationResult {
     'code' in error &&
     (error as { code?: unknown }).code === 'permission-denied'
   ) {
-    return {
-      ok: false,
-      reason: 'Akses ditolak. Periksa Firestore Security Rules untuk koleksi attendances.',
-    };
+    if (operation === 'checkIn') {
+      // Check-in membaca dokumen enrollment di dalam transaksi. Bila dokumen
+      // itu tidak ada, Firestore menolak `transaction.get` dengan
+      // permission-denied sebelum validasi enrollment sempat berjalan,
+      // sehingga alasan sebenarnya adalah enrollment belum terverifikasi.
+      return { ok: false, reason: ATTENDANCE_ENROLLMENT_UNVERIFIED_REASON };
+    }
+    return { ok: false, reason: SESSION_PERMISSION_DENIED_REASON[operation] };
   }
 
   if (typeof console !== 'undefined' && typeof console.warn === 'function') {
@@ -310,26 +425,35 @@ function createMockBackend(options: Required<Pick<AttendanceServiceOptions, 'get
 
   const checkIn = async (
     sessionId: string,
-    user: CurrentUser = options.getCurrentUser(),
+    user: CurrentUser | null = options.getCurrentUser(),
   ): Promise<MutationResult> => {
     const currentUser = options.getCurrentUser();
 
+    if (!currentUser) {
+      return { ok: false, reason: ATTENDANCE_IDENTITY_INVALID_REASON };
+    }
+    if (!user) {
+      return { ok: false, reason: ATTENDANCE_IDENTITY_INVALID_REASON };
+    }
     if (user.role !== 'praktikan') {
       return { ok: false, reason: 'Hanya praktikan yang dapat melakukan presensi.' };
     }
     if (!user.uid || user.uid !== currentUser.uid) {
-      return { ok: false, reason: 'Presensi hanya dapat dilakukan untuk akun sendiri.' };
+      return { ok: false, reason: ATTENDANCE_IDENTITY_INVALID_REASON };
+    }
+    if (!user.name.trim()) {
+      return { ok: false, reason: ATTENDANCE_IDENTITY_INVALID_REASON };
     }
 
     const session = getSession(sessionId);
     if (!session) return { ok: false, reason: 'Sesi tidak ditemukan.' };
     if (session.status !== 'dibuka') {
-      return { ok: false, reason: 'Presensi hanya tersedia saat sesi dibuka.' };
+      return { ok: false, reason: ATTENDANCE_SESSION_NOT_OPEN_REASON };
     }
 
     const attendanceId = getAttendanceDocId(sessionId, user.uid);
     if (attendances.some((record) => record.id === attendanceId)) {
-      return { ok: false, reason: 'Kamu sudah melakukan presensi pada sesi ini.' };
+      return { ok: false, reason: ATTENDANCE_ALREADY_CHECKED_IN_REASON };
     }
 
     attendances.push({
@@ -341,8 +465,7 @@ function createMockBackend(options: Required<Pick<AttendanceServiceOptions, 'get
       status: 'hadir',
     });
 
-    emitAttendance(sessionId);
-    emitAttendance(undefined, user.uid);
+    emitAttendance(sessionId, user.uid);
     return { ok: true };
   };
 
@@ -395,6 +518,14 @@ function createMockBackend(options: Required<Pick<AttendanceServiceOptions, 'get
         attendanceListeners.delete(entry);
       };
     },
+    subscribeToAllAttendance: (onData: AttendanceListener, _onError?: ListenerErrorHandler) => {
+      const entry = { onData };
+      attendanceListeners.add(entry);
+      onData(clone([...attendances].sort(byAttendedAt)));
+      return () => {
+        attendanceListeners.delete(entry);
+      };
+    },
   };
 }
 
@@ -427,7 +558,7 @@ function createFirestoreBackend(
       });
       return { ok: true };
     } catch (error) {
-      return toMutationFailure(error);
+      return toMutationFailure(error, 'openSession');
     }
   };
 
@@ -452,21 +583,24 @@ function createFirestoreBackend(
       });
       return { ok: true };
     } catch (error) {
-      return toMutationFailure(error);
+      return toMutationFailure(error, 'closeSession');
     }
   };
 
   const checkIn = async (
     sessionId: string,
-    user: CurrentUser = options.getCurrentUser(),
+    user: CurrentUser | null = options.getCurrentUser(),
   ): Promise<MutationResult> => {
     const currentUser = options.getCurrentUser();
 
+    if (!currentUser || !user) {
+      return { ok: false, reason: ATTENDANCE_IDENTITY_INVALID_REASON };
+    }
     if (user.role !== 'praktikan') {
       return { ok: false, reason: 'Hanya praktikan yang dapat melakukan presensi.' };
     }
-    if (!user.uid || user.uid !== currentUser.uid) {
-      return { ok: false, reason: 'Presensi hanya dapat dilakukan untuk akun sendiri.' };
+    if (!user.uid || user.uid !== currentUser.uid || isDummyPraktikanId(user.uid)) {
+      return { ok: false, reason: ATTENDANCE_IDENTITY_INVALID_REASON };
     }
 
     try {
@@ -477,31 +611,72 @@ function createFirestoreBackend(
           'attendances',
           getAttendanceDocId(sessionId, user.uid),
         );
+        const profileRef = doc(database, 'users', user.uid);
 
         const sessionSnapshot = await transaction.get(sessionRef);
         if (!sessionSnapshot.exists()) {
           throw new AttendanceServiceError('Sesi tidak ditemukan.');
         }
-        if (sessionSnapshot.data().status !== 'dibuka') {
-          throw new AttendanceServiceError('Presensi hanya tersedia saat sesi dibuka.');
+        const sessionData = sessionSnapshot.data();
+        if (sessionData.status !== 'dibuka') {
+          throw new AttendanceServiceError(ATTENDANCE_SESSION_NOT_OPEN_REASON);
+        }
+
+        const classId =
+          typeof sessionData.classId === 'string' ? sessionData.classId.trim() : '';
+        if (!classId) {
+          throw new AttendanceServiceError(ATTENDANCE_ENROLLMENT_UNVERIFIED_REASON);
+        }
+
+        const enrollmentRef = doc(
+          database,
+          'enrollments',
+          `${classId}_${user.uid}`,
+        );
+        const enrollmentSnapshot = await transaction.get(enrollmentRef);
+        const enrollment = enrollmentSnapshot.exists()
+          ? enrollmentSnapshot.data()
+          : null;
+        if (
+          !enrollment
+          || enrollment.praktikanId !== user.uid
+          || enrollment.classId !== classId
+        ) {
+          throw new AttendanceServiceError(ATTENDANCE_ENROLLMENT_UNVERIFIED_REASON);
+        }
+
+        const profileSnapshot = await transaction.get(profileRef);
+        const profile = profileSnapshot.exists() ? profileSnapshot.data() : null;
+        const profileUid = profile?.uid;
+        const profileRole = profile?.role;
+        const profileName =
+          typeof profile?.name === 'string' ? profile.name.trim() : '';
+
+        if (
+          !profile
+          || (profileUid !== undefined && profileUid !== user.uid)
+          || profileRole !== 'praktikan'
+          || !profileName
+        ) {
+          throw new AttendanceServiceError(ATTENDANCE_IDENTITY_INVALID_REASON);
         }
 
         const attendanceSnapshot = await transaction.get(attendanceRef);
         if (attendanceSnapshot.exists()) {
-          throw new AttendanceServiceError('Kamu sudah melakukan presensi pada sesi ini.');
+          throw new AttendanceServiceError(ATTENDANCE_ALREADY_CHECKED_IN_REASON);
         }
 
         transaction.set(attendanceRef, {
           sessionId,
           praktikanId: user.uid,
-          praktikanName: user.name,
+          praktikanName: profileName,
           attendedAt: options.now().toISOString(),
           status: 'hadir',
         });
       });
       return { ok: true };
     } catch (error) {
-      return toMutationFailure(error);
+      return toMutationFailure(error, 'checkIn');
     }
   };
 
@@ -549,6 +724,21 @@ function createFirestoreBackend(
     );
   };
 
+  const subscribeToAllAttendance = (
+    onData: AttendanceListener,
+    onError?: ListenerErrorHandler,
+  ): AttendanceUnsubscribe =>
+    onSnapshot(
+      collection(database, 'attendances'),
+      (snapshot) => {
+        const records = snapshot.docs
+          .map((record) => mapAttendance(record.id, record.data()))
+          .sort(byAttendedAt);
+        onData(records);
+      },
+      (error) => onError?.(describeListenerError(error)),
+    );
+
   const subscribeToSession = (
     sessionId: string,
     onData: SessionListener,
@@ -586,6 +776,7 @@ function createFirestoreBackend(
     subscribeToSession,
     subscribeToSessions,
     subscribeToPraktikanAttendance,
+    subscribeToAllAttendance,
   };
 }
 
@@ -635,7 +826,15 @@ export const attendanceServiceMode = attendanceService.mode;
 
 export const openSession = (sessionId: string) => attendanceService.openSession(sessionId);
 export const closeSession = (sessionId: string) => attendanceService.closeSession(sessionId);
-export const checkIn = (sessionId: string, user?: CurrentUser) =>
+/**
+ * Check-in praktikan untuk satu sesi (SRS-09). `user` default diambil dari
+ * identitas Auth aktif; `null` diperlakukan sebagai identitas tidak valid.
+ *
+ * @returns `{ ok: true }` bila `attendances/{sessionId}_{uid}` berhasil dibuat,
+ * atau `{ ok: false, reason }` sesuai daftar alasan pada dokumentasi konstanta
+ * `ATTENDANCE_*_REASON` di atas.
+ */
+export const checkIn = (sessionId: string, user?: CurrentUser | null) =>
   attendanceService.checkIn(sessionId, user);
 export const subscribeToAttendance = (
   sessionId: string,
@@ -657,3 +856,13 @@ export const subscribeToPraktikanAttendance = (
   onError?: ListenerErrorHandler,
 ) =>
   attendanceService.subscribeToPraktikanAttendance(praktikanId, onData, onError);
+/**
+ * Berlangganan seluruh koleksi `attendances` (lintas sesi) untuk rekap
+ * realtime asisten (SRS-10). Rules mengizinkan read bagi semua pengguna
+ * terautentikasi, jadi tidak perlu filter `where`. Rekaman diurutkan naik
+ * berdasarkan `attendedAt`, sama seperti listener per sesi.
+ */
+export const subscribeToAllAttendance = (
+  onData: AttendanceListener,
+  onError?: ListenerErrorHandler,
+) => attendanceService.subscribeToAllAttendance(onData, onError);
