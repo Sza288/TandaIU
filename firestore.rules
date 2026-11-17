@@ -107,6 +107,36 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    // Enrollment: ID = classId + '_' + uid.
+    // Praktikan hanya boleh membaca enrollment miliknya sendiri. Asisten boleh
+    // membaca enrollment seluruh kelas (keputusan PM untuk TandaIU saat ini)
+    // agar detail sesi dapat menghitung terdaftar, belum presensi, dan
+    // persentase kehadiran. Tidak ada izin tulis untuk siapa pun.
+    match /enrollments/{enrollmentId} {
+      // Baca satu dokumen: milik sendiri (ID deterministik) atau asisten.
+      allow get: if isSignedIn()
+        && (
+          (resource.data.praktikanId == request.auth.uid
+            && enrollmentId == resource.data.classId + '_' + request.auth.uid)
+          || isAssistant()
+        );
+      // Query list: Firestore tidak dapat membuktikan syarat ID dokumen pada
+      // sebuah query, sehingga kepemilikan diverifikasi lewat field praktikanId.
+      allow list: if isSignedIn()
+        && (resource.data.praktikanId == request.auth.uid || isAssistant());
+      allow create, update, delete: if false;
+    }
+
+    // Arsip historis presensi yang tidak dapat menjadi dokumen attendance
+    // (enrollment tidak ada, atau versi ganda dari data demo lama).
+    // Hanya praktikan pemilik yang boleh membaca; asisten belum punya dasar
+    // relasi kelas sehingga belum diberi akses.
+    match /attendanceArchives/{archiveId} {
+      allow get, list: if isSignedIn()
+        && resource.data.praktikanId == request.auth.uid;
+      allow create, update, delete: if false;
+    }
+
     // Koleksi lain ditolak secara default.
     match /{document=**} {
       allow read, write: if false;
