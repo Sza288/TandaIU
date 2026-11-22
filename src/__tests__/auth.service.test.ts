@@ -14,6 +14,7 @@ import { auth } from '../lib/firebase';
 import { doc, getDoc, runTransaction, setDoc } from 'firebase/firestore';
 import {
   AuthServiceError,
+  getAuthErrorMessage,
   getUserProfile,
   isGoogleSignInAvailable,
   registerWithEmailAndPassword,
@@ -49,6 +50,7 @@ jest.mock('firebase/auth', () => ({
   signInWithCredential: jest.fn(),
   signInWithPopup: jest.fn(),
   signOut: jest.fn(),
+  getIdTokenResult: jest.fn().mockResolvedValue({ claims: {} }),
 }));
 
 jest.mock('@react-native-google-signin/google-signin', () => ({
@@ -144,22 +146,17 @@ describe('registration flow', () => {
     expect(validProfile.role).toBe('praktikan');
   });
 
-  it('creates an asisten profile with the normalized Firestore role and no student code', async () => {
+  it('rejects public Asprak account creation before creating a Firebase account', async () => {
     jest.mocked(createUserWithEmailAndPassword).mockResolvedValue(userCredential);
 
     await expect(registerWithEmailAndPassword({
       ...registrationInput,
       role: 'asisten',
       studentCode: '',
-    })).resolves.toMatchObject({ role: 'asisten' });
+    })).rejects.toMatchObject({ code: 'invalid-input' });
 
-    expect(doc).toHaveBeenCalledWith(expect.anything(), 'users', 'uid-1');
-    expect(setDoc).toHaveBeenCalledWith(documentReference, {
-      name: 'Ayu Pratiwi',
-      email: 'ayu@example.com',
-      role: 'asisten',
-      authProvider: 'password',
-    });
+    expect(createUserWithEmailAndPassword).not.toHaveBeenCalled();
+    expect(setDoc).not.toHaveBeenCalled();
   });
 
   it('validates required fields, email, password length, and confirmation', () => {
@@ -172,7 +169,9 @@ describe('registration flow', () => {
     expect(validateRegistrationInput({ ...registrationInput, studentCode: '' })).toBe(
       'Kode mahasiswa perlu diisi.',
     );
-    expect(validateRegistrationInput({ ...registrationInput, role: 'asisten', studentCode: '' })).toBeNull();
+    expect(validateRegistrationInput({ ...registrationInput, role: 'asisten', studentCode: '' })).toBe(
+      'Akun Asprak hanya dapat dibuat dan diaktifkan oleh admin.',
+    );
     expect(validateRegistrationInput({ ...registrationInput, password: '12345' })).toBe(
       'Kata sandi minimal 6 karakter.',
     );
@@ -185,7 +184,9 @@ describe('registration flow', () => {
     expect(validateGoogleProfileInput({ name: 'Ayu', role: 'praktikan' })).toBe(
       'Kode mahasiswa perlu diisi.',
     );
-    expect(validateGoogleProfileInput({ name: 'Raka', role: 'asisten' })).toBeNull();
+    expect(validateGoogleProfileInput({ name: 'Raka', role: 'asisten' })).toBe(
+      'Akun Asprak hanya dapat dibuat dan diaktifkan oleh admin.',
+    );
   });
 
   it('explains when the email is already in use', async () => {
@@ -347,6 +348,28 @@ describe('profile validation and login', () => {
     ).rejects.toThrow('Email atau kata sandi belum cocok.');
     expect(getDoc).not.toHaveBeenCalled();
   });
+
+  it('distinguishes emulator credential failures from emulator connection failures', () => {
+    const previousEmulatorFlag = process.env.EXPO_PUBLIC_USE_FIREBASE_EMULATOR;
+    process.env.EXPO_PUBLIC_USE_FIREBASE_EMULATOR = 'true';
+    try {
+      expect(getAuthErrorMessage(firebaseError('auth/invalid-credential')))
+        .toContain('di Auth Emulator');
+      expect(getAuthErrorMessage(firebaseError('auth/network-request-failed')))
+        .toContain('Auth Emulator tidak dapat dijangkau');
+    } finally {
+      if (previousEmulatorFlag === undefined) {
+        delete process.env.EXPO_PUBLIC_USE_FIREBASE_EMULATOR;
+      } else {
+        process.env.EXPO_PUBLIC_USE_FIREBASE_EMULATOR = previousEmulatorFlag;
+      }
+    }
+  });
+
+  it('identifies Firebase project configuration failures safely', () => {
+    expect(getAuthErrorMessage(firebaseError('auth/invalid-api-key')))
+      .toContain('Konfigurasi Firebase aplikasi tidak cocok');
+  });
 });
 
 describe('Google Sign-In', () => {
@@ -409,7 +432,7 @@ describe('Google Sign-In', () => {
     }
 
     expect(GoogleSignin.configure).toHaveBeenCalledWith({
-      webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID,
+      webClientId: 'web-client-id',
       offlineAccess: false,
     });
     expect(GoogleAuthProvider.credential).toHaveBeenCalledWith('google-id-token');
@@ -479,23 +502,13 @@ describe('Google Sign-In', () => {
     expect(mockTransactionSet).not.toHaveBeenCalled();
   });
 
-  it('creates Google profiles with the selected role at users/{uid}', async () => {
+  it('rejects public Google profile creation as Asprak', async () => {
     Object.assign(auth, { currentUser: user });
-    jest.mocked(getDoc).mockResolvedValue(makeDocumentSnapshot({
-      name: 'Raka Asisten',
-      email: 'ayu@example.com',
-      role: 'asisten',
-      authProvider: 'google',
-    }));
 
-    await registerGoogleProfile({ name: 'Raka Asisten', role: 'asisten' });
+    await expect(registerGoogleProfile({ name: 'Raka Asisten', role: 'asisten' }))
+      .rejects.toMatchObject({ code: 'invalid-input' });
 
-    expect(mockTransactionSet).toHaveBeenCalledWith(documentReference, {
-      name: 'Raka Asisten',
-      email: 'ayu@example.com',
-      role: 'asisten',
-      authProvider: 'google',
-    });
+    expect(mockTransactionSet).not.toHaveBeenCalled();
   });
 
   it('requires an authenticated Google provider before completing Google registration', async () => {

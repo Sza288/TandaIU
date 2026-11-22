@@ -4,6 +4,7 @@ import {
   onSnapshot,
   query,
   runTransaction,
+  serverTimestamp,
   where,
   type DocumentData,
   type Firestore,
@@ -14,6 +15,7 @@ import { initialSessions } from '../data/sessions';
 import { praktikans } from '../data/praktikans';
 import type { CurrentUser } from '../lib/currentSession';
 import type { Attendance, MutationResult, PracticumSession } from '../types';
+import { firestoreDateToIso, isoToFirestoreDate } from '../utils/firestoreDate';
 
 export type AttendanceRecord = Attendance & {
   id: string;
@@ -37,6 +39,7 @@ export type AttendanceService = {
     sessionId: string,
     onData: AttendanceListener,
     onError?: ListenerErrorHandler,
+    praktikanId?: string,
   ) => AttendanceUnsubscribe;
   subscribeToSession: (
     sessionId: string,
@@ -232,6 +235,30 @@ function getConfiguredDatabase(): Firestore | undefined {
 
 class AttendanceServiceError extends Error {}
 
+type FirestoreTimestampValue = {
+  seconds: number;
+  nanoseconds: number;
+  toDate: () => Date;
+};
+
+function isFirestoreTimestamp(value: unknown): value is FirestoreTimestampValue {
+  return typeof value === 'object'
+    && value !== null
+    && 'seconds' in value
+    && typeof value.seconds === 'number'
+    && 'nanoseconds' in value
+    && typeof value.nanoseconds === 'number'
+    && 'toDate' in value
+    && typeof value.toDate === 'function';
+}
+
+function sessionTimestampForWrite(value: unknown): Date | FirestoreTimestampValue {
+  if (isFirestoreTimestamp(value)) return value;
+  const iso = firestoreDateToIso(value);
+  if (!iso) throw new AttendanceServiceError('Waktu sesi tidak valid dan tidak dapat dinormalisasi.');
+  return isoToFirestoreDate(iso);
+}
+
 /**
  * Jenis operasi memengaruhi pesan kegagalan. Sebelumnya semua operasi memakai
  * satu pesan yang menyebut koleksi `attendances`, sehingga kegagalan pada
@@ -261,11 +288,10 @@ function toMutationFailure(
     (error as { code?: unknown }).code === 'permission-denied'
   ) {
     if (operation === 'checkIn') {
-      // Check-in membaca dokumen enrollment di dalam transaksi. Bila dokumen
-      // itu tidak ada, Firestore menolak `transaction.get` dengan
-      // permission-denied sebelum validasi enrollment sempat berjalan,
-      // sehingga alasan sebenarnya adalah enrollment belum terverifikasi.
-      return { ok: false, reason: ATTENDANCE_ENROLLMENT_UNVERIFIED_REASON };
+      return {
+        ok: false,
+        reason: 'Presensi ditolak. Pastikan sesi sedang dibuka, waktu sesi masih berlaku, dan enrollment kamu valid.',
+      };
     }
     return { ok: false, reason: SESSION_PERMISSION_DENIED_REASON[operation] };
   }
@@ -301,7 +327,7 @@ function mapAttendance(id: string, data: DocumentData): AttendanceRecord {
     sessionId: String(data.sessionId ?? ''),
     praktikanId: String(data.praktikanId ?? ''),
     praktikanName: String(data.praktikanName ?? 'Praktikan'),
-    attendedAt: typeof data.attendedAt === 'string' ? data.attendedAt : '',
+    attendedAt: firestoreDateToIso(data.attendedAt),
     status,
     excuseReason,
   };
@@ -316,8 +342,8 @@ function mapSession(id: string, data: DocumentData): PracticumSession {
     courseId: String(data.courseId ?? ''),
     practicumName: String(data.practicumName ?? 'Praktikum'),
     className: String(data.className ?? ''),
-    startsAt: String(data.startsAt ?? ''),
-    endsAt: String(data.endsAt ?? ''),
+    startsAt: firestoreDateToIso(data.startsAt),
+    endsAt: firestoreDateToIso(data.endsAt),
     status,
   };
 }
@@ -477,11 +503,15 @@ function createMockBackend(options: Required<Pick<AttendanceServiceOptions, 'get
       sessionId: string,
       onData: AttendanceListener,
       _onError?: ListenerErrorHandler,
+      praktikanId?: string,
     ) => {
-      const entry = { sessionId, onData };
+      const entry = { sessionId, praktikanId, onData };
       attendanceListeners.add(entry);
       onData(
-        clone(attendances.filter((record) => record.sessionId === sessionId).sort(byAttendedAt)),
+        clone(attendances
+          .filter((record) => record.sessionId === sessionId)
+          .filter((record) => !praktikanId || record.praktikanId === praktikanId)
+          .sort(byAttendedAt)),
       );
       return () => {
         attendanceListeners.delete(entry);
@@ -554,7 +584,12 @@ function createFirestoreBackend(
           throw new AttendanceServiceError('Sesi yang sudah ditutup tidak dapat dibuka kembali.');
         }
 
-        transaction.update(sessionRef, { status: 'dibuka' });
+        const sessionData = sessionSnapshot.data();
+        transaction.update(sessionRef, {
+          status: 'dibuka',
+          startsAt: sessionTimestampForWrite(sessionData.startsAt),
+          endsAt: sessionTimestampForWrite(sessionData.endsAt),
+        });
       });
       return { ok: true };
     } catch (error) {
@@ -579,7 +614,12 @@ function createFirestoreBackend(
           throw new AttendanceServiceError('Hanya sesi yang sedang dibuka yang dapat ditutup.');
         }
 
-        transaction.update(sessionRef, { status: 'ditutup' });
+        const sessionData = sessionSnapshot.data();
+        transaction.update(sessionRef, {
+          status: 'ditutup',
+          startsAt: sessionTimestampForWrite(sessionData.startsAt),
+          endsAt: sessionTimestampForWrite(sessionData.endsAt),
+        });
       });
       return { ok: true };
     } catch (error) {
@@ -670,7 +710,7 @@ function createFirestoreBackend(
           sessionId,
           praktikanId: user.uid,
           praktikanName: profileName,
-          attendedAt: options.now().toISOString(),
+          attendedAt: serverTimestamp(),
           status: 'hadir',
         });
       });
@@ -684,10 +724,13 @@ function createFirestoreBackend(
     sessionId: string,
     onData: AttendanceListener,
     onError?: ListenerErrorHandler,
+    praktikanId?: string,
   ): AttendanceUnsubscribe => {
+    const constraints = [where('sessionId', '==', sessionId)];
+    if (praktikanId) constraints.push(where('praktikanId', '==', praktikanId));
     const attendanceQuery = query(
       collection(database, 'attendances'),
-      where('sessionId', '==', sessionId),
+      ...constraints,
     );
 
     return onSnapshot(
@@ -762,7 +805,7 @@ function createFirestoreBackend(
         onData(
           snapshot.docs
             .map((record) => mapSession(record.id, record.data()))
-            .sort((a, b) => a.startsAt.localeCompare(b.startsAt)),
+            .sort((a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt)),
         );
       },
       (error) => onError?.(describeListenerError(error)),
@@ -840,7 +883,8 @@ export const subscribeToAttendance = (
   sessionId: string,
   onData: AttendanceListener,
   onError?: ListenerErrorHandler,
-) => attendanceService.subscribeToAttendance(sessionId, onData, onError);
+  praktikanId?: string,
+) => attendanceService.subscribeToAttendance(sessionId, onData, onError, praktikanId);
 export const subscribeToSession = (
   sessionId: string,
   onData: SessionListener,

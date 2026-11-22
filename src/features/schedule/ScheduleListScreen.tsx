@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import {
@@ -19,7 +19,19 @@ import { useEnrollments } from '../../hooks/useEnrollments';
 import { useSessions } from '../../hooks/useSessions';
 import { useAuthSession } from '../auth/AuthSessionContext';
 import { getAuthenticatedPraktikanIdentity } from '../praktikan/authenticatedIdentity';
+import { getCourseById } from '../../utils/academic';
+import {
+  matchesScheduleEntry,
+  type ScheduleStatusFilter,
+} from '../../utils/scheduleFilters';
 import { colors, fonts, radius, shadows, spacing } from '../../theme';
+
+const STATUS_FILTERS: { value: ScheduleStatusFilter; label: string }[] = [
+  { value: 'semua', label: 'Semua' },
+  { value: 'dibuka', label: 'Dibuka' },
+  { value: 'terlewati', label: 'Terlewati' },
+  { value: 'mendatang', label: 'Mendatang' },
+];
 
 export default function ScheduleListScreen() {
   const authSession = useAuthSession();
@@ -28,6 +40,13 @@ export default function ScheduleListScreen() {
   const activePraktikan = getAuthenticatedPraktikanIdentity(profile);
   const activePraktikanId = activeRole === 'praktikan' ? profile?.uid ?? null : null;
   const [query, setQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState<ScheduleStatusFilter>('semua');
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(timer);
+  }, []);
 
   const sessionResult = useSessions();
   const enrollmentResult = useEnrollments(
@@ -44,10 +63,18 @@ export default function ScheduleListScreen() {
     : activeRole === 'praktikan'
       ? enrolledSessions
       : [];
-  const normalizedQuery = query.trim().toLocaleLowerCase('id-ID');
   const visibleSessions = roleSessions.filter((session) =>
-    [session.practicumName, session.className]
-      .some((value) => value.toLocaleLowerCase('id-ID').includes(normalizedQuery)),
+    matchesScheduleEntry(
+      session,
+      [
+        session.practicumName,
+        getCourseById(session.courseId)?.name ?? '',
+        session.className,
+      ],
+      statusFilter,
+      query,
+      now,
+    ),
   );
   const attendedSessionIds = new Set(
     attendanceResult.data.map((attendance) => attendance.sessionId),
@@ -122,6 +149,34 @@ export default function ScheduleListScreen() {
             {activePraktikan ? `Halo, ${activePraktikan.name} 👋` : 'Jadwal akun praktikan'}
           </Text>
         ) : null}
+
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.filterList}
+          accessibilityLabel="Filter status jadwal"
+        >
+          {STATUS_FILTERS.map((filter) => {
+            const selected = statusFilter === filter.value;
+            return (
+              <Pressable
+                key={filter.value}
+                accessibilityRole="button"
+                accessibilityState={{ selected }}
+                onPress={() => setStatusFilter(filter.value)}
+                style={({ pressed }) => [
+                  styles.filterChip,
+                  selected && styles.filterChipSelected,
+                  pressed && styles.filterChipPressed,
+                ]}
+              >
+                <Text style={[styles.filterChipText, selected && styles.filterChipTextSelected]}>
+                  {filter.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
 
         <View style={styles.searchBox}>
           <Ionicons name="search-outline" size={22} color={colors.primary} />
@@ -227,12 +282,18 @@ export default function ScheduleListScreen() {
           />
         ) : visibleSessions.length === 0 ? (
           <EmptyScheduleState
-            title={query.trim() ? 'Praktikum tidak ditemukan' : 'Belum ada jadwal praktikum'}
+            title={query.trim()
+              ? 'Praktikum tidak ditemukan'
+              : statusFilter !== 'semua'
+                ? 'Tidak ada sesi pada filter ini'
+                : 'Belum ada jadwal praktikum'}
             description={query.trim()
               ? 'Coba kata kunci lain seperti nama praktikum atau kelas.'
-              : activeRole === 'praktikan'
-                ? 'Belum ada sesi yang terdaftar untuk identitas praktikan ini.'
-                : 'Jadwal praktikum yang tersedia akan tampil di sini.'}
+              : statusFilter !== 'semua'
+                ? 'Ubah filter status atau pilih Semua untuk melihat jadwal lainnya.'
+                : activeRole === 'praktikan'
+                  ? 'Belum ada sesi yang terdaftar untuk identitas praktikan ini.'
+                  : 'Jadwal praktikum yang tersedia akan tampil di sini.'}
           />
         ) : (
           <View style={styles.list}>
@@ -331,6 +392,35 @@ const styles = StyleSheet.create({
     fontFamily: fonts.heading,
     fontSize: 21,
     lineHeight: 28,
+  },
+  filterList: {
+    gap: spacing.sm,
+    paddingTop: spacing.lg,
+  },
+  filterChip: {
+    minHeight: 38,
+    justifyContent: 'center',
+    paddingHorizontal: spacing.lg,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.borderStrong,
+    backgroundColor: colors.surface,
+  },
+  filterChipSelected: {
+    borderColor: colors.primaryDark,
+    backgroundColor: colors.primaryDark,
+  },
+  filterChipPressed: {
+    opacity: 0.82,
+  },
+  filterChipText: {
+    color: colors.textSecondary,
+    fontFamily: fonts.semiBold,
+    fontSize: 12,
+  },
+  filterChipTextSelected: {
+    color: colors.textOnPrimary,
+    fontFamily: fonts.bold,
   },
   searchBox: {
     minHeight: 48,

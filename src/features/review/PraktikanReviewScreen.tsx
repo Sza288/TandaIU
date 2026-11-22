@@ -65,7 +65,7 @@ export default function PraktikanReviewScreen() {
       sessions
         .filter((session) => session.status === 'ditutup')
         .filter((session) => session.classId && enrolledClassIds.has(session.classId))
-        .sort((a, b) => b.startsAt.localeCompare(a.startsAt)),
+        .sort((a, b) => Date.parse(b.startsAt) - Date.parse(a.startsAt)),
     [enrolledClassIds, sessions],
   );
 

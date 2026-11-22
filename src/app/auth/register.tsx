@@ -1,6 +1,6 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 import {
   AuthError,
   AuthLink,
@@ -24,7 +24,7 @@ export default function RegisterScreen() {
   const isGoogleRegistration = params.provider === 'google';
   const [name, setName] = useState(params.name ?? '');
   const [email, setEmail] = useState(params.email ?? '');
-  const [role, setRole] = useState<RegistrationRole>('praktikan');
+  const role: RegistrationRole = 'praktikan';
   const [studentCode, setStudentCode] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -76,26 +76,11 @@ export default function RegisterScreen() {
       <Text style={styles.formSubtitle}>Data diri</Text>
       {errorMessage ? <AuthError message={errorMessage} /> : null}
 
-      <Text style={styles.label}>Daftar sebagai</Text>
       <View style={styles.roleOptions}>
-        {([
-          { value: 'praktikan', label: 'Praktikan', description: 'Mengikuti praktikum' },
-          { value: 'asisten', label: 'Asisten', description: 'Mendampingi praktikum' },
-        ] as const).map((option) => (
-          <Pressable
-            key={option.value}
-            accessibilityRole="button"
-            accessibilityState={{ selected: role === option.value, disabled: loading }}
-            disabled={loading}
-            onPress={() => setRole(option.value)}
-            style={[styles.roleOption, role === option.value && styles.roleOptionSelected]}
-          >
-            <Text style={[styles.roleTitle, role === option.value && styles.roleTitleSelected]}>
-              {option.label}
-            </Text>
-            <Text style={styles.roleDescription}>{option.description}</Text>
-          </Pressable>
-        ))}
+        <Text style={styles.roleTitle}>Pendaftaran praktikan</Text>
+        <Text style={styles.roleDescription}>
+          Akun Asprak hanya dapat diaktifkan oleh admin.
+        </Text>
       </View>
 
       <AuthTextField

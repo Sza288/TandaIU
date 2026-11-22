@@ -28,6 +28,7 @@ export type ReviewStatus = Extract<PermitStatus, 'approved' | 'rejected'>;
  */
 export type PermitSubscriptionScope = {
   studentId?: string;
+  sessionIds?: string[];
 };
 
 const PERMITS_COLLECTION = 'permits';
@@ -191,9 +192,23 @@ export function subscribePermits(
   onPermits: (permits: Permit[]) => void,
   onError?: (message: string) => void,
 ): () => void {
-  const permitsQuery = scope.studentId
-    ? query(collection(db, PERMITS_COLLECTION), where('studentId', '==', scope.studentId))
-    : query(collection(db, PERMITS_COLLECTION));
+  if (scope.sessionIds) {
+    const snapshots = new Map<string, Permit[]>();
+    const unsubscribers = scope.sessionIds.map((sessionId) => onSnapshot(
+      query(collection(db, PERMITS_COLLECTION), where('sessionId', '==', sessionId)),
+      (snapshot) => {
+        snapshots.set(sessionId, snapshot.docs.map((item) => toPermit(item.id, item.data())));
+        onPermits([...snapshots.values()].flat().sort((a, b) => b.createdAt.localeCompare(a.createdAt)));
+      },
+      (error) => onError?.(getPermitErrorMessage(error)),
+    ));
+    return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
+  }
+
+  const permitsQuery = query(
+    collection(db, PERMITS_COLLECTION),
+    where('studentId', '==', scope.studentId ?? ''),
+  );
 
   return onSnapshot(
     permitsQuery,

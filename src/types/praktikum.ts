@@ -12,6 +12,9 @@ export type ClassDoc = {
   courseId: string;
   className: string;
   createdAt: string;
+  semester?: number;
+  semesterParity?: 'ganjil' | 'genap';
+  assistantUid?: string;
 };
 
 export type ScheduleDoc = {
@@ -22,12 +25,17 @@ export type ScheduleDoc = {
   startTime: ClockTime;
   endTime: ClockTime;
   room: string;
+  semesterParity?: 'ganjil' | 'genap';
+  assistantUid?: string;
 };
 
 export type SessionDoc = PracticumSession & {
   classId: string;
   lecturerId?: LecturerId;
   lecturer?: string;
+  semester?: number;
+  semesterParity?: 'ganjil' | 'genap';
+  assistantUid?: string;
 };
 
 export type ClassInput = Omit<ClassDoc, 'id'>;

@@ -37,6 +37,52 @@ describe('protected route access decisions', () => {
     expect(getAuthNavigationTarget({ status: 'unauthenticated' }, '/')).toBeNull();
   });
 
+  it('preserves a schedule detail deep link through login without changing its session ID', () => {
+    const deepLink = '/schedule/session-42';
+    const loginTarget = getAuthNavigationTarget(
+      { status: 'unauthenticated' },
+      deepLink,
+    );
+    expect(loginTarget).toBe('/auth/login?returnTo=%2Fschedule%2Fsession-42');
+    expect(
+      getAuthNavigationTarget(praktikanSession, '/auth/login', deepLink),
+    ).toBe(deepLink);
+  });
+
+  it('uses the role dashboard for ordinary login and rejects unsafe continuation routes', () => {
+    expect(getAuthNavigationTarget(praktikanSession, '/auth/login')).toBe('/praktikan');
+    expect(
+      getAuthNavigationTarget(
+        {
+          status: 'authenticated',
+          profile: { ...praktikanSession.profile, role: 'asisten' },
+        },
+        '/auth/login',
+      ),
+    ).toBe('/assistant');
+    expect(
+      getAuthNavigationTarget(praktikanSession, '/auth/login', '/assistant'),
+    ).toBe('/praktikan');
+    expect(
+      getAuthNavigationTarget(
+        { status: 'unauthenticated' },
+        '/schedule/session-42/extra',
+      ),
+    ).toBe('/');
+  });
+
+  it('drops a session continuation on logout so the next login starts normally', () => {
+    expect(
+      getAuthNavigationTarget(
+        { status: 'unauthenticated' },
+        '/schedule/session-42',
+        undefined,
+        'authenticated',
+      ),
+    ).toBe('/');
+    expect(getAuthNavigationTarget(praktikanSession, '/auth/login')).toBe('/praktikan');
+  });
+
   it('does not redirect authenticated users between private routes or hide profile errors', () => {
     expect(getAuthNavigationTarget(praktikanSession, '/schedule')).toBeNull();
     expect(

@@ -76,15 +76,25 @@ export function usePraktikanAttendance(praktikanId?: string | null): AttendanceL
   return useAttendanceSubscription(normalizedId || null, subscribe);
 }
 
-export function useSessionAttendance(sessionId?: string | null): AttendanceListenerState {
+export function useSessionAttendance(
+  sessionId?: string | null,
+  praktikanId?: string | null,
+): AttendanceListenerState {
   const normalizedId = sessionId?.trim() ?? '';
+  const normalizedPraktikanId = praktikanId?.trim() ?? '';
+  const key = normalizedId ? `${normalizedId}::${normalizedPraktikanId}` : null;
   const subscribe = useCallback(
     (
       onData: (records: AttendanceRecord[]) => void,
       onError: (message: string) => void,
-    ) => subscribeToAttendance(normalizedId, onData, onError),
-    [normalizedId],
+    ) => subscribeToAttendance(
+      normalizedId,
+      onData,
+      onError,
+      normalizedPraktikanId || undefined,
+    ),
+    [normalizedId, normalizedPraktikanId],
   );
 
-  return useAttendanceSubscription(normalizedId || null, subscribe);
+  return useAttendanceSubscription(key, subscribe);
 }

@@ -1,9 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
-import { router, Stack } from 'expo-router';
+import { router, Stack, type Href } from 'expo-router';
 import { ReactNode, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -18,10 +17,7 @@ import { useClasses } from '../../hooks/useClasses';
 import { useSchedules } from '../../hooks/useSchedules';
 import { useSessions } from '../../hooks/useSessions';
 import {
-  deleteClass,
   deleteSchedule,
-  deleteSession,
-  seedInitialSessions,
 } from '../../services/practicumService';
 import { colors, fonts, radius, shadows, spacing } from '../../theme';
 import { formatDateShort, formatTimeRange } from '../../utils/format';
@@ -52,9 +48,8 @@ const FORM_PATHS: Record<CrudKind, string> = {
 
 export default function ManageScreen() {
   const [tab, setTab] = useState<TabKey>('classes');
-  const [deleting, setDeleting] = useState<{ kind: CrudKind; id: string } | null>(null);
+  const [deletingScheduleId, setDeletingScheduleId] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
-  const [seeding, setSeeding] = useState(false);
 
   const classes = useClasses();
   const schedules = useSchedules();
@@ -66,89 +61,27 @@ export default function ManageScreen() {
     router.push(manageHref(FORM_PATHS[kind], id));
   };
 
-  const runDelete = async (kind: CrudKind, id: string) => {
-    setDeleting({ kind, id });
+  const runDeleteSchedule = async (id: string) => {
+    setDeletingScheduleId(id);
     setDeleteError(null);
     try {
-      if (kind === 'class') {
-        await deleteClass(id);
-      } else if (kind === 'schedule') {
-        await deleteSchedule(id);
-      } else {
-        await deleteSession(id);
-      }
+      await deleteSchedule(id);
     } catch (error) {
       setDeleteError(getErrorMessage(error));
     } finally {
-      setDeleting(null);
+      setDeletingScheduleId(null);
     }
   };
 
-  const confirmDelete = (kind: CrudKind, id: string, label: string) => {
+  const confirmDeleteSchedule = (id: string) => {
     confirmAction({
-      title: `Hapus ${label}?`,
+      title: 'Hapus jadwal ini?',
       message: 'Data yang dihapus tidak dapat dikembalikan.',
       onConfirm: () => {
-        void runDelete(kind, id);
+        void runDeleteSchedule(id);
       },
     });
   };
-
-  const runSeed = async () => {
-    setSeeding(true);
-    try {
-      const inserted = await seedInitialSessions();
-      if (inserted === 0) {
-        Alert.alert('Data sudah ada', 'Koleksi sesi sudah berisi data.');
-      }
-    } catch (error) {
-      Alert.alert('Gagal mengisi data awal', getErrorMessage(error));
-    } finally {
-      setSeeding(false);
-    }
-  };
-
-  const confirmSeed = () => {
-    Alert.alert(
-      'Isi data awal',
-      'Tambahkan data sesi contoh ke Firestore?',
-      [
-        { text: 'Batal', style: 'cancel' },
-        {
-          text: 'Isi Data',
-          onPress: () => {
-            void runSeed();
-          },
-        },
-      ],
-    );
-  };
-
-  const isDeleting = (kind: CrudKind, id: string) =>
-    deleting?.kind === kind && deleting.id === id;
-
-  const seedAction = (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel="Isi data awal"
-      disabled={seeding}
-      onPress={confirmSeed}
-      style={({ pressed }) => [
-        styles.seedButton,
-        seeding ? styles.seedButtonDisabled : null,
-        pressed && !seeding ? styles.pressed : null,
-      ]}
-    >
-      {seeding ? (
-        <ActivityIndicator size="small" color={colors.textOnPrimary} />
-      ) : (
-        <>
-          <Ionicons name="cloud-download-outline" size={16} color={colors.textOnPrimary} />
-          <Text style={styles.seedText}>Isi data awal</Text>
-        </>
-      )}
-    </Pressable>
-  );
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
@@ -169,6 +102,16 @@ export default function ManageScreen() {
             <Text style={styles.errorText}>{deleteError}</Text>
           </View>
         ) : null}
+
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => router.push('/assistant/manage/enrollments' as Href)}
+          style={styles.enrollmentLink}
+        >
+          <Ionicons name="people-outline" size={18} color={colors.primaryDark} />
+          <Text style={styles.enrollmentLinkText}>Kelola enrollment mahasiswa</Text>
+          <Ionicons name="chevron-forward" size={18} color={colors.primaryDark} />
+        </Pressable>
 
         <View style={styles.tabs}>
           {TABS.map((item) => {
@@ -218,10 +161,6 @@ export default function ManageScreen() {
                 eyebrow={getCourseName(item.courseId)}
                 title={`Kelas ${item.className}`}
                 onEdit={() => openForm('class', item.id)}
-                onDelete={() =>
-                  confirmDelete('class', item.id, `kelas ${item.className}`)
-                }
-                deleting={isDeleting('class', item.id)}
               >
                 <Text style={styles.meta}>
                   Dibuat {formatDateShort(item.createdAt)}
@@ -256,10 +195,8 @@ export default function ManageScreen() {
                     classDoc ? `Kelas ${classDoc.className}` : `Kelas ${item.classId}`
                   }
                   onEdit={() => openForm('schedule', item.id)}
-                  onDelete={() =>
-                    confirmDelete('schedule', item.id, 'jadwal ini')
-                  }
-                  deleting={isDeleting('schedule', item.id)}
+                  onDelete={() => confirmDeleteSchedule(item.id)}
+                  deleting={deletingScheduleId === item.id}
                 >
                   <Text style={styles.meta}>
                     {dayLabel} · {item.startTime}-{item.endTime}
@@ -282,7 +219,7 @@ export default function ManageScreen() {
             emptyIcon="time-outline"
             emptyTitle="Belum ada sesi"
             emptyBody="Sesi praktikum yang ditambahkan akan tampil di sini."
-            emptyAction={sessions.error ? null : seedAction}
+            emptyAction={null}
           >
             {sessions.data.map((item) => {
               const lecturerName = item.lecturer?.trim();
@@ -294,10 +231,6 @@ export default function ManageScreen() {
                   eyebrow={getCourseName(item.courseId)}
                   title={item.practicumName}
                   onEdit={() => openForm('session', item.id)}
-                  onDelete={() =>
-                    confirmDelete('session', item.id, item.practicumName)
-                  }
-                  deleting={isDeleting('session', item.id)}
                 >
                   <Text style={styles.meta}>
                     Kelas {item.className} · {formatDateShort(item.startsAt)}
@@ -415,6 +348,21 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
     backgroundColor: colors.surface,
+  },
+  enrollmentLink: {
+    minHeight: 48,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.md,
+    borderRadius: radius.md,
+    backgroundColor: colors.primarySofter,
+  },
+  enrollmentLinkText: {
+    flex: 1,
+    color: colors.primaryDark,
+    fontFamily: fonts.semiBold,
+    fontSize: 13,
   },
   tab: {
     flex: 1,

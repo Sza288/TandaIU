@@ -61,32 +61,75 @@ export function toClockTime(value: string): ClockTime {
 export function toDateTimeInput(iso: string): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return iso;
-
-  const pad = (value: number) => String(value).padStart(2, '0');
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(
-    date.getHours(),
-  )}:${pad(date.getMinutes())}`;
+  const parts = jakartaDateParts(date);
+  return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`;
 }
 
 export function fromDateTimeInput(value: string): string {
   const trimmed = value.trim();
   if (!trimmed) return trimmed;
 
-  const normalized = trimmed.length === 16 ? `${trimmed}:00` : trimmed;
-  const date = new Date(normalized);
-  if (Number.isNaN(date.getTime())) return trimmed;
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/.exec(trimmed);
+  if (!match) return trimmed;
+  const [, year, month, day, hour, minute, second = '0'] = match;
+  const wallParts = {
+    year: Number(year), month: Number(month), day: Number(day),
+    hour: Number(hour), minute: Number(minute), second: Number(second),
+  };
+  if (!isValidWallTime(wallParts)) return trimmed;
 
-  return date.toISOString();
+  const wallAsUtc = Date.UTC(
+    wallParts.year, wallParts.month - 1, wallParts.day,
+    wallParts.hour, wallParts.minute, wallParts.second,
+  );
+  let instant = wallAsUtc;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const actual = jakartaDateParts(new Date(instant), true);
+    const actualAsUtc = Date.UTC(
+      Number(actual.year), Number(actual.month) - 1, Number(actual.day),
+      Number(actual.hour), Number(actual.minute), Number(actual.second),
+    );
+    const correction = wallAsUtc - actualAsUtc;
+    instant += correction;
+    if (correction === 0) break;
+  }
+  const result = new Date(instant);
+  const roundTrip = jakartaDateParts(result, true);
+  if (!sameWallTime(wallParts, roundTrip)) return trimmed;
+  return result.toISOString();
+}
+
+type JakartaWallParts = { year: number; month: number; day: number; hour: number; minute: number; second: number };
+
+function jakartaDateParts(date: Date, includeSeconds = false): Record<string, string> {
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Jakarta', year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', ...(includeSeconds ? { second: '2-digit' } : {}),
+    hourCycle: 'h23',
+  });
+  return Object.fromEntries(formatter.formatToParts(date).map(({ type, value }) => [type, value]));
+}
+
+function isValidWallTime(value: JakartaWallParts): boolean {
+  if (value.hour > 23 || value.minute > 59 || value.second > 59) return false;
+  const check = new Date(Date.UTC(value.year, value.month - 1, value.day));
+  return check.getUTCFullYear() === value.year
+    && check.getUTCMonth() === value.month - 1
+    && check.getUTCDate() === value.day;
+}
+
+function sameWallTime(expected: JakartaWallParts, actual: Record<string, string>): boolean {
+  return expected.year === Number(actual.year)
+    && expected.month === Number(actual.month)
+    && expected.day === Number(actual.day)
+    && expected.hour === Number(actual.hour)
+    && expected.minute === Number(actual.minute)
+    && expected.second === Number(actual.second);
 }
 
 function toDateValue(date: Date): string {
-  const pad = (value: number) => String(value).padStart(2, '0');
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
-}
-
-function toTimeValue(date: Date): string {
-  const pad = (value: number) => String(value).padStart(2, '0');
-  return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  const parts = jakartaDateParts(date);
+  return `${parts.year}-${parts.month}-${parts.day}`;
 }
 
 export function todayDateValue(): string {
@@ -99,8 +142,12 @@ export function splitDateTimeInput(value: string): { date: string; time: string 
   return { date, time: time.slice(0, 5) };
 }
 
-export function combineDateTime(date: string, time: string): string {
+export function combineDateTime(date: string, time: string, originalValue?: string): string {
   if (!date || !time) return '';
+  if (originalValue) {
+    const originalInput = toDateTimeInput(originalValue);
+    if (originalInput === `${date}T${time}`) return originalValue;
+  }
   return fromDateTimeInput(`${date}T${time}`);
 }
 
@@ -110,15 +157,22 @@ export function addHoursToDateTime(
   hours: number,
 ): { date: string; time: string } {
   const [hour = '0', minute = '0'] = time.split(':');
-  const base = new Date(
-    `${date}T${hour.padStart(2, '0')}:${minute.padStart(2, '0')}:00`,
-  );
+  const baseWall = `${date}T${hour.padStart(2, '0')}:${minute.padStart(2, '0')}:00`;
+  const base = new Date(fromDateTimeInput(baseWall));
   if (Number.isNaN(base.getTime())) {
     return { date, time };
   }
 
-  base.setHours(base.getHours() + hours);
-  return { date: toDateValue(base), time: toTimeValue(base) };
+  const wall = jakartaDateParts(base, true);
+  const shifted = new Date(Date.UTC(
+    Number(wall.year), Number(wall.month) - 1, Number(wall.day),
+    Number(wall.hour) + hours, Number(wall.minute), Number(wall.second),
+  ));
+  const pad = (value: number) => String(value).padStart(2, '0');
+  return {
+    date: `${shifted.getUTCFullYear()}-${pad(shifted.getUTCMonth() + 1)}-${pad(shifted.getUTCDate())}`,
+    time: `${pad(shifted.getUTCHours())}:${pad(shifted.getUTCMinutes())}`,
+  };
 }
 
 const DAY_SHORT_LABELS = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'];
@@ -138,12 +192,12 @@ const MONTH_SHORT_LABELS = [
 ];
 
 export function formatDateLabel(value: string): string {
-  const date = new Date(`${value}T00:00:00`);
+  const date = new Date(`${value}T00:00:00.000Z`);
   if (!value || Number.isNaN(date.getTime())) return value;
 
-  return `${DAY_SHORT_LABELS[date.getDay()]}, ${date.getDate()} ${
-    MONTH_SHORT_LABELS[date.getMonth()]
-  } ${date.getFullYear()}`;
+  return `${DAY_SHORT_LABELS[date.getUTCDay()]}, ${date.getUTCDate()} ${
+    MONTH_SHORT_LABELS[date.getUTCMonth()]
+  } ${date.getUTCFullYear()}`;
 }
 
 export function fieldForMessage<T extends string>(

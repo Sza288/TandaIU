@@ -130,6 +130,11 @@ export async function ensureClassesForSessions(
   database: Firestore = getDefaultDatabase(),
   options: ClassMigrationOptions = {},
 ): Promise<InitialClassSeedResult> {
+  if (!options.dryRun) {
+    throw new Error(
+      'Penulisan migrasi kelas dinonaktifkan pada client Firestore. Administrator harus menjalankan migrasi tepercaya yang menetapkan assistantUid, semester, semesterParity, dan memverifikasi courseCatalog sebelum menulis.',
+    );
+  }
   const existingClasses = await readClassDocs(database);
   const { classByKey, classById, duplicateClasses } = indexClasses(existingClasses);
   const requested = uniquePairs(sessions);
@@ -239,6 +244,11 @@ export async function migrateClassesAndSessions(
   database: Firestore = getDefaultDatabase(),
   options: ClassMigrationOptions = {},
 ): Promise<ClassSessionMigrationResult> {
+  if (!options.dryRun) {
+    throw new Error(
+      'Migrasi classes/sessions hanya dapat dijalankan sebagai dry-run dari aplikasi. Penulisan membutuhkan tool Admin SDK dengan mapping owner dan katalog course tepercaya.',
+    );
+  }
   const sessionRead = await readCollectionDocuments(database, COLLECTIONS.sessions);
   if (sessionRead.error) {
     throw new Error(sessionRead.error);
