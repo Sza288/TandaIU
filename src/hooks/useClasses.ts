@@ -1,7 +1,8 @@
-import { collection, onSnapshot } from 'firebase/firestore';
+import { collection, onSnapshot, query, where } from 'firebase/firestore';
 import { useEffect, useState } from 'react';
 
 import { db } from '../lib/firebase';
+import { useAuthSession } from '../features/auth/AuthSessionContext';
 import { COLLECTIONS, type ClassDoc } from '../types/praktikum';
 
 export type ClassesFilter = {
@@ -31,17 +32,32 @@ function mapLoadError(error: unknown): string {
 
 export function useClasses(filter?: ClassesFilter): UseClassesResult {
   const courseId = filter?.courseId;
-  const filterKey = courseId ?? '';
+  const authSession = useAuthSession();
+  const assistant = authSession?.status === 'authenticated' && authSession.profile.role === 'asisten'
+    ? authSession.profile
+    : null;
+  const assistantUid = assistant?.uid ?? '';
+  const assistantSemesterParity = assistant?.assistantSemesterParity;
+  const assignmentMissing = Boolean(assistant && !assistantSemesterParity);
+  const filterKey = `${courseId ?? ''}::${assistantUid}::${assistantSemesterParity ?? ''}`;
   const [data, setData] = useState<ClassDoc[]>([]);
   const [errorState, setErrorState] = useState<string | null>(null);
   const [resolvedKey, setResolvedKey] = useState<string | null>(null);
 
-  const loading = resolvedKey !== filterKey;
-  const error = resolvedKey === filterKey ? errorState : null;
+  const loading = !assignmentMissing && resolvedKey !== filterKey;
+  const error = assignmentMissing
+    ? 'Penugasan semester akun Asprak belum dikonfigurasi.'
+    : resolvedKey === filterKey ? errorState : null;
 
   useEffect(() => {
+    if (assignmentMissing) return undefined;
+    const constraints = [];
+    if (assistantUid) {
+      constraints.push(where('assistantUid', '==', assistantUid));
+      constraints.push(where('semesterParity', '==', assistantSemesterParity));
+    }
     const unsubscribe = onSnapshot(
-      collection(db, COLLECTIONS.classes),
+      query(collection(db, COLLECTIONS.classes), ...constraints),
       (snapshot) => {
         const nextData = snapshot.docs
           .map((document) => ({
@@ -61,7 +77,7 @@ export function useClasses(filter?: ClassesFilter): UseClassesResult {
     );
 
     return unsubscribe;
-  }, [courseId, filterKey]);
+  }, [assignmentMissing, assistantUid, assistantSemesterParity, courseId, filterKey]);
 
-  return { data, loading, error };
+  return { data: assignmentMissing ? [] : data, loading, error };
 }

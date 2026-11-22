@@ -27,6 +27,7 @@ export type ReviewMutationResult =
  */
 export type ReviewSubscriptionScope = {
   studentId?: string;
+  sessionIds?: string[];
 };
 
 const REVIEWS_COLLECTION = 'reviews';
@@ -118,9 +119,23 @@ export function subscribeReviews(
   onReviews: (reviews: Review[]) => void,
   onError?: (message: string) => void,
 ): () => void {
-  const reviewsQuery = scope.studentId
-    ? query(collection(db, REVIEWS_COLLECTION), where('studentId', '==', scope.studentId))
-    : query(collection(db, REVIEWS_COLLECTION));
+  if (scope.sessionIds) {
+    const snapshots = new Map<string, Review[]>();
+    const unsubscribers = scope.sessionIds.map((sessionId) => onSnapshot(
+      query(collection(db, REVIEWS_COLLECTION), where('sessionId', '==', sessionId)),
+      (snapshot) => {
+        snapshots.set(sessionId, snapshot.docs.map((item) => toReview(item.id, item.data())));
+        onReviews([...snapshots.values()].flat().sort((a, b) => b.createdAt.localeCompare(a.createdAt)));
+      },
+      (error) => onError?.(getReviewErrorMessage(error)),
+    ));
+    return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
+  }
+
+  const reviewsQuery = query(
+    collection(db, REVIEWS_COLLECTION),
+    where('studentId', '==', scope.studentId ?? ''),
+  );
 
   return onSnapshot(
     reviewsQuery,

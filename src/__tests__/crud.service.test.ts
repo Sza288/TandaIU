@@ -1,9 +1,8 @@
-import { addDoc, deleteDoc, getDoc, getDocs, setDoc } from 'firebase/firestore';
+import { addDoc, getDoc, setDoc } from 'firebase/firestore';
 
 import { dosen } from '../data/dosen';
 import {
   createSession,
-  deleteClass,
   validateClassInput,
   validateScheduleInput,
   validateSessionInput,
@@ -28,7 +27,15 @@ jest.mock('firebase/firestore', () => ({
   where: jest.fn(),
 }));
 
-jest.mock('../lib/firebase', () => ({ db: {} }));
+jest.mock('../lib/firebase', () => ({
+  auth: {
+    currentUser: {
+      uid: 'assistant-1',
+      getIdTokenResult: jest.fn().mockResolvedValue({ claims: { assistantSemesterParity: 'ganjil' } }),
+    },
+  },
+  db: {},
+}));
 
 const validSession: SessionInput = {
   classId: 'c1',
@@ -131,6 +138,9 @@ describe('createSession lecturer validation', () => {
         courseId: validSession.courseId,
         className: validSession.className,
         createdAt: '2026-10-01T00:00:00+07:00',
+        semester: 3,
+        semesterParity: 'ganjil',
+        assistantUid: 'assistant-1',
       }),
     });
     (addDoc as jest.Mock).mockResolvedValue({ id: 's1' });
@@ -138,27 +148,11 @@ describe('createSession lecturer validation', () => {
     await expect(createSession(validSession)).resolves.toMatchObject({ id: 's1' });
 
     expect(addDoc).toHaveBeenCalledTimes(1);
-  });
-});
-
-describe('deleteClass', () => {
-  it('rejects deletion when the class still has schedules', async () => {
-    (getDocs as jest.Mock).mockResolvedValue({ size: 2, empty: false, docs: [] });
-
-    await expect(deleteClass('c1')).rejects.toThrow(
-      'Kelas masih memiliki 2 jadwal. Hapus jadwalnya dulu.',
-    );
-
-    expect(deleteDoc).not.toHaveBeenCalled();
-  });
-
-  it('deletes the class when it has no schedules', async () => {
-    (getDocs as jest.Mock).mockResolvedValue({ size: 0, empty: true, docs: [] });
-    (deleteDoc as jest.Mock).mockResolvedValue(undefined);
-
-    await expect(deleteClass('c1')).resolves.toBeUndefined();
-
-    expect(deleteDoc).toHaveBeenCalledTimes(1);
+    const writtenSession = (addDoc as jest.Mock).mock.calls[0][1];
+    expect(writtenSession.startsAt).toBeInstanceOf(Date);
+    expect(writtenSession.endsAt).toBeInstanceOf(Date);
+    expect(writtenSession.startsAt.getTime()).toBe(Date.parse(validSession.startsAt));
+    expect(writtenSession.endsAt.getTime()).toBe(Date.parse(validSession.endsAt));
   });
 });
 

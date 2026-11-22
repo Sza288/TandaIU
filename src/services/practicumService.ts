@@ -5,20 +5,14 @@ import {
   doc,
   getDoc,
   getDocs,
-  query,
-  setDoc,
   updateDoc,
-  where,
 } from 'firebase/firestore';
+import { auth, db } from '../lib/firebase';
 
 import { dosen } from '../data/dosen';
-import { initialSessions } from '../data/sessions';
-import { db } from '../lib/firebase';
-import {
-  buildClassKey,
-  ensureClassesForInitialSessions,
-} from '../migrations/classesSessions';
+import { courses } from '../data/courses';
 import type { SessionStatus } from '../types';
+import { firestoreDateToIso, isoToFirestoreDate } from '../utils/firestoreDate';
 import {
   COLLECTIONS,
   type ClassDoc,
@@ -130,7 +124,33 @@ async function resolveSessionClass(
   if (selected.courseId !== courseId) {
     throw new Error('Kelas tidak sesuai dengan mata kuliah yang dipilih.');
   }
+  const course = courses.find((item) => item.id === courseId);
+  if (!course || course.semester !== selected.semester) {
+    throw new Error('Semester kelas tidak sesuai dengan data mata kuliah.');
+  }
+  const currentUid = auth.currentUser?.uid;
+  if (!currentUid || selected.assistantUid !== currentUid || !selected.semester) {
+    throw new Error('Penanggung jawab atau semester kelas belum dikonfigurasi.');
+  }
   return selected;
+}
+
+async function buildOwnedClassInput(input: ClassInput): Promise<ClassInput> {
+  const user = auth.currentUser;
+  const course = courses.find((item) => item.id === input.courseId);
+  if (!user || !course) throw new Error('Akun Asprak atau mata kuliah tidak valid.');
+  const token = await user.getIdTokenResult();
+  const parity = token.claims.assistantSemesterParity;
+  if ((course.semester % 2 === 1 && parity !== 'ganjil')
+    || (course.semester % 2 === 0 && parity !== 'genap')) {
+    throw new Error('Mata kuliah berada di luar semester tanggung jawab akun ini.');
+  }
+  return {
+    ...input,
+    semester: course.semester,
+    semesterParity: course.semester % 2 === 1 ? 'ganjil' : 'genap',
+    assistantUid: user.uid,
+  };
 }
 
 type FirestoreErrorLike = {
@@ -162,9 +182,10 @@ async function runFirestore<T>(operation: () => Promise<T>): Promise<T> {
 
 export async function createClass(input: ClassInput): Promise<ClassDoc> {
   validateClassInput(input);
+  const ownedInput = await buildOwnedClassInput(input);
   return runFirestore(async () => {
-    const reference = await addDoc(collection(db, COLLECTIONS.classes), input);
-    return { id: reference.id, ...input };
+    const reference = await addDoc(collection(db, COLLECTIONS.classes), ownedInput);
+    return { id: reference.id, ...ownedInput };
   });
 }
 
@@ -174,27 +195,15 @@ export async function updateClass(
 ): Promise<ClassDoc> {
   validateClassInput(input);
   return runFirestore(async () => {
-    await updateDoc(doc(db, COLLECTIONS.classes, id), input);
-    return { id, ...input };
-  });
-}
-
-export async function deleteClass(id: string): Promise<void> {
-  const scheduleCount = await runFirestore(async () => {
-    const snapshot = await getDocs(
-      query(collection(db, COLLECTIONS.schedules), where('classId', '==', id)),
-    );
-    return snapshot.size;
-  });
-
-  if (scheduleCount > 0) {
-    throw new Error(
-      `Kelas masih memiliki ${scheduleCount} jadwal. Hapus jadwalnya dulu.`,
-    );
-  }
-
-  return runFirestore(async () => {
-    await deleteDoc(doc(db, COLLECTIONS.classes, id));
+    const current = await getClassById(id);
+    const ownedInput = await buildOwnedClassInput(input);
+    if (!current || current.assistantUid !== auth.currentUser?.uid
+      || current.semester !== ownedInput.semester) {
+      throw new Error('Kelas tidak ditemukan atau berada di luar kewenangan akun ini.');
+    }
+    const payload = { ...ownedInput, assistantUid: current.assistantUid };
+    await updateDoc(doc(db, COLLECTIONS.classes, id), payload);
+    return { id, ...payload };
   });
 }
 
@@ -223,8 +232,19 @@ export async function createSchedule(
 ): Promise<ScheduleDoc> {
   validateScheduleInput(input);
   return runFirestore(async () => {
-    const reference = await addDoc(collection(db, COLLECTIONS.schedules), input);
-    return { id: reference.id, ...input };
+    const classDoc = await getClassById(input.classId);
+    if (!classDoc || classDoc.courseId !== input.courseId
+      || classDoc.assistantUid !== auth.currentUser?.uid
+      || !classDoc.semesterParity) {
+      throw new Error('Pilih kelas yang berada di bawah tanggung jawab akun ini.');
+    }
+    const payload: ScheduleInput = {
+      ...input,
+      semesterParity: classDoc.semesterParity,
+      assistantUid: classDoc.assistantUid,
+    };
+    const reference = await addDoc(collection(db, COLLECTIONS.schedules), payload);
+    return { id: reference.id, ...payload };
   });
 }
 
@@ -234,8 +254,19 @@ export async function updateSchedule(
 ): Promise<ScheduleDoc> {
   validateScheduleInput(input);
   return runFirestore(async () => {
-    await updateDoc(doc(db, COLLECTIONS.schedules, id), input);
-    return { id, ...input };
+    const classDoc = await getClassById(input.classId);
+    if (!classDoc || classDoc.courseId !== input.courseId
+      || classDoc.assistantUid !== auth.currentUser?.uid
+      || !classDoc.semesterParity) {
+      throw new Error('Pilih kelas yang berada di bawah tanggung jawab akun ini.');
+    }
+    const payload: ScheduleInput = {
+      ...input,
+      semesterParity: classDoc.semesterParity,
+      assistantUid: classDoc.assistantUid,
+    };
+    await updateDoc(doc(db, COLLECTIONS.schedules, id), payload);
+    return { id, ...payload };
   });
 }
 
@@ -274,6 +305,9 @@ export async function createSession(input: SessionInput): Promise<SessionDoc> {
   validateSessionInput(input);
   const lecturer = resolveLecturer(input.lecturerId, input.lecturer);
   const classDoc = await resolveSessionClass(input.classId, input.courseId);
+  if (classDoc.semesterParity !== 'ganjil' && classDoc.semesterParity !== 'genap') {
+    throw new Error('Semester kelas belum dikonfigurasi.');
+  }
   const payload: Omit<SessionDoc, 'id'> = {
     classId: classDoc.id,
     courseId: classDoc.courseId,
@@ -284,10 +318,17 @@ export async function createSession(input: SessionInput): Promise<SessionDoc> {
     status: input.status,
     lecturerId: input.lecturerId,
     lecturer,
+    semester: classDoc.semester,
+    semesterParity: classDoc.semesterParity,
+    assistantUid: classDoc.assistantUid,
   };
 
   return runFirestore(async () => {
-    const reference = await addDoc(collection(db, COLLECTIONS.sessions), payload);
+    const reference = await addDoc(collection(db, COLLECTIONS.sessions), {
+      ...payload,
+      startsAt: isoToFirestoreDate(payload.startsAt),
+      endsAt: isoToFirestoreDate(payload.endsAt),
+    });
     return { id: reference.id, ...payload };
   });
 }
@@ -299,6 +340,9 @@ export async function updateSession(
   validateSessionInput(input);
   const lecturer = resolveLecturer(input.lecturerId, input.lecturer);
   const classDoc = await resolveSessionClass(input.classId, input.courseId);
+  if (classDoc.semesterParity !== 'ganjil' && classDoc.semesterParity !== 'genap') {
+    throw new Error('Semester kelas belum dikonfigurasi.');
+  }
   const payload: Omit<SessionDoc, 'id'> = {
     classId: classDoc.id,
     courseId: classDoc.courseId,
@@ -309,17 +353,18 @@ export async function updateSession(
     status: input.status,
     lecturerId: input.lecturerId,
     lecturer,
+    semester: classDoc.semester,
+    semesterParity: classDoc.semesterParity,
+    assistantUid: classDoc.assistantUid,
   };
 
   return runFirestore(async () => {
-    await updateDoc(doc(db, COLLECTIONS.sessions, id), payload);
+    await updateDoc(doc(db, COLLECTIONS.sessions, id), {
+      ...payload,
+      startsAt: isoToFirestoreDate(payload.startsAt),
+      endsAt: isoToFirestoreDate(payload.endsAt),
+    });
     return { id, ...payload };
-  });
-}
-
-export async function deleteSession(id: string): Promise<void> {
-  return runFirestore(async () => {
-    await deleteDoc(doc(db, COLLECTIONS.sessions, id));
   });
 }
 
@@ -329,9 +374,12 @@ export async function getSessionById(id: string): Promise<SessionDoc | null> {
     if (!snapshot.exists()) {
       return null;
     }
+    const data = snapshot.data() as Omit<SessionDoc, 'id'>;
     return {
+      ...data,
       id: snapshot.id,
-      ...(snapshot.data() as Omit<SessionDoc, 'id'>),
+      startsAt: firestoreDateToIso(data.startsAt),
+      endsAt: firestoreDateToIso(data.endsAt),
     };
   });
 }
@@ -339,37 +387,20 @@ export async function getSessionById(id: string): Promise<SessionDoc | null> {
 export async function getAllSessions(): Promise<SessionDoc[]> {
   return runFirestore(async () => {
     const snapshot = await getDocs(collection(db, COLLECTIONS.sessions));
-    return snapshot.docs.map((document) => ({
-      id: document.id,
-      ...(document.data() as Omit<SessionDoc, 'id'>),
-    }));
+    return snapshot.docs.map((document) => {
+      const data = document.data() as Omit<SessionDoc, 'id'>;
+      return {
+        ...data,
+        id: document.id,
+        startsAt: firestoreDateToIso(data.startsAt),
+        endsAt: firestoreDateToIso(data.endsAt),
+      };
+    });
   });
 }
 
 export async function seedInitialSessions(): Promise<number> {
-  return runFirestore(async () => {
-    const existing = await getDocs(collection(db, COLLECTIONS.sessions));
-    if (!existing.empty) {
-      return 0;
-    }
-
-    const classSeed = await ensureClassesForInitialSessions(initialSessions);
-
-    for (const session of initialSessions) {
-      const classDoc = classSeed.classByKey.get(
-        buildClassKey(session.courseId, session.className),
-      );
-      if (!classDoc) {
-        throw new Error(`Kelas untuk sesi ${session.id} tidak ditemukan.`);
-      }
-
-      const { id, ...payload } = session;
-      await setDoc(doc(db, COLLECTIONS.sessions, id), {
-        ...payload,
-        classId: classDoc.id,
-      });
-    }
-
-    return initialSessions.length;
-  });
+  throw new Error(
+    'Seed sesi demo dinonaktifkan. Data kelas dan sesi resmi harus disiapkan administrator dengan metadata owner, semester, parity, dan courseCatalog yang tervalidasi.',
+  );
 }

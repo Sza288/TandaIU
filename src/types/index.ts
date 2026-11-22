@@ -1,6 +1,7 @@
 export type SessionStatus = 'terjadwal' | 'dibuka' | 'ditutup';
 
-export type Semester = 1 | 2 | 3 | 4 | 5;
+// Semester parity is used for term ownership; allow future curriculum terms.
+export type Semester = number;
 
 export type AcademicTerm = 'ganjil' | 'genap';
 
@@ -15,8 +16,8 @@ export type PracticumSession = {
   courseId: string;
   practicumName: string;
   className: string;
-  startsAt: string; // ISO 8601
-  endsAt: string;   // ISO 8601
+  startsAt: string; // ISO 8601 in app models; Firestore stores Timestamp.
+  endsAt: string;   // ISO 8601 in app models; Firestore stores Timestamp.
   status: SessionStatus;
 };
 
@@ -32,7 +33,7 @@ export type ExcuseReason = 'sakit' | 'izin-lainnya';
 export type Attendance = {
   sessionId: string;
   praktikanId: string;
-  attendedAt: string; // ISO 8601
+  attendedAt: string; // ISO 8601 in app models; new Firestore writes use serverTimestamp.
   status?: 'hadir' | 'izin';
   excuseReason?: ExcuseReason;
 };

@@ -2,142 +2,440 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
-
-    // Memeriksa apakah pengguna sudah login.
     function isSignedIn() {
       return request.auth != null;
     }
 
-    // Mengambil role dari dokumen users/{uid}, bukan dari custom token.
+    function userPath(uid) {
+      return /databases/$(database)/documents/users/$(uid);
+    }
+
+    function hasValidProfile(uid) {
+      return exists(userPath(uid))
+        && get(userPath(uid)).data.role in ['praktikan', 'asisten', 'assistant']
+        && get(userPath(uid)).data.name is string
+        && get(userPath(uid)).data.email is string;
+    }
+
     function userRole() {
-      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+      return get(userPath(request.auth.uid)).data.role;
     }
 
-    // Asisten adalah pengguna login dengan role 'asisten'.
+    function isPraktikan() {
+      return isSignedIn()
+        && exists(userPath(request.auth.uid))
+        && get(userPath(request.auth.uid)).data.role == 'praktikan'
+        && get(userPath(request.auth.uid)).data.name is string
+        && get(userPath(request.auth.uid)).data.email is string;
+    }
+
+    // The role comes from the trusted profile; semester ownership comes only
+    // from an Admin SDK custom claim.
     function isAssistant() {
-      return isSignedIn() && userRole() == 'asisten';
+      return isSignedIn()
+        && exists(userPath(request.auth.uid))
+        && get(userPath(request.auth.uid)).data.role in ['asisten', 'assistant']
+        && get(userPath(request.auth.uid)).data.name is string
+        && get(userPath(request.auth.uid)).data.email is string
+        && request.auth.token.assistantSemesterParity in ['ganjil', 'genap'];
     }
 
-    // Pengguna hanya dapat membaca profil miliknya
+    function semesterMatchesAssignment(semester) {
+      return semester is int
+        && semester > 0
+        && ((semester % 2 == 1 && request.auth.token.assistantSemesterParity == 'ganjil')
+          || (semester % 2 == 0 && request.auth.token.assistantSemesterParity == 'genap'));
+    }
+
+    function courseMatchesSemester(courseId, semester, parity) {
+      return courseId is string
+        && semester is int
+        && semester > 0
+        && parity in ['ganjil', 'genap']
+        && exists(/databases/$(database)/documents/courseCatalog/$(courseId))
+        && get(/databases/$(database)/documents/courseCatalog/$(courseId)).data.semester == semester
+        && get(/databases/$(database)/documents/courseCatalog/$(courseId)).data.semesterParity == parity
+        && parity == (semester % 2 == 1 ? 'ganjil' : 'genap');
+    }
+
+    function validClass(data) {
+      return data.keys().hasAll([
+          'courseId', 'className', 'createdAt', 'semester', 'semesterParity', 'assistantUid'
+        ])
+        && data.keys().hasOnly([
+          'courseId', 'className', 'createdAt', 'semester', 'semesterParity', 'assistantUid'
+        ])
+        && data.courseId is string
+        && data.className is string
+        && data.createdAt is string
+        && data.assistantUid is string
+        && courseMatchesSemester(data.courseId, data.semester, data.semesterParity);
+    }
+
+    function assistantOwnsClass(classId) {
+      return isAssistant()
+        && exists(/databases/$(database)/documents/classes/$(classId))
+        && get(/databases/$(database)/documents/classes/$(classId)).data.assistantUid == request.auth.uid
+        && get(/databases/$(database)/documents/classes/$(classId)).data.semesterParity == request.auth.token.assistantSemesterParity
+        && semesterMatchesAssignment(get(/databases/$(database)/documents/classes/$(classId)).data.semester)
+        && courseMatchesSemester(
+          get(/databases/$(database)/documents/classes/$(classId)).data.courseId,
+          get(/databases/$(database)/documents/classes/$(classId)).data.semester,
+          get(/databases/$(database)/documents/classes/$(classId)).data.semesterParity
+        );
+    }
+
+    function praktikanEnrolledInClass(classId) {
+      return isPraktikan()
+        && exists(/databases/$(database)/documents/enrollments/$(classId + '_' + request.auth.uid))
+        && get(/databases/$(database)/documents/enrollments/$(classId + '_' + request.auth.uid)).data.praktikanId == request.auth.uid
+        && get(/databases/$(database)/documents/enrollments/$(classId + '_' + request.auth.uid)).data.classId == classId;
+    }
+
+    function sessionMatchesClass(data) {
+      return data.classId is string
+        && exists(/databases/$(database)/documents/classes/$(data.classId))
+        && courseMatchesSemester(
+          get(/databases/$(database)/documents/classes/$(data.classId)).data.courseId,
+          get(/databases/$(database)/documents/classes/$(data.classId)).data.semester,
+          get(/databases/$(database)/documents/classes/$(data.classId)).data.semesterParity
+        )
+        && data.courseId == get(/databases/$(database)/documents/classes/$(data.classId)).data.courseId
+        && data.className == get(/databases/$(database)/documents/classes/$(data.classId)).data.className
+        && data.semester == get(/databases/$(database)/documents/classes/$(data.classId)).data.semester
+        && data.semesterParity == get(/databases/$(database)/documents/classes/$(data.classId)).data.semesterParity
+        && data.assistantUid == get(/databases/$(database)/documents/classes/$(data.classId)).data.assistantUid;
+    }
+
+    function validSessionTimePair(data) {
+      return (data.startsAt is timestamp
+          && data.endsAt is timestamp
+          && data.endsAt > data.startsAt)
+        || (data.startsAt is string && data.endsAt is string);
+    }
+
+    function validSession(data) {
+      return data.keys().hasAll([
+          'classId', 'courseId', 'practicumName', 'className', 'startsAt', 'endsAt',
+          'status', 'semester', 'semesterParity', 'assistantUid'
+        ])
+        && data.keys().hasOnly([
+          'classId', 'courseId', 'practicumName', 'className', 'startsAt', 'endsAt',
+          'status', 'semester', 'semesterParity', 'assistantUid', 'lecturerId', 'lecturer'
+        ])
+        && data.practicumName is string
+        && validSessionTimePair(data)
+        && data.status in ['terjadwal', 'dibuka', 'ditutup']
+        && ((!data.keys().hasAny(['lecturerId', 'lecturer']))
+          || (data.lecturerId is string && data.lecturer is string))
+        && sessionMatchesClass(data);
+    }
+
+    function assistantOwnsSession(sessionId) {
+      return isAssistant()
+        && exists(/databases/$(database)/documents/sessions/$(sessionId))
+        && sessionMatchesClass(get(/databases/$(database)/documents/sessions/$(sessionId)).data)
+        && get(/databases/$(database)/documents/sessions/$(sessionId)).data.assistantUid == request.auth.uid
+        && get(/databases/$(database)/documents/sessions/$(sessionId)).data.semesterParity == request.auth.token.assistantSemesterParity
+        && assistantOwnsClass(get(/databases/$(database)/documents/sessions/$(sessionId)).data.classId);
+    }
+
+    function sessionRecordInAssistantScope(data) {
+      return isAssistant()
+        && validSession(data)
+        && data.assistantUid == request.auth.uid
+        && exists(/databases/$(database)/documents/classes/$(data.classId))
+        && get(/databases/$(database)/documents/classes/$(data.classId)).data.assistantUid == request.auth.uid
+        && get(/databases/$(database)/documents/classes/$(data.classId)).data.semesterParity == request.auth.token.assistantSemesterParity
+        && semesterMatchesAssignment(data.semester);
+    }
+
+    function scheduleRecordInAssistantScope(data) {
+      return isAssistant()
+        && data.keys().hasAll([
+          'classId', 'courseId', 'dayOfWeek', 'startTime', 'endTime', 'room',
+          'semesterParity', 'assistantUid'
+        ])
+        && data.keys().hasOnly([
+          'classId', 'courseId', 'dayOfWeek', 'startTime', 'endTime', 'room',
+          'semesterParity', 'assistantUid'
+        ])
+        && data.classId is string
+        && data.courseId is string
+        && data.dayOfWeek is int
+        && data.dayOfWeek >= 0
+        && data.dayOfWeek <= 6
+        && data.startTime is string
+        && data.endTime is string
+        && data.room is string
+        && data.assistantUid == request.auth.uid
+        && exists(/databases/$(database)/documents/classes/$(data.classId))
+        && get(/databases/$(database)/documents/classes/$(data.classId)).data.assistantUid == request.auth.uid
+        && get(/databases/$(database)/documents/classes/$(data.classId)).data.semester is int
+        && semesterMatchesAssignment(get(/databases/$(database)/documents/classes/$(data.classId)).data.semester)
+        && data.courseId == get(/databases/$(database)/documents/classes/$(data.classId)).data.courseId
+        && data.semesterParity == get(/databases/$(database)/documents/classes/$(data.classId)).data.semesterParity
+        && courseMatchesSemester(
+          get(/databases/$(database)/documents/classes/$(data.classId)).data.courseId,
+          get(/databases/$(database)/documents/classes/$(data.classId)).data.semester,
+          get(/databases/$(database)/documents/classes/$(data.classId)).data.semesterParity
+        );
+    }
+
+    function validEnrollment(data, enrollmentId) {
+      return data.keys().hasAll([
+          'praktikanId', 'praktikanName', 'studentCode', 'classId', 'courseId', 'semester', 'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'praktikanId', 'praktikanName', 'studentCode', 'classId', 'courseId', 'semester', 'createdAt'
+        ])
+        && data.praktikanId is string
+        && data.praktikanName is string
+        && data.studentCode is string
+        && data.classId is string
+        && data.courseId is string
+        && data.semester is int
+        && data.createdAt is string
+        && enrollmentId == data.classId + '_' + data.praktikanId;
+    }
+
+    function validDirectory(data) {
+      return data.keys().hasAll(['name', 'studentCode', 'semester', 'semesterParity'])
+        && data.keys().hasOnly(['name', 'studentCode', 'semester', 'semesterParity'])
+        && data.name is string
+        && data.studentCode is string
+        && data.semester is int
+        && data.semester > 0
+        && data.semesterParity in ['ganjil', 'genap']
+        && data.semesterParity == (data.semester % 2 == 1 ? 'ganjil' : 'genap');
+    }
+
     match /users/{userId} {
-      allow get: if request.auth != null
-                 && request.auth.uid == userId;
-
-      // Tidak boleh membaca seluruh koleksi users
+      // A missing profile can be fetched by its owner, but grants no access to
+      // any protected collection because role helpers require a valid profile.
+      allow get: if isSignedIn() && request.auth.uid == userId;
       allow list: if false;
-
-      // Praktikan maupun asisten boleh membuat profil sendiri
-      allow create: if request.auth != null
-                    && request.auth.uid == userId
-                    && request.resource.data.role in ['praktikan', 'asisten']
-                    && request.resource.data.authProvider in ['google', 'password']
-                    && request.resource.data.email is string
-                    && request.resource.data.name is string;
-
-      // Profil dan role tidak boleh diubah langsung oleh pengguna
+      allow create: if isSignedIn()
+        && request.auth.uid == userId
+        && request.resource.data.role == 'praktikan'
+        && request.resource.data.authProvider in ['google', 'password']
+        && request.resource.data.email is string
+        && request.resource.data.name is string
+        && request.resource.data.keys().hasAll(['role', 'authProvider', 'email', 'name'])
+        && request.resource.data.keys().hasOnly(['role', 'authProvider', 'email', 'name', 'studentCode'])
+        && (!request.resource.data.keys().hasAny(['studentCode']) || request.resource.data.studentCode is string);
       allow update, delete: if false;
     }
 
-    // Semua pengguna terautentikasi boleh membaca kelas; hanya asisten yang boleh menulis.
+    match /courseCatalog/{courseId} {
+      // The app uses its bundled course list. Rules read catalog documents
+      // internally for validation; clients do not need direct catalog access.
+      allow read, write: if false;
+    }
+
+    match /studentDirectory/{praktikanId} {
+      allow get: if (isPraktikan()
+          && request.auth.uid == praktikanId
+          && validDirectory(resource.data))
+        || (isAssistant()
+          && validDirectory(resource.data)
+          && semesterMatchesAssignment(resource.data.semester)
+          && resource.data.semesterParity == request.auth.token.assistantSemesterParity);
+      // The enrollment management UI filters by the assistant's claim parity.
+      // The directory is Admin-SDK-only, so its semester/parity pair is trusted.
+      allow list: if isAssistant()
+        && resource.data.semesterParity == request.auth.token.assistantSemesterParity;
+      allow create, update, delete: if false;
+    }
+
     match /classes/{classId} {
-      allow read: if isSignedIn();
-      allow write: if isAssistant();
+      allow get, list: if (isAssistant()
+          && validClass(resource.data)
+          && resource.data.assistantUid == request.auth.uid
+          && resource.data.semesterParity == request.auth.token.assistantSemesterParity)
+        || (praktikanEnrolledInClass(classId) && validClass(resource.data));
+      allow create: if validClass(request.resource.data)
+        && isAssistant()
+        && request.resource.data.assistantUid == request.auth.uid
+        && semesterMatchesAssignment(request.resource.data.semester);
+      allow update: if assistantOwnsClass(classId)
+        && validClass(request.resource.data)
+        && request.resource.data.assistantUid == resource.data.assistantUid
+        && request.resource.data.semester == resource.data.semester
+        && request.resource.data.semesterParity == resource.data.semesterParity
+        && request.resource.data.courseId == resource.data.courseId
+        && request.resource.data.createdAt == resource.data.createdAt;
+      // Client deletion could orphan sessions, enrollments, and attendance history.
+      // Delete only through a trusted administrative process after checking references.
+      allow delete: if false;
     }
 
-    // Semua pengguna terautentikasi boleh membaca jadwal; hanya asisten yang boleh menulis.
     match /schedules/{scheduleId} {
-      allow read: if isSignedIn();
-      allow write: if isAssistant();
+      allow get, list: if (isPraktikan()
+          && resource.data.classId is string
+          && praktikanEnrolledInClass(resource.data.classId))
+        || (isAssistant()
+          && scheduleRecordInAssistantScope(resource.data)
+          && resource.data.semesterParity == request.auth.token.assistantSemesterParity);
+      allow create: if scheduleRecordInAssistantScope(request.resource.data);
+      allow update: if scheduleRecordInAssistantScope(resource.data)
+        && scheduleRecordInAssistantScope(request.resource.data);
+      allow delete: if scheduleRecordInAssistantScope(resource.data);
     }
 
-    // Semua pengguna terautentikasi boleh membaca sesi; hanya asisten yang boleh menulis.
     match /sessions/{sessionId} {
-      allow read: if isSignedIn();
-      allow write: if isAssistant();
+      allow get: if (isPraktikan()
+          && validSession(resource.data)
+          && praktikanEnrolledInClass(resource.data.classId))
+        || (isAssistant()
+          && validSession(resource.data)
+          && resource.data.assistantUid == request.auth.uid
+          && resource.data.semesterParity == request.auth.token.assistantSemesterParity);
+      // Queries expose their constrained fields to Rules. Keep list access scoped
+      // to class enrollment or assistant owner/parity; get and all writes validate
+      // the full session/class/course relationship.
+      allow list: if (isPraktikan()
+          && resource.data.classId is string
+          && praktikanEnrolledInClass(resource.data.classId))
+        || (isAssistant()
+          && resource.data.assistantUid == request.auth.uid
+          && resource.data.semesterParity == request.auth.token.assistantSemesterParity);
+      allow create: if sessionRecordInAssistantScope(request.resource.data)
+        && request.resource.data.startsAt is timestamp
+        && request.resource.data.endsAt is timestamp;
+      allow update: if sessionRecordInAssistantScope(resource.data)
+        && sessionRecordInAssistantScope(request.resource.data)
+        && request.resource.data.startsAt is timestamp
+        && request.resource.data.endsAt is timestamp;
+      // Client deletion could orphan attendance, permit, review, and archive history.
+      // Delete only through a trusted administrative process after checking references.
+      allow delete: if false;
     }
 
-    // Presensi: ID = sessionId + '_' + uid, hanya praktikan untuk dirinya saat sesi dibuka.
-    match /attendances/{attendanceId} {
-      allow read: if isSignedIn();
-      allow create: if isSignedIn()
-        && userRole() == 'praktikan'
-        && request.resource.data.praktikanId == request.auth.uid
-        && attendanceId == request.resource.data.sessionId + '_' + request.auth.uid
-        && request.resource.data.status == 'hadir'
-        && request.resource.data.keys().hasAll(['sessionId', 'praktikanId', 'praktikanName', 'attendedAt', 'status'])
-        && get(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId)).data.status == 'dibuka';
+    match /enrollments/{enrollmentId} {
+      allow get: if (isPraktikan()
+          && resource.data.praktikanId == request.auth.uid
+          && enrollmentId == resource.data.classId + '_' + request.auth.uid)
+        || (isAssistant()
+          && validEnrollment(resource.data, enrollmentId)
+          && assistantOwnsClass(resource.data.classId));
+      allow list: if (isPraktikan()
+          && resource.data.keys().hasAll(['praktikanId'])
+          && resource.data.praktikanId == request.auth.uid)
+        || (isAssistant()
+          && resource.data.keys().hasAll(['classId'])
+          && resource.data.classId is string
+          && assistantOwnsClass(resource.data.classId));
+      allow create: if isAssistant()
+        && validEnrollment(request.resource.data, enrollmentId)
+        && assistantOwnsClass(request.resource.data.classId)
+        && request.resource.data.courseId == get(/databases/$(database)/documents/classes/$(request.resource.data.classId)).data.courseId
+        && request.resource.data.semester == get(/databases/$(database)/documents/classes/$(request.resource.data.classId)).data.semester
+        && exists(/databases/$(database)/documents/studentDirectory/$(request.resource.data.praktikanId))
+        && validDirectory(get(/databases/$(database)/documents/studentDirectory/$(request.resource.data.praktikanId)).data)
+        && get(/databases/$(database)/documents/studentDirectory/$(request.resource.data.praktikanId)).data.semester == request.resource.data.semester
+        && get(/databases/$(database)/documents/studentDirectory/$(request.resource.data.praktikanId)).data.semesterParity == get(/databases/$(database)/documents/classes/$(request.resource.data.classId)).data.semesterParity
+        && get(/databases/$(database)/documents/studentDirectory/$(request.resource.data.praktikanId)).data.studentCode == request.resource.data.studentCode
+        && get(/databases/$(database)/documents/studentDirectory/$(request.resource.data.praktikanId)).data.name == request.resource.data.praktikanName
+        && exists(userPath(request.resource.data.praktikanId))
+        && get(userPath(request.resource.data.praktikanId)).data.role == 'praktikan';
       allow update, delete: if false;
     }
 
-    // Izin: ID = sessionId + '_' + uid, satu pengajuan per sesi per praktikan.
-    // Praktikan mengajukan 'pending', asisten mereview jadi 'approved'/'rejected'.
+    match /attendances/{attendanceId} {
+      // Transactional check-in reads its not-yet-created deterministic record.
+      // A missing-document read reveals no data; existing reads stay owner-scoped.
+      allow get: if (isPraktikan() && resource == null)
+        || (isPraktikan()
+          && resource.data.praktikanId == request.auth.uid
+          && attendanceId == resource.data.sessionId + '_' + request.auth.uid)
+        || assistantOwnsSession(resource.data.sessionId);
+      allow list: if (isPraktikan() && resource.data.praktikanId == request.auth.uid)
+        || assistantOwnsSession(resource.data.sessionId);
+      allow create: if isPraktikan()
+        && request.resource.data.keys().hasAll(['sessionId', 'praktikanId', 'praktikanName', 'attendedAt', 'status'])
+        && request.resource.data.keys().hasOnly(['sessionId', 'praktikanId', 'praktikanName', 'attendedAt', 'status'])
+        && request.resource.data.praktikanId == request.auth.uid
+        && request.resource.data.praktikanName == get(userPath(request.auth.uid)).data.name
+        && request.resource.data.attendedAt is timestamp
+        && request.resource.data.attendedAt == request.time
+        && request.resource.data.status == 'hadir'
+        && attendanceId == request.resource.data.sessionId + '_' + request.auth.uid
+        && exists(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId))
+        && validSession(get(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId)).data)
+        && get(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId)).data.startsAt is timestamp
+        && get(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId)).data.endsAt is timestamp
+        && get(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId)).data.status == 'dibuka'
+        && request.time >= get(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId)).data.startsAt
+        && request.time < get(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId)).data.endsAt
+        && praktikanEnrolledInClass(get(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId)).data.classId);
+      allow update, delete: if false;
+    }
+
     match /permits/{permitId} {
-      allow read: if isSignedIn()
-        && (resource.data.studentId == request.auth.uid || isAssistant());
-      allow create: if isSignedIn()
-        && userRole() == 'praktikan'
+      // Permit submission checks a missing deterministic record in a transaction.
+      allow get: if (isPraktikan() && resource == null)
+        || (isPraktikan() && resource.data.studentId == request.auth.uid)
+        || assistantOwnsSession(resource.data.sessionId);
+      allow list: if (isPraktikan() && resource.data.studentId == request.auth.uid)
+        || assistantOwnsSession(resource.data.sessionId);
+      allow create: if isPraktikan()
+        && request.resource.data.keys().hasAll(['sessionId', 'studentId', 'studentName', 'reason', 'status', 'createdAt'])
+        && request.resource.data.keys().hasOnly(['sessionId', 'studentId', 'studentName', 'reason', 'status', 'createdAt'])
         && request.resource.data.studentId == request.auth.uid
+        && request.resource.data.studentName == get(userPath(request.auth.uid)).data.name
+        && request.resource.data.reason is string
         && permitId == request.resource.data.sessionId + '_' + request.auth.uid
         && request.resource.data.status == 'pending'
-        && !request.resource.data.keys().hasAny(['reviewedAt', 'reviewedBy'])
-        && request.resource.data.keys().hasAll(['sessionId', 'studentId', 'studentName', 'reason', 'status', 'createdAt']);
-      allow update: if isAssistant()
+        && request.resource.data.createdAt is string
+        && exists(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId))
+        && validSession(get(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId)).data)
+        && praktikanEnrolledInClass(get(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId)).data.classId);
+      allow update: if assistantOwnsSession(resource.data.sessionId)
         && resource.data.status == 'pending'
         && request.resource.data.status in ['approved', 'rejected']
+        && request.resource.data.reviewedAt is string
+        && (!request.resource.data.keys().hasAny(['reviewedBy'])
+          || request.resource.data.reviewedBy == get(userPath(request.auth.uid)).data.name)
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'reviewedAt', 'reviewedBy']);
       allow delete: if false;
     }
 
-    // Ulasan pasca-praktikum: ID = sessionId + '_' + uid, satu ulasan per sesi.
-    // Bila sesi tersedia di Firestore, statusnya wajib sudah 'ditutup'.
     match /reviews/{reviewId} {
-      allow read: if isSignedIn()
-        && (resource.data.studentId == request.auth.uid || isAssistant());
-      allow create: if isSignedIn()
-        && userRole() == 'praktikan'
+      allow get: if (isPraktikan() && resource == null)
+        || (isPraktikan() && resource.data.studentId == request.auth.uid)
+        || assistantOwnsSession(resource.data.sessionId);
+      allow list: if (isPraktikan() && resource.data.studentId == request.auth.uid)
+        || assistantOwnsSession(resource.data.sessionId);
+      allow create: if isPraktikan()
+        && request.resource.data.keys().hasAll([
+          'sessionId', 'studentId', 'studentName', 'comment', 'sentiment', 'sentimentSource', 'createdAt'
+        ])
+        && request.resource.data.keys().hasOnly([
+          'sessionId', 'studentId', 'studentName', 'comment', 'sentiment', 'sentimentSource', 'createdAt'
+        ])
         && request.resource.data.studentId == request.auth.uid
-        && reviewId == request.resource.data.sessionId + '_' + request.auth.uid
+        && request.resource.data.studentName == get(userPath(request.auth.uid)).data.name
+        && request.resource.data.comment is string
         && request.resource.data.sentiment in ['positif', 'netral', 'negatif']
         && request.resource.data.sentimentSource in ['model', 'fallback']
-        && request.resource.data.keys().hasAll(['sessionId', 'studentId', 'studentName', 'comment', 'sentiment', 'sentimentSource', 'createdAt'])
-        && (
-          !exists(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId))
-          || get(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId)).data.status == 'ditutup'
-        );
+        && request.resource.data.createdAt is string
+        && reviewId == request.resource.data.sessionId + '_' + request.auth.uid
+        && exists(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId))
+        && validSession(get(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId)).data)
+        && get(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId)).data.status == 'ditutup'
+        && praktikanEnrolledInClass(get(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId)).data.classId);
       allow update, delete: if false;
     }
 
-    // Enrollment: ID = classId + '_' + uid.
-    // Praktikan hanya boleh membaca enrollment miliknya sendiri. Asisten boleh
-    // membaca enrollment seluruh kelas (keputusan PM untuk TandaIU saat ini)
-    // agar detail sesi dapat menghitung terdaftar, belum presensi, dan
-    // persentase kehadiran. Tidak ada izin tulis untuk siapa pun.
-    match /enrollments/{enrollmentId} {
-      // Baca satu dokumen: milik sendiri (ID deterministik) atau asisten.
-      allow get: if isSignedIn()
-        && (
-          (resource.data.praktikanId == request.auth.uid
-            && enrollmentId == resource.data.classId + '_' + request.auth.uid)
-          || isAssistant()
-        );
-      // Query list: Firestore tidak dapat membuktikan syarat ID dokumen pada
-      // sebuah query, sehingga kepemilikan diverifikasi lewat field praktikanId.
-      allow list: if isSignedIn()
-        && (resource.data.praktikanId == request.auth.uid || isAssistant());
-      allow create, update, delete: if false;
-    }
-
-    // Arsip historis presensi yang tidak dapat menjadi dokumen attendance
-    // (enrollment tidak ada, atau versi ganda dari data demo lama).
-    // Hanya praktikan pemilik yang boleh membaca; asisten belum punya dasar
-    // relasi kelas sehingga belum diberi akses.
     match /attendanceArchives/{archiveId} {
-      allow get, list: if isSignedIn()
+      allow get, list: if isPraktikan()
+        && resource.data.keys().hasAll(['praktikanId'])
         && resource.data.praktikanId == request.auth.uid;
       allow create, update, delete: if false;
     }
 
-    // Koleksi lain ditolak secara default.
+    // Deny every collection that has no explicit policy above.
     match /{document=**} {
       allow read, write: if false;
     }

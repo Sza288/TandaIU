@@ -1,6 +1,7 @@
 import * as Linking from 'expo-linking';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
+import QRCode from 'react-native-qrcode-svg';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -48,20 +49,17 @@ type ActionFeedback = {
 
 function createAttendanceLink(sessionId: string): string {
   const encodedId = encodeURIComponent(sessionId);
-  const route = `/schedule/${encodedId}?role=praktikan`;
+  const route = `/schedule/${encodedId}`;
 
   if (Platform.OS === 'web' && typeof window !== 'undefined') {
     const { hostname, origin } = window.location;
     if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]') {
-      return `presensipraktikum:///schedule/${encodedId}?role=praktikan`;
+      return `presensipraktikum:///schedule/${encodedId}`;
     }
     return new URL(route, origin).toString();
   }
 
-  return Linking.createURL(`/schedule/${encodedId}`, {
-    scheme: 'presensipraktikum',
-    queryParams: { role: 'praktikan' },
-  });
+  return Linking.createURL(`/schedule/${encodedId}`, { scheme: 'presensipraktikum' });
 }
 
 function InfoRow({
@@ -95,6 +93,7 @@ export default function SessionDetailScreen() {
   const activePraktikanId = activeRole === 'praktikan' ? profile?.uid ?? null : null;
   const sessionResult = useSessions();
   const session = sessionResult.data.find((item) => item.id === sessionId);
+  const attendanceLink = session ? createAttendanceLink(session.id) : '';
   const sessionCourse = session ? getCourseById(session.courseId) : undefined;
   const isAssistant = activeRole === 'asisten';
   const praktikanEnrollmentResult = useEnrollments(
@@ -103,7 +102,7 @@ export default function SessionDetailScreen() {
   const classEnrollmentResult = useEnrollments(
     isAssistant && session?.classId ? { classId: session.classId } : undefined,
   );
-  const attendanceResult = useSessionAttendance(sessionId);
+  const attendanceResult = useSessionAttendance(sessionId, activePraktikanId);
   const currentUser = useMemo<CurrentUser | null>(() => {
     if (!profile) return null;
     return {
@@ -127,6 +126,14 @@ export default function SessionDetailScreen() {
   const detailScrollRef = useRef<ScrollViewInstance | null>(null);
   const rosterOffset = useRef(0);
   const [statusCardSize, setStatusCardSize] = useState({ width: 0, height: 0 });
+  const [visibleQrKey, setVisibleQrKey] = useState<string | null>(null);
+  const [currentTime, setCurrentTime] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setCurrentTime(Date.now()), 30_000);
+    return () => clearInterval(timer);
+  }, []);
+  const qrKey = session ? `${session.id}:${session.status}` : '';
+  const qrVisible = qrKey !== '' && visibleQrKey === qrKey;
   const enrolledPraktikans: EnrollmentRecord[] = classEnrollmentResult.data;
   const enrolledIds = new Set(enrolledPraktikans.map((praktikan) => praktikan.praktikanId));
   const attendanceByPraktikan = useMemo(() => {
@@ -210,6 +217,14 @@ export default function SessionDetailScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [diagKey]);
   const alreadyCheckedIn = activeAttendance !== undefined;
+  const withinAttendanceWindow = Boolean(
+    session
+    && currentTime >= Date.parse(session.startsAt)
+    && currentTime < Date.parse(session.endsAt),
+  );
+  const attendanceWindowElapsed = Boolean(
+    session && currentTime >= Date.parse(session.endsAt),
+  );
   const enrollmentLoading = isAssistant
     ? classEnrollmentResult.loading
     : praktikanEnrollmentResult.loading;
@@ -260,6 +275,7 @@ export default function SessionDetailScreen() {
       || !activePraktikanId
       || !isEnrolledPraktikan
       || alreadyCheckedIn
+      || !withinAttendanceWindow
       || enrollmentLoading
       || enrollmentError
       || attendanceResult.loading
@@ -305,7 +321,7 @@ export default function SessionDetailScreen() {
 
   const shareAttendanceLink = async () => {
     if (!session) return;
-    const link = createAttendanceLink(session.id);
+    const link = attendanceLink;
 
     try {
       if (Platform.OS === 'web') {
@@ -360,7 +376,9 @@ export default function SessionDetailScreen() {
       : alreadyCheckedIn
         ? activeAttendance?.status === 'izin' ? 'Izin Tercatat' : 'Sudah Presensi'
         : session?.status === 'dibuka'
-          ? 'Presensi Sekarang'
+          ? withinAttendanceWindow
+            ? 'Presensi Sekarang'
+            : attendanceWindowElapsed ? 'Waktu Presensi Berakhir' : 'Presensi Belum Dimulai'
           : session?.status === 'terjadwal'
             ? 'Presensi Belum Tersedia'
             : 'Sesi Telah Ditutup';
@@ -375,6 +393,7 @@ export default function SessionDetailScreen() {
       || attendanceResult.loading
       || !isEnrolledPraktikan
       || alreadyCheckedIn
+      || !withinAttendanceWindow
       || session.status !== 'dibuka'
     ));
   const actionHint = activeRole === null
@@ -395,6 +414,10 @@ export default function SessionDetailScreen() {
         ? 'Memeriksa apakah presensi sudah tercatat...'
       : !isEnrolledPraktikan
         ? 'Akun ini tidak terdaftar pada kelas praktikum tersebut.'
+      : session?.status === 'dibuka' && !withinAttendanceWindow
+        ? attendanceWindowElapsed
+          ? 'Waktu presensi sesi ini sudah berakhir (WIB).'
+          : 'Presensi tersedia setelah waktu mulai sesi (WIB).'
         : alreadyCheckedIn
           ? activeAttendance?.status === 'izin'
             ? 'Status izinnya sudah tercatat untuk sesi ini.'
@@ -602,21 +625,48 @@ export default function SessionDetailScreen() {
                   )}
                 </View>
 
-                {session.status === 'dibuka' ? (
-                  <View style={styles.shareBlock}>
-                    <Text style={styles.shareLabel}>Link presensi aktif</Text>
-                    <Text style={styles.shareLink} selectable>{createAttendanceLink(session.id)}</Text>
-                    <Pressable
-                      onPress={() => void shareAttendanceLink()}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Bagikan link presensi ${session.practicumName}`}
-                      style={({ pressed }) => [styles.shareButton, pressed && styles.buttonPressed]}
-                    >
-                      <Ionicons name="share-social-outline" size={18} color={colors.textOnPrimary} />
-                      <Text style={styles.shareButtonText}>Bagikan Link</Text>
-                    </Pressable>
-                  </View>
-                ) : null}
+                <View style={styles.shareBlock}>
+                  {session.status === 'dibuka' ? (
+                    <>
+                      <Text style={styles.shareLabel}>Link presensi aktif</Text>
+                      <Text style={styles.shareLink} selectable>{attendanceLink}</Text>
+                      <Pressable
+                        onPress={() => void shareAttendanceLink()}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Bagikan link presensi ${session.practicumName}`}
+                        style={({ pressed }) => [styles.shareButton, pressed && styles.buttonPressed]}
+                      >
+                        <Ionicons name="share-social-outline" size={18} color={colors.textOnPrimary} />
+                        <Text style={styles.shareButtonText}>Bagikan Link</Text>
+                      </Pressable>
+                      <Pressable
+                        onPress={() => setVisibleQrKey(qrVisible ? null : qrKey)}
+                        accessibilityRole="button"
+                        accessibilityLabel={qrVisible ? 'Sembunyikan QR presensi' : 'Tampilkan QR presensi'}
+                        style={({ pressed }) => [styles.shareButton, styles.qrButton, pressed && styles.buttonPressed]}
+                      >
+                        <Ionicons name="qr-code-outline" size={18} color={colors.primaryDark} />
+                        <Text style={styles.qrButtonText}>
+                          {qrVisible ? 'Sembunyikan QR Code' : 'Tampilkan QR Code'}
+                        </Text>
+                      </Pressable>
+                      {qrVisible ? (
+                        <View style={styles.qrContainer}>
+                          <QRCode value={attendanceLink} size={200} />
+                          <Text style={styles.qrCaption}>
+                            Pindai untuk membuka sesi {session.practicumName}.
+                          </Text>
+                        </View>
+                      ) : null}
+                    </>
+                  ) : (
+                    <Text style={styles.inactiveShareText}>
+                      {session.status === 'terjadwal'
+                        ? 'Link dan QR presensi tersedia setelah sesi dibuka.'
+                        : 'Sesi sudah ditutup. Link dan QR tidak dapat digunakan untuk presensi.'}
+                    </Text>
+                  )}
+                </View>
 
                 <View
                   style={styles.rosterSection}
@@ -1051,6 +1101,33 @@ const styles = StyleSheet.create({
     color: colors.textOnPrimary,
     fontFamily: fonts.bold,
     fontSize: 13,
+  },
+  qrButton: {
+    borderWidth: 1,
+    borderColor: colors.primarySoft,
+    backgroundColor: colors.surface,
+  },
+  qrButtonText: {
+    color: colors.primaryDark,
+    fontFamily: fonts.bold,
+    fontSize: 13,
+  },
+  qrContainer: {
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingVertical: spacing.md,
+  },
+  qrCaption: {
+    color: colors.textSecondary,
+    fontFamily: fonts.regular,
+    fontSize: 12,
+    textAlign: 'center',
+  },
+  inactiveShareText: {
+    color: colors.textSecondary,
+    fontFamily: fonts.regular,
+    fontSize: 12,
+    lineHeight: 18,
   },
   buttonPressed: {
     opacity: 0.85,

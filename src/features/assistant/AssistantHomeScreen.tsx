@@ -41,7 +41,7 @@ export default function AssistantHomeScreen() {
     () =>
       sessions
         .filter((s) => s.status === 'ditutup')
-        .sort((a, b) => b.startsAt.localeCompare(a.startsAt)),
+        .sort((a, b) => Date.parse(b.startsAt) - Date.parse(a.startsAt)),
     [sessions],
   );
 
