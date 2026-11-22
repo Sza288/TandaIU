@@ -27,6 +27,7 @@ jest.mock('firebase/firestore', () => ({
   onSnapshot: jest.fn(),
   query: jest.fn(),
   runTransaction: jest.fn(),
+  serverTimestamp: jest.fn(() => 'server_timestamp_sentinel'),
   where: jest.fn(),
 }));
 
@@ -67,7 +68,12 @@ function sessionSnapshot(status: string | null, classId = 'class-1') {
   return {
     id: 's5',
     exists: () => status !== null,
-    data: () => ({ status, classId }),
+    data: () => ({
+      status,
+      classId,
+      startsAt: '2026-11-15T10:00:00+07:00',
+      endsAt: '2026-11-15T12:00:00+07:00',
+    }),
   };
 }
 
@@ -148,7 +154,11 @@ describe('attendanceService (Firestore mode)', () => {
 
     expect(transaction.update).toHaveBeenCalledWith(
       expect.objectContaining({ path: 'sessions/s5' }),
-      { status: 'dibuka' },
+      {
+        status: 'dibuka',
+        startsAt: new Date('2026-11-15T03:00:00.000Z'),
+        endsAt: new Date('2026-11-15T05:00:00.000Z'),
+      },
     );
   });
 
@@ -160,7 +170,11 @@ describe('attendanceService (Firestore mode)', () => {
 
     expect(transaction.update).toHaveBeenCalledWith(
       expect.objectContaining({ path: 'sessions/s5' }),
-      { status: 'ditutup' },
+      {
+        status: 'ditutup',
+        startsAt: new Date('2026-11-15T03:00:00.000Z'),
+        endsAt: new Date('2026-11-15T05:00:00.000Z'),
+      },
     );
   });
 
@@ -188,7 +202,7 @@ describe('attendanceService (Firestore mode)', () => {
         sessionId: 's5',
         praktikanId: 'u1',
         praktikanName: 'User Satu Profil',
-        attendedAt: fixedNow.toISOString(),
+        attendedAt: 'server_timestamp_sentinel',
         status: 'hadir',
       },
     );
@@ -350,14 +364,22 @@ describe('attendanceService (Firestore mode)', () => {
     expect(result.reason).not.toContain('attendances');
   });
 
-  it('maps check-in permission errors to the enrollment reason (BUG-01)', async () => {
+  it('explains that a Rules rejection may be caused by time, status, or enrollment', async () => {
     const service = makeService();
     mockedRunTransaction.mockRejectedValueOnce({ code: 'permission-denied' });
 
     await expect(service.checkIn('s5', user)).resolves.toEqual({
       ok: false,
-      reason: ATTENDANCE_ENROLLMENT_UNVERIFIED_REASON,
+      reason: 'Presensi ditolak. Pastikan sesi sedang dibuka, waktu sesi masih berlaku, dan enrollment kamu valid.',
     });
+  });
+
+  it('scopes a praktikan session attendance listener to that praktikan', () => {
+    const service = makeService();
+    service.subscribeToAttendance('s5', jest.fn(), undefined, 'u1');
+
+    expect(mockedWhere).toHaveBeenNthCalledWith(1, 'sessionId', '==', 's5');
+    expect(mockedWhere).toHaveBeenNthCalledWith(2, 'praktikanId', '==', 'u1');
   });
 
   it('streams attendance snapshots through onSnapshot', () => {

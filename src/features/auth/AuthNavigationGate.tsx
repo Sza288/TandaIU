@@ -1,4 +1,4 @@
-import { router, usePathname } from 'expo-router';
+import { router, useGlobalSearchParams, usePathname, type Href } from 'expo-router';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import ProtectedRoute from '../../components/ProtectedRoute';
@@ -23,23 +23,46 @@ function requiredRoles(pathname: string): readonly UserRole[] | undefined {
 
 export default function AuthNavigationGate({ children }: AuthNavigationGateProps) {
   const pathname = usePathname();
+  const params = useGlobalSearchParams<{ returnTo?: string | string[] }>();
   const session = useAuthSession();
-  const navigationTarget = session ? getAuthNavigationTarget(session, pathname) : null;
+  const previousSessionStatus = useRef(session?.status);
+  const returnTo = Array.isArray(params.returnTo) ? params.returnTo[0] : params.returnTo;
+  const navigationTarget = session ? getAuthNavigationTarget(session, pathname, returnTo) : null;
   const pendingNavigationTarget = useRef<string | null>(null);
 
   useEffect(() => {
-    if (!navigationTarget) {
+    if (!session) {
       pendingNavigationTarget.current = null;
       return;
     }
-    if (pendingNavigationTarget.current !== navigationTarget) {
-      pendingNavigationTarget.current = navigationTarget;
-      router.replace(navigationTarget);
-    }
-  }, [navigationTarget]);
 
-  if (!session || session.status === 'loading') {
-    return <AuthLoadingScreen />;
+    const target = getAuthNavigationTarget(
+      session,
+      pathname,
+      returnTo,
+      previousSessionStatus.current,
+    );
+    previousSessionStatus.current = session.status;
+
+    if (!target) {
+      pendingNavigationTarget.current = null;
+      return;
+    }
+    if (pendingNavigationTarget.current !== target) {
+      pendingNavigationTarget.current = target;
+      router.replace(target as Href);
+    }
+  }, [navigationTarget, pathname, returnTo, session]);
+
+  if (!session || session.status === 'loading' || navigationTarget) {
+    return (
+      <View style={styles.gatedNavigator}>
+        {children}
+        <View style={styles.gatedNavigatorOverlay}>
+          <AuthLoadingScreen />
+        </View>
+      </View>
+    );
   }
   const canCompleteGoogleRegistration =
     session.status === 'error' &&
@@ -47,9 +70,6 @@ export default function AuthNavigationGate({ children }: AuthNavigationGateProps
     (pathname === '/auth/login' || pathname === '/auth/register');
   if (session.status === 'error' && !canCompleteGoogleRegistration) {
     return <AuthProfileRecovery message={session.message} />;
-  }
-  if (navigationTarget) {
-    return <AuthLoadingScreen />;
   }
   if (session.status === 'authenticated') {
     return (
@@ -127,6 +147,13 @@ function AuthLoadingScreen() {
 }
 
 const styles = StyleSheet.create({
+  gatedNavigator: {
+    flex: 1,
+  },
+  gatedNavigatorOverlay: {
+    ...StyleSheet.absoluteFill,
+    backgroundColor: colors.background,
+  },
   container: {
     flex: 1,
     alignItems: 'center',

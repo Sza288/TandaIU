@@ -71,7 +71,7 @@ export default function PraktikanPermitScreen() {
             if (a.status === 'dibuka') return -1;
             if (b.status === 'dibuka') return 1;
           }
-          return b.startsAt.localeCompare(a.startsAt);
+          return Date.parse(b.startsAt) - Date.parse(a.startsAt);
         }),
     [enrolledClassIds, sessions],
   );

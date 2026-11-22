@@ -1,7 +1,8 @@
-import { collection, onSnapshot } from 'firebase/firestore';
+import { collection, onSnapshot, query, where } from 'firebase/firestore';
 import { useEffect, useState } from 'react';
 
 import { db } from '../lib/firebase';
+import { useAuthSession } from '../features/auth/AuthSessionContext';
 import { COLLECTIONS, type ScheduleDoc } from '../types/praktikum';
 
 export type SchedulesFilter = {
@@ -31,17 +32,33 @@ function mapLoadError(error: unknown): string {
 
 export function useSchedules(filter?: SchedulesFilter): UseSchedulesResult {
   const classId = filter?.classId;
-  const filterKey = classId ?? '';
+  const authSession = useAuthSession();
+  const assistant = authSession?.status === 'authenticated' && authSession.profile.role === 'asisten'
+    ? authSession.profile
+    : null;
+  const assistantUid = assistant?.uid ?? '';
+  const assistantSemesterParity = assistant?.assistantSemesterParity;
+  const assignmentMissing = Boolean(assistant && !assistantSemesterParity);
+  const filterKey = `${classId ?? ''}::${assistantUid}::${assistantSemesterParity ?? ''}`;
   const [data, setData] = useState<ScheduleDoc[]>([]);
   const [errorState, setErrorState] = useState<string | null>(null);
   const [resolvedKey, setResolvedKey] = useState<string | null>(null);
 
-  const loading = resolvedKey !== filterKey;
-  const error = resolvedKey === filterKey ? errorState : null;
+  const loading = !assignmentMissing && resolvedKey !== filterKey;
+  const error = assignmentMissing
+    ? 'Penugasan semester akun Asprak belum dikonfigurasi.'
+    : resolvedKey === filterKey ? errorState : null;
 
   useEffect(() => {
+    if (assignmentMissing) return undefined;
+    const constraints = [];
+    if (assistantUid) {
+      constraints.push(where('assistantUid', '==', assistantUid));
+      constraints.push(where('semesterParity', '==', assistantSemesterParity));
+    }
+    if (classId) constraints.push(where('classId', '==', classId));
     const unsubscribe = onSnapshot(
-      collection(db, COLLECTIONS.schedules),
+      query(collection(db, COLLECTIONS.schedules), ...constraints),
       (snapshot) => {
         const nextData = snapshot.docs
           .map((document) => ({
@@ -61,7 +78,7 @@ export function useSchedules(filter?: SchedulesFilter): UseSchedulesResult {
     );
 
     return unsubscribe;
-  }, [classId, filterKey]);
+  }, [assignmentMissing, assistantUid, assistantSemesterParity, classId, filterKey]);
 
-  return { data, loading, error };
+  return { data: assignmentMissing ? [] : data, loading, error };
 }

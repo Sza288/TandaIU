@@ -85,55 +85,12 @@ describe('buildClassKey', () => {
 });
 
 describe('ensureClassesForSessions', () => {
-  it('reuses an existing class and never rewrites it', async () => {
-    jest.mocked(getDocs).mockResolvedValue({
-      docs: [
-        {
-          id: 'existing-class',
-          data: () => ({
-            courseId: 'struktur-data',
-            className: 'A1',
-            createdAt: '2026-01-01T00:00:00.000Z',
-          }),
-        },
-      ],
-    } as never);
-
-    const result = await ensureClassesForSessions(
-      [{ courseId: ' struktur-data ', className: ' A1 ' }],
-      database,
-    );
-
-    expect(result.created).toBe(0);
-    expect(result.reused).toBe(1);
-    expect(result.classByKey.get(buildClassKey('struktur-data', 'A1'))?.id).toBe(
-      'existing-class',
-    );
-    expect(runTransaction).not.toHaveBeenCalled();
-  });
-
-  it('creates a missing class through a transaction', async () => {
-    jest.mocked(getDocs).mockResolvedValue({ docs: [] } as never);
-    const set = jest.fn();
-    jest.mocked(runTransaction).mockImplementation(async (_db, callback) =>
-      callback({
-        get: async () => ({ exists: () => false }),
-        set,
-      } as never),
-    );
-
-    const result = await ensureClassesForSessions(
+  it('rejects client writes that cannot attach trusted assistant metadata', async () => {
+    await expect(ensureClassesForSessions(
       [{ courseId: 'struktur-data', className: 'A1' }],
       database,
-    );
-
-    expect(result.created).toBe(1);
-    expect(result.reused).toBe(0);
-    expect(set).toHaveBeenCalledTimes(1);
-    expect(set).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({ courseId: 'struktur-data', className: 'A1' }),
-    );
+    )).rejects.toThrow('Penulisan migrasi kelas dinonaktifkan');
+    expect(runTransaction).not.toHaveBeenCalled();
   });
 
   it('plans a missing class without writing during dry-run', async () => {

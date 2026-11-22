@@ -2,6 +2,7 @@ import { useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
 
 import { courses } from '../../data/courses';
+import { useAuthSession } from '../auth/AuthSessionContext';
 import {
   createClass,
   getClassById,
@@ -32,6 +33,10 @@ const CLASS_FIELDS: { field: ClassField; prefix: string }[] = [
 ];
 
 export default function ClassFormScreen() {
+  const authSession = useAuthSession();
+  const parity = authSession?.status === 'authenticated' && authSession.profile.role === 'asisten'
+    ? authSession.profile.assistantSemesterParity
+    : undefined;
   const params = useLocalSearchParams<{ id?: string | string[] }>();
   const id = Array.isArray(params.id) ? params.id[0] : params.id;
   const isEdit = Boolean(id);
@@ -73,6 +78,10 @@ export default function ClassFormScreen() {
   }, [id]);
 
   const selectedCourse = courses.find((course) => course.id === courseId);
+  const courseOptions = COURSE_OPTIONS.filter((option) => {
+    const course = courses.find((item) => item.id === option.value);
+    return parity && course && (course.semester % 2 === 1 ? 'ganjil' : 'genap') === parity;
+  });
 
   const handleSubmit = async () => {
     setErrors({});
@@ -158,7 +167,7 @@ export default function ClassFormScreen() {
       <OptionPicker
         visible={coursePickerVisible}
         title="Pilih Mata Kuliah"
-        options={COURSE_OPTIONS}
+        options={courseOptions}
         selectedValue={courseId}
         onSelect={setCourseId}
         onClose={() => setCoursePickerVisible(false)}

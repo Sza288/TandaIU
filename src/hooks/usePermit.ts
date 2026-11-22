@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Permit } from '../features/permit/permit.types';
 import { useAuthSession } from '../features/auth/AuthSessionContext';
 import { subscribePermits } from '../services/permitService';
+import { useSessions } from './useSessions';
 
 type PermitSnapshot = {
   key: string | null;
@@ -17,13 +18,21 @@ export function usePermits(): Permit[] {
   const profile = session?.status === 'authenticated' ? session.profile : null;
   const uid = profile?.uid ?? null;
   const role = profile?.role ?? null;
+  const assistantSessions = useSessions();
+  const sessionKey = role === 'asisten'
+    ? assistantSessions.data.map((item) => item.id).join('|')
+    : '';
+  const sessionIds = useMemo(
+    () => role === 'asisten' ? (sessionKey ? sessionKey.split('|') : []) : undefined,
+    [role, sessionKey],
+  );
   const key = uid && role ? `${role}:${uid}` : null;
   const [snapshot, setSnapshot] = useState<PermitSnapshot>({ key: null, permits: [] });
 
   useEffect(() => {
     if (!key || !uid || !role) return;
 
-    const scope = role === 'asisten' ? {} : { studentId: uid };
+    const scope = role === 'asisten' ? { sessionIds: sessionIds ?? [] } : { studentId: uid };
     return subscribePermits(
       scope,
       (next) => setSnapshot({ key, permits: next }),
@@ -32,7 +41,7 @@ export function usePermits(): Permit[] {
         setSnapshot({ key, permits: [] });
       },
     );
-  }, [key, role, uid]);
+  }, [key, role, uid, sessionIds]);
 
   return snapshot.key === key ? snapshot.permits : [];
 }

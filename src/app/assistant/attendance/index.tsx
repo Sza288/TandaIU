@@ -56,7 +56,7 @@ export default function AssistantAttendanceScreen() {
       [...sessions].sort((a, b) => {
         const byStatus = statusRank[a.status] - statusRank[b.status];
         if (byStatus !== 0) return byStatus;
-        return a.startsAt.localeCompare(b.startsAt);
+        return Date.parse(a.startsAt) - Date.parse(b.startsAt);
       }),
     [sessions],
   );

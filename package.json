@@ -28,6 +28,7 @@
     "react-dom": "19.3.0",
     "react-native": "0.88.1",
     "react-native-gesture-handler": "~3.3.0",
+    "react-native-qrcode-svg": "^6.3.54",
     "react-native-reanimated": "4.7.1",
     "react-native-safe-area-context": "~5.11.1",
     "react-native-screens": "~4.30.1",
@@ -36,10 +37,13 @@
     "react-native-worklets": "0.13.0"
   },
   "devDependencies": {
+    "@firebase/rules-unit-testing": "^6.0.0",
     "@types/jest": "^30.0.0",
+    "@types/node": "^26.6.6",
     "@types/react": "~19.3.0",
     "eslint": "^9.0.0",
     "eslint-config-expo": "~58.0.4",
+    "firebase-admin": "^14.5.1",
     "jest": "^30.5.2",
     "jest-expo": "~58.0.14",
     "typescript": "~6.0.3"
@@ -52,7 +56,16 @@
     "ios": "expo start --go --ios",
     "web": "expo start --web",
     "lint": "expo lint",
-    "test": "jest"
+    "test": "jest",
+    "test:rules": "set EXPO_PUBLIC_USE_RN_FETCH=1&& jest --runInBand --testTimeout=30000 src/__tests__/firestore.rules.test.ts",
+    "test:containment": "set EXPO_PUBLIC_USE_RN_FETCH=1&& jest --runInBand --testTimeout=30000 src/__tests__/firestore.containment.rules.test.ts",
+    "test:migration": "node --test scripts/production-session-timestamp-migration.test.cjs",
+    "production:sessions": "node scripts/production-session-timestamp-migration.cjs",
+    "emulators": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-firebase-emulators.ps1",
+    "seed:emulator": "node --env-file=.env.development.local scripts/seed-firebase-emulator.cjs",
+    "start:emulator": "expo start --go --lan",
+    "start:web:emulator": "expo start --web --lan",
+    "test:emulator:functional": "node --env-file=.env.development.local --test scripts/firebase-emulator.functional.test.cjs"
   },
   "private": true
 }

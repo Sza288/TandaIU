@@ -2,6 +2,7 @@ export const USER_ROLES = ['asisten', 'praktikan'] as const;
 
 export type UserRole = (typeof USER_ROLES)[number];
 export type RegistrationRole = 'praktikan' | 'asisten';
+export type AssistantSemesterParity = 'ganjil' | 'genap';
 
 export type AuthProfile = {
   uid: string;
@@ -9,6 +10,7 @@ export type AuthProfile = {
   email: string;
   role: UserRole;
   studentCode?: string;
+  assistantSemesterParity?: AssistantSemesterParity;
 };
 
 export type AuthSessionState =
@@ -31,17 +33,42 @@ export function getDashboardPath(role: UserRole): '/assistant' | '/praktikan' {
 export function getAuthNavigationTarget(
   state: AuthSessionState,
   pathname: string,
-): '/' | '/assistant' | '/praktikan' | null {
+  returnTo?: string,
+  previousStatus?: AuthSessionState['status'],
+): string | null {
   const isPublicPath =
     pathname === '/' || pathname === '/auth/login' || pathname === '/auth/register';
 
   if (state.status === 'authenticated' && (isPublicPath || pathname === '/home')) {
+    const sessionPath = normalizeScheduleDetailPath(returnTo);
+    if (pathname === '/auth/login' && sessionPath) return sessionPath;
     return getDashboardPath(state.profile.role);
   }
+  if (state.status === 'unauthenticated' && previousStatus === 'authenticated') {
+    return '/';
+  }
   if (state.status === 'unauthenticated' && !isPublicPath) {
+    const sessionPath = normalizeScheduleDetailPath(pathname);
+    if (sessionPath) {
+      return `/auth/login?returnTo=${encodeURIComponent(sessionPath)}`;
+    }
     return '/';
   }
   return null;
+}
+
+function normalizeScheduleDetailPath(path: string | undefined): string | null {
+  if (!path || !path.startsWith('/schedule/')) return null;
+  const segments = path.split('/');
+  if (segments.length !== 3 || !segments[2]) return null;
+
+  try {
+    const sessionId = decodeURIComponent(segments[2]);
+    if (!sessionId || sessionId.includes('/')) return null;
+    return `/schedule/${encodeURIComponent(sessionId)}`;
+  } catch {
+    return null;
+  }
 }
 
 // Dokumen lama sempat menyimpan role 'assistant'; nilai itu tetap diterima saat membaca.

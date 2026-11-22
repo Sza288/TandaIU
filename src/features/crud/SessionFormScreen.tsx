@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { courses } from '../../data/courses';
 import { dosen } from '../../data/dosen';
 import { useClasses } from '../../hooks/useClasses';
+import { useAuthSession } from '../auth/AuthSessionContext';
 import {
   createSession,
   getSessionById,
@@ -52,6 +53,10 @@ const SESSION_FIELDS: { field: SessionField; prefix: string }[] = [
 ];
 
 export default function SessionFormScreen() {
+  const authSession = useAuthSession();
+  const parity = authSession?.status === 'authenticated' && authSession.profile.role === 'asisten'
+    ? authSession.profile.assistantSemesterParity
+    : undefined;
   const params = useLocalSearchParams<{ id?: string | string[] }>();
   const id = Array.isArray(params.id) ? params.id[0] : params.id;
   const isEdit = Boolean(id);
@@ -67,6 +72,8 @@ export default function SessionFormScreen() {
   const [startTime, setStartTime] = useState('08:00');
   const [endDate, setEndDate] = useState(() => todayDateValue());
   const [endTime, setEndTime] = useState('10:00');
+  const [originalStartsAt, setOriginalStartsAt] = useState<string>();
+  const [originalEndsAt, setOriginalEndsAt] = useState<string>();
   const [status, setStatus] = useState('terjadwal');
   const [coursePickerVisible, setCoursePickerVisible] = useState(false);
   const [classPickerVisible, setClassPickerVisible] = useState(false);
@@ -90,6 +97,8 @@ export default function SessionFormScreen() {
           setCourseId(session.courseId);
           setPracticumName(session.practicumName);
           setLecturerId(session.lecturerId ?? '');
+          setOriginalStartsAt(session.startsAt);
+          setOriginalEndsAt(session.endsAt);
           const startParts = splitDateTimeInput(session.startsAt);
           const endParts = splitDateTimeInput(session.endsAt);
           setStartDate(startParts.date);
@@ -114,6 +123,10 @@ export default function SessionFormScreen() {
   const selectedCourse = courses.find((course) => course.id === courseId);
   const selectedClass = classes.data.find((classDoc) => classDoc.id === classId);
   const selectedLecturer = dosen.find((lecturer) => lecturer.id === lecturerId);
+  const courseOptions = COURSE_OPTIONS.filter((option) => {
+    const course = courses.find((item) => item.id === option.value);
+    return parity && course && (course.semester % 2 === 1 ? 'ganjil' : 'genap') === parity;
+  });
 
   const availableClasses = courseId
     ? classes.data.filter((classDoc) => classDoc.courseId === courseId)
@@ -195,8 +208,8 @@ export default function SessionFormScreen() {
       courseId: selectedClass.courseId,
       practicumName: selectedCourse.name,
       className: selectedClass.className,
-      startsAt: combineDateTime(startDate, startTime),
-      endsAt: combineDateTime(endDate, endTime),
+      startsAt: combineDateTime(startDate, startTime, originalStartsAt),
+      endsAt: combineDateTime(endDate, endTime, originalEndsAt),
       status: status as SessionStatus,
       lecturerId: toLecturerId(lecturerId),
       lecturer: selectedLecturer.name,
@@ -320,13 +333,13 @@ export default function SessionFormScreen() {
 
       <FormNote>
         Kelas dan dosen wajib dipilih untuk sesi baru maupun perubahan. Waktu menggunakan
-        zona waktu perangkat.
+        zona waktu Asia/Jakarta (WIB).
       </FormNote>
 
       <OptionPicker
         visible={coursePickerVisible}
         title="Pilih Mata Kuliah"
-        options={COURSE_OPTIONS}
+        options={courseOptions}
         selectedValue={courseId}
         onSelect={handleSelectCourse}
         onClose={() => setCoursePickerVisible(false)}
