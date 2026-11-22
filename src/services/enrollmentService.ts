@@ -1,7 +1,9 @@
 import {
   collection,
+  doc,
   onSnapshot,
   query,
+  runTransaction,
   where,
   type DocumentData,
   type Firestore,
@@ -9,7 +11,7 @@ import {
   type Unsubscribe,
 } from 'firebase/firestore';
 
-import { db } from '../lib/firebase';
+import { auth, db } from '../lib/firebase';
 import type { Semester } from '../types';
 
 export const ENROLLMENTS_COLLECTION = 'enrollments';
@@ -33,10 +35,88 @@ export type EnrollmentFilter = {
 export type EnrollmentListener = (records: EnrollmentRecord[]) => void;
 export type EnrollmentErrorHandler = (message: string) => void;
 
+export type StudentDirectoryRecord = {
+  uid: string;
+  name: string;
+  studentCode: string;
+  semester: Semester;
+  semesterParity: 'ganjil' | 'genap';
+};
+
+export function subscribeToStudentDirectory(
+  parity: 'ganjil' | 'genap',
+  onData: (students: StudentDirectoryRecord[]) => void,
+  onError?: EnrollmentErrorHandler,
+): Unsubscribe {
+  return onSnapshot(
+    query(collection(db, 'studentDirectory'), where('semesterParity', '==', parity)),
+    (snapshot) => {
+      const records = snapshot.docs.flatMap((item) => {
+        const data = item.data();
+        const semester = parseSemester(data.semester);
+        const name = typeof data.name === 'string' ? data.name.trim() : '';
+        const studentCode = typeof data.studentCode === 'string' ? data.studentCode.trim() : '';
+        if (!semester || !name || !studentCode) return [];
+        return [{ uid: item.id, name, studentCode, semester, semesterParity: parity }];
+      });
+      onData(records.sort((a, b) => a.name.localeCompare(b.name, 'id')));
+    },
+    (error) => onError?.(describeEnrollmentListenerError(error)),
+  );
+}
+
+export async function createEnrollment(
+  student: StudentDirectoryRecord,
+  classId: string,
+): Promise<void> {
+  const user = auth.currentUser;
+  if (!user) throw new Error('Sesi Asprak tidak tersedia.');
+  const token = await user.getIdTokenResult();
+  const parity = token.claims.assistantSemesterParity;
+  if (parity !== 'ganjil' && parity !== 'genap') {
+    throw new Error('Penugasan semester akun Asprak belum dikonfigurasi.');
+  }
+
+  const reference = doc(db, ENROLLMENTS_COLLECTION, `${classId}_${student.uid}`);
+  await runTransaction(db, async (transaction) => {
+    const classRef = doc(db, 'classes', classId);
+    const directoryRef = doc(db, 'studentDirectory', student.uid);
+    const [classSnapshot, directorySnapshot] = await Promise.all([
+      transaction.get(classRef),
+      transaction.get(directoryRef),
+    ]);
+    if (!classSnapshot.exists() || !directorySnapshot.exists()) {
+      throw new Error('Data kelas atau identitas mahasiswa belum tersedia.');
+    }
+    const classData = classSnapshot.data();
+    const directory = directorySnapshot.data();
+    if (classData.assistantUid !== user.uid || classData.semesterParity !== parity) {
+      throw new Error('Kelas berada di luar kewenangan semester akun ini.');
+    }
+    if (directory.semester !== classData.semester || directory.semesterParity !== parity
+      || student.semester !== directory.semester || student.studentCode !== directory.studentCode) {
+      throw new Error('Semester atau identitas mahasiswa tidak cocok dengan data resmi.');
+    }
+    transaction.set(reference, {
+      praktikanId: student.uid,
+      praktikanName: directory.name,
+      studentCode: directory.studentCode,
+      classId,
+      courseId: classData.courseId,
+      semester: directory.semester,
+      createdAt: new Date().toISOString(),
+    });
+  });
+}
+
 function toSemester(value: unknown): Semester {
-  return value === 1 || value === 2 || value === 3 || value === 4 || value === 5
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? value : 1;
+}
+
+function parseSemester(value: unknown): Semester | null {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0
     ? value
-    : 1;
+    : null;
 }
 
 export function mapEnrollment(id: string, data: DocumentData): EnrollmentRecord {

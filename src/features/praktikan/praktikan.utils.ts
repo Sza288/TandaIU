@@ -56,5 +56,5 @@ export function deriveOpenSessions(
       && enrolledSessionIds.has(session.id)
       && !handledSessionIds.has(session.id),
     )
-    .sort((a, b) => a.startsAt.localeCompare(b.startsAt));
+    .sort((a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt));
 }

@@ -3,6 +3,7 @@ import { Platform } from 'react-native';
 import {
   createUserWithEmailAndPassword,
   deleteUser,
+  getIdTokenResult,
   GoogleAuthProvider,
   sendPasswordResetEmail,
   signInWithEmailAndPassword,
@@ -15,6 +16,7 @@ import { doc, getDoc, runTransaction, setDoc } from 'firebase/firestore';
 import { auth, db } from '../lib/firebase';
 import {
   toUserRole,
+  type AssistantSemesterParity,
   type AuthProfile,
   type RegistrationRole,
 } from '../features/auth/authTypes';
@@ -71,8 +73,8 @@ export function validateRegistrationInput(input: RegistrationInput): string | nu
   if (!input.email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.email.trim())) {
     return 'Masukkan alamat email yang valid.';
   }
-  if (input.role !== 'praktikan' && input.role !== 'asisten') {
-    return 'Pilih peran akun yang valid.';
+  if (input.role !== 'praktikan') {
+    return 'Akun Asprak hanya dapat dibuat dan diaktifkan oleh admin.';
   }
   if (input.role === 'praktikan' && !input.studentCode.trim()) {
     return 'Kode mahasiswa perlu diisi.';
@@ -94,8 +96,8 @@ export function validateGoogleProfileInput(input: {
   if (!input.name.trim()) {
     return 'Nama perlu diisi.';
   }
-  if (input.role !== 'praktikan' && input.role !== 'asisten') {
-    return 'Pilih peran akun yang valid.';
+  if (input.role !== 'praktikan') {
+    return 'Akun Asprak hanya dapat dibuat dan diaktifkan oleh admin.';
   }
   if (input.role === 'praktikan' && !input.studentCode?.trim()) {
     return 'Kode mahasiswa perlu diisi.';
@@ -131,13 +133,22 @@ export function getAuthErrorMessage(error: unknown): string {
     case 'auth/invalid-credential':
     case 'auth/user-not-found':
     case 'auth/wrong-password':
+      if (process.env.EXPO_PUBLIC_USE_FIREBASE_EMULATOR === 'true') {
+        return 'Email atau kata sandi tidak cocok di Auth Emulator. Pastikan akun lokal sudah di-seed.';
+      }
       return 'Email atau kata sandi belum cocok.';
     case 'auth/user-disabled':
       return 'Akun ini sedang dinonaktifkan. Hubungi admin.';
     case 'auth/weak-password':
       return 'Kata sandi terlalu mudah ditebak. Coba gunakan yang lebih kuat.';
     case 'auth/network-request-failed':
+      if (process.env.EXPO_PUBLIC_USE_FIREBASE_EMULATOR === 'true') {
+        return 'Auth Emulator tidak dapat dijangkau. Pastikan emulator aktif dan host LAN di .env.development.local benar.';
+      }
       return 'Koneksi terputus. Periksa internetmu lalu coba lagi.';
+    case 'auth/invalid-api-key':
+    case 'auth/app-not-authorized':
+      return 'Konfigurasi Firebase aplikasi tidak cocok. Periksa project dan environment yang digunakan.';
     case 'auth/operation-not-allowed':
       return 'Metode masuk ini belum diaktifkan. Hubungi admin.';
     case 'auth/account-exists-with-different-credential':
@@ -155,7 +166,11 @@ export function getAuthErrorMessage(error: unknown): string {
   }
 }
 
-function makeProfile(data: Record<string, unknown>, expectedUid: string): AuthProfile {
+function makeProfile(
+  data: Record<string, unknown>,
+  expectedUid: string,
+  assistantSemesterParity?: AssistantSemesterParity,
+): AuthProfile {
   if (data.uid !== undefined && data.uid !== expectedUid) {
     throw new AuthServiceError(
       'profile-uid-mismatch',
@@ -181,6 +196,7 @@ function makeProfile(data: Record<string, unknown>, expectedUid: string): AuthPr
     name: data.name,
     email: data.email,
     role,
+    ...(role === 'asisten' && assistantSemesterParity ? { assistantSemesterParity } : {}),
     ...(typeof data.studentCode === 'string' && data.studentCode.trim()
       ? { studentCode: data.studentCode }
       : {}),
@@ -225,7 +241,11 @@ export async function getUserProfile(uid: string): Promise<AuthProfile> {
     );
   }
 
-  return makeProfile(snapshot.data() as Record<string, unknown>, uid);
+  const currentUser = auth.currentUser;
+  const token = currentUser?.uid === uid ? await getIdTokenResult(currentUser) : null;
+  const claim = token?.claims.assistantSemesterParity;
+  const assistantSemesterParity = claim === 'ganjil' || claim === 'genap' ? claim : undefined;
+  return makeProfile(snapshot.data() as Record<string, unknown>, uid, assistantSemesterParity);
 }
 
 export async function registerWithEmailAndPassword(
@@ -297,11 +317,6 @@ export async function registerGoogleProfile(input: {
   role: RegistrationRole;
   studentCode?: string;
 }): Promise<AuthProfile> {
-  const validationMessage = validateGoogleProfileInput(input);
-  if (validationMessage) {
-    throw new AuthServiceError('invalid-input', validationMessage);
-  }
-
   const user = auth.currentUser;
   if (!user?.email || !user.providerData.some((provider) => provider.providerId === 'google.com')) {
     throw new AuthServiceError(
@@ -323,10 +338,15 @@ export async function registerGoogleProfile(input: {
     await runTransaction(db, async (transaction) => {
       const snapshot = await transaction.get(profileRef);
       if (!snapshot.exists()) {
+        const validationMessage = validateGoogleProfileInput(input);
+        if (validationMessage) {
+          throw new AuthServiceError('invalid-input', validationMessage);
+        }
         transaction.set(profileRef, profileData);
       }
     });
   } catch (error) {
+    if (error instanceof AuthServiceError) throw error;
     const code = firebaseErrorCode(error);
     if (code === 'permission-denied') {
       throw new AuthServiceError(

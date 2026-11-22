@@ -8,7 +8,7 @@ type Props = {
   title: string;
   eyebrow?: string;
   onEdit: () => void;
-  onDelete: () => void;
+  onDelete?: () => void;
   deleting?: boolean;
   children?: ReactNode;
 };
@@ -39,7 +39,7 @@ export default function CrudCard({
       <View style={styles.divider} />
 
       <View style={styles.actions}>
-        <Pressable
+        {onDelete ? <Pressable
           accessibilityRole="button"
           accessibilityLabel={`Edit ${title}`}
           onPress={onEdit}
@@ -51,7 +51,7 @@ export default function CrudCard({
         >
           <Ionicons name="create-outline" size={14} color={colors.primaryDark} />
           <Text style={styles.editText}>Edit</Text>
-        </Pressable>
+        </Pressable> : null}
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={`Hapus ${title}`}
