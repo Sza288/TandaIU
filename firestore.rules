@@ -121,14 +121,43 @@ service cloud.firestore {
         ])
         && data.keys().hasOnly([
           'classId', 'courseId', 'practicumName', 'className', 'startsAt', 'endsAt',
-          'status', 'semester', 'semesterParity', 'assistantUid', 'lecturerId', 'lecturer'
+          'status', 'semester', 'semesterParity', 'assistantUid', 'lecturerId', 'lecturer',
+          'laboratoryId'
         ])
         && data.practicumName is string
         && validSessionTimePair(data)
         && data.status in ['terjadwal', 'dibuka', 'ditutup']
         && ((!data.keys().hasAny(['lecturerId', 'lecturer']))
           || (data.lecturerId is string && data.lecturer is string))
+        && ((!data.keys().hasAny(['laboratoryId']))
+          || (data.laboratoryId is string
+            && exists(/databases/$(database)/documents/laboratories/$(data.laboratoryId))))
         && sessionMatchesClass(data);
+    }
+
+    function validLaboratory(data) {
+      return data.keys().hasAll([
+          'name', 'latitude', 'longitude', 'radius', 'lantai', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'name', 'latitude', 'longitude', 'radius', 'lantai', 'createdAt', 'updatedAt'
+        ])
+        && data.name is string
+        && data.name.size() > 0
+        && (data.latitude is float || data.latitude is int)
+        && data.latitude >= -90
+        && data.latitude <= 90
+        && (data.longitude is float || data.longitude is int)
+        && data.longitude >= -180
+        && data.longitude <= 180
+        && data.radius is int
+        && data.radius >= 1
+        && data.radius <= 500
+        && data.lantai is int
+        && data.lantai >= 1
+        && data.lantai <= 6
+        && data.createdAt is string
+        && data.updatedAt is string;
     }
 
     function assistantOwnsSession(sessionId) {
@@ -310,6 +339,24 @@ service cloud.firestore {
       // Client deletion could orphan attendance, permit, review, and archive history.
       // Delete only through a trusted administrative process after checking references.
       allow delete: if false;
+    }
+
+    match /laboratories/{laboratoryId} {
+      // Laboratory coordinates and radius feed both attendance validation and the
+      // Maps screen, so every signed-in user needs read access. Any assistant may
+      // manage them: laboratories are shared facilities, not per-assistant records.
+      allow get, list: if isSignedIn();
+      allow create: if isAssistant() && validLaboratory(request.resource.data);
+      // The stored document is deliberately not re-validated: a record saved under
+      // an older, looser contract (for example lantai above the current maximum)
+      // must stay editable, otherwise it becomes permanently unreadable in the UI.
+      allow update: if isAssistant()
+        && validLaboratory(request.resource.data)
+        && request.resource.data.createdAt == resource.data.createdAt;
+      // Assistant-only deletion. Sessions keep a denormalized laboratoryId that
+      // becomes dangling if the document disappears; the UI warns before deleting
+      // and sessions without a resolvable laboratory are treated as unassigned.
+      allow delete: if isAssistant();
     }
 
     match /enrollments/{enrollmentId} {
