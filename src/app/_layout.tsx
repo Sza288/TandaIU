@@ -44,6 +44,14 @@ export default function RootLayout() {
             <Stack.Screen name="assistant" options={{ title: 'Asisten', headerShown: false }} />
             <Stack.Screen name="praktikan" options={{ title: 'Praktikan', headerShown: false }} />
             <Stack.Screen name="schedule" options={{ title: 'Jadwal', headerShown: false }} />
+            <Stack.Screen
+              name="schedule/schedules"
+              options={{ title: 'Jadwal Mingguan', headerShown: false }}
+            />
+            <Stack.Screen
+              name="schedule/schedule/[id]"
+              options={{ title: 'Detail Jadwal', headerShown: false }}
+            />
             <Stack.Screen name="schedule/[id]" options={{ title: 'Detail Sesi' }} />
             <Stack.Screen
               name="assistant/riwayat"
