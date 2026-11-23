@@ -7,7 +7,8 @@ type Props = {
   icon: keyof typeof Ionicons.glyphMap;
   title: string;
   eyebrow?: string;
-  onEdit: () => void;
+  /** Bila tidak diisi, kartu tidak menampilkan aksi edit sama sekali. */
+  onEdit?: () => void;
   onDelete?: () => void;
   deleting?: boolean;
   children?: ReactNode;
@@ -22,6 +23,8 @@ export default function CrudCard({
   deleting = false,
   children,
 }: Props) {
+  const hasActions = Boolean(onEdit || onDelete);
+
   return (
     <View style={styles.card}>
       <View style={styles.topRow}>
@@ -36,46 +39,52 @@ export default function CrudCard({
 
       {children}
 
-      <View style={styles.divider} />
+      {hasActions ? (
+        <>
+          <View style={styles.divider} />
 
-      <View style={styles.actions}>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={`Edit ${title}`}
-          onPress={onEdit}
-          style={({ pressed }) => [
-            styles.button,
-            styles.editButton,
-            pressed ? styles.buttonPressed : null,
-          ]}
-        >
-          <Ionicons name="create-outline" size={14} color={colors.primaryDark} />
-          <Text style={styles.editText}>Edit</Text>
-        </Pressable>
-        {onDelete ? (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={`Hapus ${title}`}
-            disabled={deleting}
-            onPress={onDelete}
-            style={({ pressed }) => [
-              styles.button,
-              styles.deleteButton,
-              pressed && !deleting ? styles.buttonPressed : null,
-              deleting ? styles.buttonDisabled : null,
-            ]}
-          >
-            {deleting ? (
-              <ActivityIndicator size="small" color={colors.danger} />
-            ) : (
-              <>
-                <Ionicons name="trash-outline" size={14} color={colors.danger} />
-                <Text style={styles.deleteText}>Hapus</Text>
-              </>
-            )}
-          </Pressable>
-        ) : null}
-      </View>
+          <View style={styles.actions}>
+            {onEdit ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`Edit ${title}`}
+                onPress={onEdit}
+                style={({ pressed }) => [
+                  styles.button,
+                  styles.editButton,
+                  pressed ? styles.buttonPressed : null,
+                ]}
+              >
+                <Ionicons name="create-outline" size={14} color={colors.primaryDark} />
+                <Text style={styles.editText}>Edit</Text>
+              </Pressable>
+            ) : null}
+            {onDelete ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`Hapus ${title}`}
+                disabled={deleting}
+                onPress={onDelete}
+                style={({ pressed }) => [
+                  styles.button,
+                  styles.deleteButton,
+                  pressed && !deleting ? styles.buttonPressed : null,
+                  deleting ? styles.buttonDisabled : null,
+                ]}
+              >
+                {deleting ? (
+                  <ActivityIndicator size="small" color={colors.danger} />
+                ) : (
+                  <>
+                    <Ionicons name="trash-outline" size={14} color={colors.danger} />
+                    <Text style={styles.deleteText}>Hapus</Text>
+                  </>
+                )}
+              </Pressable>
+            ) : null}
+          </View>
+        </>
+      ) : null}
     </View>
   );
 }
