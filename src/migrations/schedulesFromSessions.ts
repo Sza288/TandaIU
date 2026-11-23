@@ -9,7 +9,7 @@ import {
   type Firestore,
 } from 'firebase/firestore';
 
-import { firestoreDateToIso } from '../utils/firestoreDate';
+import { firestoreDateToIso, isoToFirestoreDate } from '../utils/firestoreDate';
 import type { ClockTime, DayOfWeek } from '../types/praktikum';
 import {
   describeFirestoreError,
@@ -35,6 +35,9 @@ export type ExistingSession = {
   courseId: string;
   startsAt: string;
   endsAt: string;
+  /** Nilai mentah dari Firestore; string lama harus dinormalkan ke Timestamp. */
+  startsAtRaw: unknown;
+  endsAtRaw: unknown;
   semesterParity: 'ganjil' | 'genap';
   assistantUid: string;
   hasScheduleId: boolean;
@@ -52,6 +55,8 @@ export type SchedulePlanItem = {
   assistantUid: string;
   jumlahPertemuan: number;
   sessionIds: string[];
+  /** Sesi yang waktunya masih berupa string; perlu dinormalkan saat update. */
+  sessionsNeedingTimestampFix: Record<string, { startsAt: unknown; endsAt: unknown }>;
 };
 
 export type SchedulePlan = {
@@ -66,6 +71,7 @@ export type ScheduleInjectionResult = {
   planned: number;
   created: number;
   sessionsLinked: number;
+  sessionsTimestampFixed: number;
   failed: number;
   dryRun: boolean;
   createdIds: string[];
@@ -139,6 +145,9 @@ export function buildSchedulePlan(sessions: readonly ExistingSession[]): Schedul
       continue;
     }
 
+    const needsFix = typeof session.startsAtRaw === 'string'
+      || typeof session.endsAtRaw === 'string';
+
     const groupKey = buildGroupKey(
       session.classId,
       start.dayOfWeek,
@@ -149,6 +158,12 @@ export function buildSchedulePlan(sessions: readonly ExistingSession[]): Schedul
     if (existing) {
       existing.sessionIds.push(session.id);
       existing.jumlahPertemuan += 1;
+      if (needsFix) {
+        existing.sessionsNeedingTimestampFix[session.id] = {
+          startsAt: session.startsAt,
+          endsAt: session.endsAt,
+        };
+      }
       continue;
     }
 
@@ -164,6 +179,9 @@ export function buildSchedulePlan(sessions: readonly ExistingSession[]): Schedul
       assistantUid: session.assistantUid,
       jumlahPertemuan: 1,
       sessionIds: [session.id],
+      sessionsNeedingTimestampFix: needsFix
+        ? { [session.id]: { startsAt: session.startsAt, endsAt: session.endsAt } }
+        : {},
     });
   }
 
@@ -203,6 +221,8 @@ export async function readAssistantSessions(
       courseId: typeof data.courseId === 'string' ? data.courseId.trim() : '',
       startsAt: firestoreDateToIso(data.startsAt),
       endsAt: firestoreDateToIso(data.endsAt),
+      startsAtRaw: data.startsAt,
+      endsAtRaw: data.endsAt,
       semesterParity: data.semesterParity === 'genap' ? 'genap' : 'ganjil',
       assistantUid: typeof data.assistantUid === 'string' ? data.assistantUid.trim() : '',
       hasScheduleId: readScheduleId(data) !== '',
@@ -223,6 +243,7 @@ export async function injectSchedulesFromSessions(
     planned: plan.items.length,
     created: 0,
     sessionsLinked: 0,
+    sessionsTimestampFixed: 0,
     failed: 0,
     dryRun: options.dryRun ?? false,
     createdIds: [],
@@ -231,7 +252,16 @@ export async function injectSchedulesFromSessions(
 
   if (result.dryRun) return result;
 
-  const existing = await getDocs(collection(database, SCHEDULES_COLLECTION));
+  // Rules menolak list `schedules` tanpa batasan owner/parity, jadi query harus
+  // memakai filter yang sama seperti hook aplikasi.
+  const owner = plan.items[0];
+  const existing = owner
+    ? await getDocs(query(
+      collection(database, SCHEDULES_COLLECTION),
+      where('assistantUid', '==', owner.assistantUid),
+      where('semesterParity', '==', owner.semesterParity),
+    ))
+    : { docs: [] as { id: string; data: () => DocumentData }[] };
   const scheduleIdByGroup = new Map<string, string>();
   existing.docs.forEach((document) => {
     const data = document.data();
@@ -272,12 +302,20 @@ export async function injectSchedulesFromSessions(
       }
 
       for (const sessionId of item.sessionIds) {
+        // Rules mewajibkan startsAt/endsAt bertipe timestamp. Sesi lama yang
+        // masih string harus dinormalkan dalam update yang sama, jika tidak
+        // seluruh update ditolak dan scheduleId tidak pernah tertulis.
+        const fix = item.sessionsNeedingTimestampFix[sessionId];
+        const update: Record<string, unknown> = { scheduleId };
+        if (fix) {
+          update.startsAt = isoToFirestoreDate(String(fix.startsAt));
+          update.endsAt = isoToFirestoreDate(String(fix.endsAt));
+        }
         await runTransaction(database, async (transaction) => {
-          transaction.update(doc(database, SESSIONS_COLLECTION, sessionId), {
-            scheduleId,
-          });
+          transaction.update(doc(database, SESSIONS_COLLECTION, sessionId), update);
         });
         result.sessionsLinked += 1;
+        if (fix) result.sessionsTimestampFixed += 1;
       }
     } catch (error) {
       const code = firestoreErrorCode(error);
@@ -347,7 +385,7 @@ export function scheduleInjectionStep(
     id: 'schedules-from-sessions',
     title: 'Jadwal dari sesi',
     status: 'applied',
-    summary: `Jadwal dibuat: ${result.created}; sesi ditautkan: ${result.sessionsLinked}.`,
+    summary: `Jadwal dibuat: ${result.created}; sesi ditautkan: ${result.sessionsLinked}; timestamp dinormalkan: ${result.sessionsTimestampFixed}.`,
     details,
   };
 }

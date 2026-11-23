@@ -468,6 +468,17 @@ export async function updateSession(
   input: SessionInput,
 ): Promise<SessionDoc> {
   validateSessionInput(input);
+  const current = await getSessionById(id);
+  if (!current) {
+    throw new Error('Sesi tidak ditemukan.');
+  }
+  if (current.status !== 'terjadwal') {
+    throw new Error(
+      current.status === 'dibuka'
+        ? 'Sesi yang sedang dibuka tidak dapat diubah. Tutup sesi terlebih dahulu.'
+        : 'Sesi yang sudah ditutup tidak dapat diubah.',
+    );
+  }
   const lecturer = resolveLecturer(input.lecturerId, input.lecturer);
   const classDoc = await resolveSessionClass(input.classId, input.courseId);
   if (classDoc.semesterParity !== 'ganjil' && classDoc.semesterParity !== 'genap') {

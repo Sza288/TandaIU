@@ -12,6 +12,8 @@ function session(overrides: Partial<ExistingSession> = {}): ExistingSession {
     // Senin 08:00-10:00 WIB
     startsAt: '2026-11-23T01:00:00.000Z',
     endsAt: '2026-11-23T03:00:00.000Z',
+    startsAtRaw: { seconds: 1, nanoseconds: 0 },
+    endsAtRaw: { seconds: 2, nanoseconds: 0 },
     semesterParity: 'ganjil',
     assistantUid: 'uid-1',
     hasScheduleId: false,
@@ -74,9 +76,27 @@ describe('buildSchedulePlan', () => {
   });
 
   it('reports sessions with unparsable times instead of guessing', () => {
-    const plan = buildSchedulePlan([session({ id: 's1', startsAt: '' })]);
-
+    const plan = buildSchedulePlan([session({ id: 's1', startsAt: '', endsAt: '' })]);
     expect(plan.sessionsSkippedInvalid).toEqual(['s1']);
     expect(plan.items).toHaveLength(0);
+  });
+
+  it('flags sessions whose timestamps are still strings', () => {
+    const plan = buildSchedulePlan([
+      session({
+        id: 's1',
+        startsAtRaw: '2026-11-23T01:00:00+07:00',
+        endsAtRaw: '2026-11-23T03:00:00+07:00',
+      }),
+      session({ id: 's2', startsAt: '2026-11-30T01:00:00.000Z', endsAt: '2026-11-30T03:00:00.000Z' }),
+    ]);
+
+    expect(Object.keys(plan.items[0].sessionsNeedingTimestampFix)).toEqual(['s1']);
+  });
+
+  it('does not flag sessions that already use timestamps', () => {
+    const plan = buildSchedulePlan([session()]);
+
+    expect(plan.items[0].sessionsNeedingTimestampFix).toEqual({});
   });
 });
