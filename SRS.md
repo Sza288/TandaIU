@@ -535,7 +535,7 @@ Jika ada keperluan mengubah file di `src/lib` atau `src/data`, **PM** melakukann
 | SRS Kode | User‑Story |
 |----------|------------|
 | **SRS‑05** | Sebagai **Asisten**, saya dapat **CRUD** data kelas, jadwal, dan sesi praktikum. |
-| **SRS‑06** | Saat membuat/menedit sesi, saya wajib memilih **dosen pengampu** (Nurul Hidayati atau Dimas Setiawan). |
+| **SRS‑06** | Saat membuat sesi, saya wajib memilih **dosen pengampu** (Nurul Hidayati atau Dimas Setiawan). |
 | **SRS‑07** | Sebagai **Sistem**, security‑rules harus membatasi **write** hanya untuk user dengan `role=="assistant"`; **read** di‑izinkan untuk semua user ter‑autentikasi. |
 
 **Deliverable**  
