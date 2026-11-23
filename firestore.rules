@@ -122,7 +122,7 @@ service cloud.firestore {
         && data.keys().hasOnly([
           'classId', 'courseId', 'practicumName', 'className', 'startsAt', 'endsAt',
           'status', 'semester', 'semesterParity', 'assistantUid', 'lecturerId', 'lecturer',
-          'laboratoryId'
+          'laboratoryId', 'scheduleId'
         ])
         && data.practicumName is string
         && validSessionTimePair(data)
@@ -132,6 +132,9 @@ service cloud.firestore {
         && ((!data.keys().hasAny(['laboratoryId']))
           || (data.laboratoryId is string
             && exists(/databases/$(database)/documents/laboratories/$(data.laboratoryId))))
+        && ((!data.keys().hasAny(['scheduleId']))
+          || (data.scheduleId is string
+            && exists(/databases/$(database)/documents/schedules/$(data.scheduleId))))
         && sessionMatchesClass(data);
     }
 
