@@ -36,7 +36,8 @@ type ScheduleField =
   | 'dayOfWeek'
   | 'startTime'
   | 'endTime'
-  | 'room';
+  | 'room'
+  | 'jumlahPertemuan';
 
 const SCHEDULE_FIELDS: { field: ScheduleField; prefix: string }[] = [
   { field: 'classId', prefix: 'Kelas' },
@@ -45,6 +46,7 @@ const SCHEDULE_FIELDS: { field: ScheduleField; prefix: string }[] = [
   { field: 'dayOfWeek', prefix: 'Hari' },
   { field: 'startTime', prefix: 'Waktu mulai' },
   { field: 'endTime', prefix: 'Waktu selesai' },
+  { field: 'jumlahPertemuan', prefix: 'Jumlah pertemuan' },
 ];
 
 export default function ScheduleFormScreen() {
@@ -61,6 +63,7 @@ export default function ScheduleFormScreen() {
   const [startTime, setStartTime] = useState('');
   const [endTime, setEndTime] = useState('');
   const [room, setRoom] = useState('');
+  const [jumlahPertemuan, setJumlahPertemuan] = useState('14');
   const [classPickerVisible, setClassPickerVisible] = useState(false);
   const [dayPickerVisible, setDayPickerVisible] = useState(false);
   const [errors, setErrors] = useState<Partial<Record<ScheduleField, string>>>({});
@@ -83,6 +86,7 @@ export default function ScheduleFormScreen() {
           setStartTime(schedule.startTime);
           setEndTime(schedule.endTime);
           setRoom(schedule.room);
+          setJumlahPertemuan(schedule.jumlahPertemuan ? String(schedule.jumlahPertemuan) : '14');
         }
         setReady(true);
       })
@@ -142,6 +146,7 @@ export default function ScheduleFormScreen() {
       startTime: toClockTime(startTime),
       endTime: toClockTime(endTime),
       room: room.trim(),
+      jumlahPertemuan: Number(jumlahPertemuan),
     };
 
     try {
@@ -232,6 +237,16 @@ export default function ScheduleFormScreen() {
         onChangeText={setRoom}
         placeholder="Contoh: Lab Komputer 2"
         error={errors.room}
+      />
+
+      <FormTextField
+        label="Jumlah pertemuan"
+        value={jumlahPertemuan}
+        onChangeText={setJumlahPertemuan}
+        placeholder="Contoh: 14"
+        keyboardType="number-pad"
+        error={errors.jumlahPertemuan}
+        hint="Dipakai sebagai acuan saat membuat sesi dari jadwal ini."
       />
 
       <FormNote>Jadwal akan muncul untuk seluruh pengguna yang sudah login.</FormNote>
