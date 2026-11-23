@@ -25,6 +25,7 @@ export type ScheduleDoc = {
   startTime: ClockTime;
   endTime: ClockTime;
   room: string;
+  jumlahPertemuan?: number;
   semesterParity?: 'ganjil' | 'genap';
   assistantUid?: string;
 };
@@ -37,6 +38,7 @@ export type SessionDoc = PracticumSession & {
   semesterParity?: 'ganjil' | 'genap';
   assistantUid?: string;
   laboratoryId?: string;
+  scheduleId?: string;
 };
 
 export type LaboratoryDoc = {
@@ -67,6 +69,7 @@ export type SessionInput = {
   lecturerId: LecturerId;
   lecturer: string;
   laboratoryId?: string;
+  scheduleId?: string;
 };
 
 export const LABORATORY_LIMITS = {

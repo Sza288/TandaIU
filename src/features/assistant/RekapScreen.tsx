@@ -10,7 +10,6 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import BottomNav from '../../components/BottomNav';
 import StatusBadge from '../../components/StatusBadge';
 import { useSessionAttendance } from '../../hooks/useAttendanceRecords';
 import { useEnrollments } from '../../hooks/useEnrollments';
@@ -149,7 +148,6 @@ export default function RekapScreen() {
           </View>
         )}
       </ScrollView>
-      <BottomNav />
     </SafeAreaView>
   );
 }
