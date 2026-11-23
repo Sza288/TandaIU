@@ -815,15 +815,18 @@ Kriteria penerimaan:
 - Radius presensi wajib diisi saat laboratorium ditambahkan (nilai mengikuti S3-SRS-07); laboratorium tanpa radius tidak dapat dipakai untuk presensi.
 - Sistem memvalidasi kelengkapan dan kewajaran data sebelum disimpan.
 
-#### S3-SRS-06 — Mengubah Data Laboratorium
+#### S3-SRS-06 — Mengelola Data Laboratorium
 
-Sistem harus memungkinkan asisten mengubah informasi laboratorium yang sudah tersimpan.
+Sistem harus memungkinkan asisten mengubah informasi laboratorium serta mengaktifkan atau menonaktifkan laboratorium yang sudah terdaftar.
 
 Kriteria penerimaan:
-- Asisten dapat memilih data laboratorium yang ingin diubah.
-- Asisten dapat mengubah nama dan koordinat laboratorium dengan validasi yang sama seperti S3-SRS-05.
-- Perubahan tersimpan dan digunakan oleh fitur yang membutuhkan data laboratorium.
-- Perubahan tidak mengubah data presensi yang sudah tercatat.
+- Asisten yang memiliki hak akses dapat mengubah informasi laboratorium.
+- Asisten dapat menonaktifkan laboratorium melalui konfirmasi sebelum perubahan dilakukan.
+- Laboratorium yang dinonaktifkan tidak dapat dipilih untuk sesi praktikum baru atau sesi yang sedang diedit.
+- Data laboratorium yang dinonaktifkan tetap tersimpan di Firestore dan tidak menghilangkan riwayat sesi yang pernah menggunakan laboratorium tersebut.
+- Asisten dapat melihat dan mengaktifkan kembali laboratorium yang sebelumnya dinonaktifkan.
+- Perubahan status laboratorium hanya dapat dilakukan oleh asisten yang memiliki hak akses sesuai validasi backend dan Firestore Rules.
+- Penghapusan permanen data laboratorium tidak disediakan melalui aplikasi.
 
 #### S3-SRS-07 — Mengatur Radius Laboratorium
 
