@@ -2,7 +2,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useMemo } from 'react';
 import {
-  Alert,
   ScrollView,
   StyleSheet,
   Text,
@@ -12,7 +11,6 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import BottomNav from '../../components/BottomNav';
 import RoleScreenHeader from '../../components/RoleScreenHeader';
-import SessionCard from '../../components/SessionCard';
 import { useAuthSession } from '../auth/AuthSessionContext';
 import { useSessions } from '../../hooks/useSessions';
 import { colors, fonts, radius, shadows, spacing } from '../../theme';
@@ -46,7 +44,6 @@ export default function AssistantHomeScreen() {
   );
 
   const primaryActive = activeSessions[0];
-  const defaultRecapSession = closedSessions[0];
 
   const goToSchedule = () => router.push('/schedule');
 
@@ -58,18 +55,8 @@ export default function AssistantHomeScreen() {
     }
   };
 
-  const goToRekap = () => {
-    if (!defaultRecapSession) {
-      Alert.alert('Rekap belum tersedia', 'Rekap dapat dilihat setelah sesi ditutup.');
-      return;
-    }
-    router.push({
-      pathname: '/assistant/rekap/[sessionId]',
-      params: { sessionId: defaultRecapSession.id },
-    });
-  };
+  const goToRekap = () => router.push('/assistant/rekap');
 
-  const goToRiwayat = () => router.push('/assistant/riwayat');
   const goToPermits = () => router.push('/assistant/permits');
   const goToReviews = () => router.push('/assistant/reviews');
 
@@ -117,33 +104,13 @@ export default function AssistantHomeScreen() {
         </View>
 
         <View style={styles.sectionRow}>
-          <Text style={styles.sectionTitle}>Sesi Praktikum</Text>
-          <Text style={styles.sectionCount}>{sessions.length} sesi</Text>
-        </View>
-        <View style={styles.sessionList}>
-          {sessionResult.loading ? (
-            <Text style={styles.sessionHint}>Memuat sesi dari Firestore...</Text>
-          ) : sessionResult.error ? (
-            <Text style={styles.sessionError}>{sessionResult.error}</Text>
-          ) : sessions.length === 0 ? (
-            <Text style={styles.sessionHint}>
-              Belum ada sesi praktikum. Buat sesi dari menu Kelola Praktikum.
-            </Text>
-          ) : (
-            sessions.map((item) => (
-              <SessionCard key={item.id} session={item} role="asisten" />
-            ))
-          )}
-        </View>
-
-        <View style={styles.sectionRow}>
           <Text style={styles.sectionTitle}>Menu Cepat</Text>
         </View>
         <View style={styles.quickGrid}>
           <QuickCard
             icon="calendar-outline"
-            title="Jadwal"
-            caption="Lihat semua jadwal praktikum"
+            title="Sesi"
+            caption="Lihat semua sesi praktikum"
             onPress={goToSchedule}
           />
           <QuickCard
@@ -155,14 +122,8 @@ export default function AssistantHomeScreen() {
           <QuickCard
             icon="stats-chart-outline"
             title="Rekap"
-            caption="Lihat statistik kehadiran praktikum"
-            onPress={() => goToRekap()}
-          />
-          <QuickCard
-            icon="time-outline"
-            title="Riwayat"
-            caption="Praktikum yang telah selesai"
-            onPress={goToRiwayat}
+            caption="Rekap kehadiran per kelas"
+            onPress={goToRekap}
           />
           <QuickCard
             icon="document-text-outline"
@@ -324,29 +285,6 @@ const styles = StyleSheet.create({
     fontSize: 17,
   },
 
-  sectionCount: {
-    color: colors.textMuted,
-    fontFamily: fonts.regular,
-    fontSize: 11,
-  },
-  sessionList: {
-    gap: spacing.sm,
-    paddingHorizontal: spacing.xl,
-  },
-  sessionHint: {
-    color: colors.textSecondary,
-    fontFamily: fonts.regular,
-    fontSize: 12,
-    lineHeight: 18,
-    paddingVertical: spacing.md,
-  },
-  sessionError: {
-    color: colors.danger,
-    fontFamily: fonts.semiBold,
-    fontSize: 12,
-    lineHeight: 18,
-    paddingVertical: spacing.md,
-  },
   quickGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',

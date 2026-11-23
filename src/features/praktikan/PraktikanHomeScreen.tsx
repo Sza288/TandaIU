@@ -217,8 +217,8 @@ export default function PraktikanHomeScreen() {
             <View style={styles.quickGrid}>
               <QuickCard
                 icon="calendar-outline"
-                title="Jadwal"
-                caption="Lihat semua jadwal praktikum"
+                title="Sesi"
+                caption="Lihat semua sesi praktikum"
                 onPress={handleOpenSchedule}
               />
               <QuickCard
