@@ -13,6 +13,7 @@ import BottomNav from '../../components/BottomNav';
 import RoleScreenHeader from '../../components/RoleScreenHeader';
 import { useAuthSession } from '../auth/AuthSessionContext';
 import { useSessions } from '../../hooks/useSessions';
+import { useSchedules } from '../../hooks/useSchedules';
 import { colors, fonts, radius, shadows, spacing } from '../../theme';
 
 function getInitials(name: string) {
@@ -27,6 +28,8 @@ function getInitials(name: string) {
 export default function AssistantHomeScreen() {
   const sessionResult = useSessions();
   const sessions = sessionResult.data;
+  const scheduleResult = useSchedules();
+  const scheduleCount = scheduleResult.data.length;
   const session = useAuthSession();
   const profile = session?.status === 'authenticated' ? session.profile : null;
   const name = profile?.name ?? 'Akun asisten';
@@ -89,7 +92,7 @@ export default function AssistantHomeScreen() {
           <StatTile
             icon="book-outline"
             label="Jadwal Diampu"
-            value={String(sessions.length)}
+            value={String(scheduleCount)}
           />
           <StatTile
             icon="radio-button-on-outline"
@@ -140,7 +143,7 @@ export default function AssistantHomeScreen() {
           <QuickCard
             icon="settings-outline"
             title="Kelola Praktikum"
-            caption="Atur kelas, jadwal, dan sesi"
+            caption="Atur kelas, jadwal, sesi, dan lab"
             onPress={goToKelola}
           />
         </View>

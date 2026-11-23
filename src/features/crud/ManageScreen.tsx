@@ -1,12 +1,13 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, Stack, type Href } from 'expo-router';
-import { ReactNode, useState } from 'react';
+import { ReactNode, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -55,6 +56,7 @@ export default function ManageScreen() {
   const [deletingScheduleId, setDeletingScheduleId] = useState<string | null>(null);
   const [deletingLaboratoryId, setDeletingLaboratoryId] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [sessionQuery, setSessionQuery] = useState('');
 
   const classes = useClasses();
   const schedules = useSchedules();
@@ -63,6 +65,34 @@ export default function ManageScreen() {
 
   const classById = new Map(classes.data.map((item) => [item.id, item]));
   const laboratoryById = new Map(laboratories.data.map((item) => [item.id, item]));
+
+  /**
+   * Hanya sesi `terjadwal` yang ditampilkan: sesi yang sedang dibuka atau sudah
+   * ditutup tidak dapat diubah, jadi tidak perlu muncul di pengelolaan.
+   */
+  const scheduledSessions = useMemo(
+    () => sessions.data.filter((item) => item.status === 'terjadwal'),
+    [sessions.data],
+  );
+
+  const filteredSessions = useMemo(() => {
+    const needle = sessionQuery.trim().toLocaleLowerCase('id-ID');
+    return scheduledSessions
+      .filter((item) => {
+        if (!needle) return true;
+        return [
+          item.practicumName,
+          getCourseName(item.courseId),
+          item.className,
+          item.lecturer ?? '',
+        ].some((value) => value.toLocaleLowerCase('id-ID').includes(needle));
+      })
+      .sort((a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt));
+  }, [scheduledSessions, sessionQuery]);
+
+  const resetSessionFilters = () => {
+    setSessionQuery('');
+  };
 
   const openForm = (kind: CrudKind, id?: string) => {
     router.push(manageHref(FORM_PATHS[kind], id));
@@ -270,53 +300,107 @@ export default function ManageScreen() {
             emptyBody="Sesi praktikum yang ditambahkan akan tampil di sini."
             emptyAction={null}
           >
-            {sessions.data.map((item) => {
-              const lecturerName = item.lecturer?.trim();
-              const laboratoryName = item.laboratoryId
-                ? laboratoryById.get(item.laboratoryId)?.name
-                : undefined;
+            <View style={styles.filterPanel}>
+              <View style={styles.searchBox}>
+                <Ionicons name="search-outline" size={18} color={colors.primary} />
+                <TextInput
+                  value={sessionQuery}
+                  onChangeText={setSessionQuery}
+                  placeholder="Cari praktikum, kelas, atau dosen..."
+                  placeholderTextColor={colors.textMuted}
+                  style={styles.searchInput}
+                  returnKeyType="search"
+                  accessibilityLabel="Cari sesi praktikum"
+                />
+                {sessionQuery.length > 0 ? (
+                  <Pressable
+                    onPress={() => setSessionQuery('')}
+                    accessibilityRole="button"
+                    accessibilityLabel="Hapus pencarian sesi"
+                    hitSlop={8}
+                  >
+                    <Ionicons name="close-circle" size={18} color={colors.textMuted} />
+                  </Pressable>
+                ) : null}
+              </View>
 
-              return (
-                <CrudCard
-                  key={item.id}
-                  icon="flask-outline"
-                  eyebrow={getCourseName(item.courseId)}
-                  title={item.practicumName}
-                  onEdit={() => openForm('session', item.id)}
-                >
-                  <Text style={styles.meta}>
-                    Kelas {item.className} · {formatDateShort(item.startsAt)}
-                  </Text>
-                  <Text style={styles.meta}>
-                    {formatTimeRange(item.startsAt, item.endsAt)}
-                  </Text>
-                  <View style={styles.metaRow}>
-                    <Ionicons
-                      name="person-outline"
-                      size={13}
-                      color={lecturerName ? colors.primary : colors.textMuted}
-                    />
-                    <Text style={[styles.meta, !lecturerName ? styles.metaMuted : null]}>
-                      {lecturerName || 'Dosen belum diisi'}
+              <View style={styles.filterFooter}>
+                <Text style={styles.filterCount}>
+                  {filteredSessions.length} dari {scheduledSessions.length} sesi terjadwal
+                </Text>
+                {sessionQuery.trim() ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Reset filter sesi"
+                    onPress={resetSessionFilters}
+                    hitSlop={6}
+                  >
+                    <Text style={styles.filterReset}>Reset</Text>
+                  </Pressable>
+                ) : null}
+              </View>
+            </View>
+
+            {filteredSessions.length === 0 ? (
+              <View style={styles.stateCard}>
+                <Ionicons name="search-outline" size={30} color={colors.textSecondary} />
+                <Text style={styles.stateTitle}>Tidak ada sesi yang cocok</Text>
+                <Text style={styles.stateBody}>
+                  Ubah kata kunci atau status untuk melihat sesi lain.
+                </Text>
+              </View>
+            ) : (
+              filteredSessions.map((item) => {
+                const lecturerName = item.lecturer?.trim();
+                const laboratoryName = item.laboratoryId
+                  ? laboratoryById.get(item.laboratoryId)?.name
+                  : undefined;
+                // Jadwal sesi hanya boleh dipindah sebelum dibuka. Sesi yang
+                // sedang dibuka atau sudah ditutup tidak bisa diedit lagi.
+                const editable = item.status === 'terjadwal';
+
+                return (
+                  <CrudCard
+                    key={item.id}
+                    icon="flask-outline"
+                    eyebrow={getCourseName(item.courseId)}
+                    title={item.practicumName}
+                    {...(editable ? { onEdit: () => openForm('session', item.id) } : {})}
+                  >
+                    <Text style={styles.meta}>
+                      Kelas {item.className} · {formatDateShort(item.startsAt)}
                     </Text>
-                  </View>
-                  <View style={styles.metaRow}>
-                    <Ionicons
-                      name="business-outline"
-                      size={13}
-                      color={laboratoryName ? colors.primary : colors.textMuted}
-                    />
-                    <Text style={[styles.meta, !laboratoryName ? styles.metaMuted : null]}>
-                      {laboratoryName || 'Laboratorium belum diatur'}
+                    <Text style={styles.meta}>
+                      {formatTimeRange(item.startsAt, item.endsAt)}
                     </Text>
-                  </View>
-                  <View style={styles.statusRow}>
-                    <Text style={styles.meta}>Kelas {item.className}</Text>
-                    <StatusBadge status={item.status} />
-                  </View>
-                </CrudCard>
-              );
-            })}
+                    <View style={styles.metaRow}>
+                      <Ionicons
+                        name="person-outline"
+                        size={13}
+                        color={lecturerName ? colors.primary : colors.textMuted}
+                      />
+                      <Text style={[styles.meta, !lecturerName ? styles.metaMuted : null]}>
+                        {lecturerName || 'Dosen belum diisi'}
+                      </Text>
+                    </View>
+                    <View style={styles.metaRow}>
+                      <Ionicons
+                        name="business-outline"
+                        size={13}
+                        color={laboratoryName ? colors.primary : colors.textMuted}
+                      />
+                      <Text style={[styles.meta, !laboratoryName ? styles.metaMuted : null]}>
+                        {laboratoryName || 'Laboratorium belum diatur'}
+                      </Text>
+                    </View>
+                    <View style={styles.statusRow}>
+                      <Text style={styles.meta}>Kelas {item.className}</Text>
+                      <StatusBadge status={item.status} />
+                    </View>
+                  </CrudCard>
+                );
+              })
+            )}
           </SectionShell>
         ) : null}
 
@@ -513,6 +597,69 @@ const styles = StyleSheet.create({
   },
   list: {
     gap: spacing.md,
+  },
+  filterPanel: {
+    gap: spacing.sm,
+  },
+  searchBox: {
+    minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.md,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.borderStrong,
+    backgroundColor: colors.surface,
+  },
+  searchInput: {
+    flex: 1,
+    minWidth: 0,
+    paddingVertical: spacing.sm,
+    color: colors.text,
+    fontFamily: fonts.regular,
+    fontSize: 13,
+  },
+  filterChips: {
+    gap: spacing.xs,
+    paddingVertical: 2,
+  },
+  filterChip: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: 6,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+  },
+  filterChipActive: {
+    borderColor: colors.primary,
+    backgroundColor: colors.primarySoft,
+  },
+  filterChipText: {
+    color: colors.textSecondary,
+    fontFamily: fonts.semiBold,
+    fontSize: 11,
+  },
+  filterChipTextActive: {
+    color: colors.primaryDark,
+    fontFamily: fonts.bold,
+  },
+  filterFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+  },
+  filterCount: {
+    color: colors.textMuted,
+    fontFamily: fonts.regular,
+    fontSize: 11,
+  },
+  filterReset: {
+    color: colors.primary,
+    fontFamily: fonts.bold,
+    fontSize: 11,
   },
   meta: {
     color: colors.textSecondary,
