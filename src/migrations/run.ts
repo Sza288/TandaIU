@@ -30,6 +30,7 @@ type CliOptions = {
   json: boolean;
   verbose: boolean;
   help: boolean;
+  schedules: boolean;
 };
 
 function parseArgs(argv: string[]): CliOptions {
@@ -39,6 +40,7 @@ function parseArgs(argv: string[]): CliOptions {
     json: false,
     verbose: false,
     help: false,
+    schedules: false,
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -57,6 +59,10 @@ function parseArgs(argv: string[]): CliOptions {
     }
     if (argument === '--verbose') {
       options.verbose = true;
+      continue;
+    }
+    if (argument === '--schedules') {
+      options.schedules = true;
       continue;
     }
     if (argument === '--help' || argument === '-h') {
@@ -318,6 +324,7 @@ function printUsage(): void {
       '',
       'Opsi:',
       '  --accounts <file>  JSON mapping studentCode -> UID praktikan',
+      '  --schedules        Buat jadwal dari sesi lama lalu tautkan scheduleId',
       '  --local-only       Validasi seed/template lokal tanpa Firebase',
       '  --dry-run          Baca dan rencanakan tanpa menulis apa pun',
       '  --json             Cetak laporan JSON lengkap',
@@ -394,6 +401,18 @@ async function main(): Promise<void> {
     const credential = await signInWithEmailAndPassword(auth, email, password);
     const profile = await getDoc(doc(database, 'users', credential.user.uid));
     const role = profile.exists() ? profile.data().role : null;
+    const token = await credential.user.getIdTokenResult();
+    const claimParity = token.claims.assistantSemesterParity;
+    const semesterParity = claimParity === 'ganjil' || claimParity === 'genap'
+      ? claimParity
+      : null;
+    const assistantUid = credential.user.uid;
+
+    if (options.schedules && !semesterParity) {
+      throw new Error(
+        'Custom claim assistantSemesterParity wajib bernilai ganjil/genap untuk --schedules.',
+      );
+    }
 
     if (role !== 'asisten') {
       if (!options.dryRun) {
@@ -437,6 +456,9 @@ async function main(): Promise<void> {
       database,
       enrollmentAccounts,
       dryRun: options.dryRun,
+      ...(options.schedules && semesterParity
+        ? { injectSchedules: { assistantUid, semesterParity } }
+        : {}),
     });
 
     printReport(result, options);

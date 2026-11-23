@@ -8,12 +8,12 @@ import {
 const NOW = Date.parse('2026-11-21T10:00:00+07:00');
 
 describe('schedule status filters', () => {
-  it('treats an open session as passed after its end and keeps closed sessions passed', () => {
+  it('keeps an open session in the open category even after its scheduled end', () => {
     expect(getScheduleStatusCategory({
       status: 'dibuka',
       startsAt: '2026-11-21T08:00:00+07:00',
       endsAt: '2026-11-21T09:00:00+07:00',
-    }, NOW)).toBe('terlewati');
+    }, NOW)).toBe('dibuka');
     expect(getScheduleStatusCategory({
       status: 'dibuka',
       startsAt: '2026-11-21T10:30:00+07:00',
@@ -44,16 +44,16 @@ describe('schedule status filters', () => {
     }, NOW)).toBe('mendatang');
   });
 
-  it('places a late-open session in exactly one category', () => {
-    const expiredOpen = {
+  it('places an open session in exactly one category', () => {
+    const open = {
       status: 'dibuka' as const,
       startsAt: '2026-11-21T08:00:00+07:00',
       endsAt: '2026-11-21T09:00:00+07:00',
     };
-    expect(getScheduleStatusCategory(expiredOpen, NOW)).toBe('terlewati');
-    expect(matchesScheduleStatus(expiredOpen, 'dibuka', NOW)).toBe(false);
-    expect(matchesScheduleStatus(expiredOpen, 'terlewati', NOW)).toBe(true);
-    expect(matchesScheduleStatus(expiredOpen, 'mendatang', NOW)).toBe(false);
+    expect(getScheduleStatusCategory(open, NOW)).toBe('dibuka');
+    expect(matchesScheduleStatus(open, 'dibuka', NOW)).toBe(true);
+    expect(matchesScheduleStatus(open, 'terlewati', NOW)).toBe(false);
+    expect(matchesScheduleStatus(open, 'mendatang', NOW)).toBe(false);
   });
 
   it('keeps all sessions in Semua and filters by one derived status at a time', () => {

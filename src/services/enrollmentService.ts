@@ -109,6 +109,38 @@ export async function createEnrollment(
   });
 }
 
+export async function deleteEnrollment(
+  praktikanId: string,
+  classId: string,
+): Promise<void> {
+  const user = auth.currentUser;
+  if (!user) throw new Error('Sesi Asprak tidak tersedia.');
+  const token = await user.getIdTokenResult();
+  const parity = token.claims.assistantSemesterParity;
+  if (parity !== 'ganjil' && parity !== 'genap') {
+    throw new Error('Penugasan semester akun Asprak belum dikonfigurasi.');
+  }
+
+  const reference = doc(db, ENROLLMENTS_COLLECTION, `${classId}_${praktikanId}`);
+  await runTransaction(db, async (transaction) => {
+    const [classSnapshot, enrollmentSnapshot] = await Promise.all([
+      transaction.get(doc(db, 'classes', classId)),
+      transaction.get(reference),
+    ]);
+    if (!classSnapshot.exists()) {
+      throw new Error('Data kelas belum tersedia.');
+    }
+    const classData = classSnapshot.data();
+    if (classData.assistantUid !== user.uid || classData.semesterParity !== parity) {
+      throw new Error('Kelas berada di luar kewenangan semester akun ini.');
+    }
+    if (!enrollmentSnapshot.exists()) {
+      throw new Error('Pendaftaran mahasiswa ini sudah tidak ada.');
+    }
+    transaction.delete(reference);
+  });
+}
+
 function toSemester(value: unknown): Semester {
   return typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? value : 1;
 }

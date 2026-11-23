@@ -12,7 +12,6 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Circle, Path } from 'react-native-svg';
-import BottomNav from '../../components/BottomNav';
 import SessionCard from '../../components/SessionCard';
 import { usePraktikanAttendance } from '../../hooks/useAttendanceRecords';
 import { useEnrollments } from '../../hooks/useEnrollments';
@@ -153,6 +152,7 @@ export default function ScheduleListScreen() {
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
+          style={styles.filterScroll}
           contentContainerStyle={styles.filterList}
           accessibilityLabel="Filter status jadwal"
         >
@@ -245,19 +245,28 @@ export default function ScheduleListScreen() {
 
         <View style={styles.sectionHeader}>
           <View>
-            <Text style={styles.sectionTitle}>Jadwal Praktikum</Text>
+            <Text style={styles.sectionTitle}>Sesi Praktikum</Text>
             <Text style={styles.sectionSubtitle}>
               {missingRole
                 ? 'Peran diperlukan'
                 : loading
-                  ? 'Memuat jadwal'
+                  ? 'Memuat sesi'
                   : dataError
-                    ? 'Jadwal tidak dapat dimuat'
+                    ? 'Sesi tidak dapat dimuat'
                     : missingEnrollmentMapping
                       ? 'Pendaftaran belum tersedia'
                       : `${visibleSessions.length} sesi tersedia`}
             </Text>
           </View>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Lihat jadwal mingguan"
+            onPress={() => router.push('/schedule/schedules')}
+            style={({ pressed }) => [styles.scheduleLink, pressed && styles.scheduleLinkPressed]}
+          >
+            <Ionicons name="calendar-outline" size={14} color={colors.primaryDark} />
+            <Text style={styles.scheduleLinkText}>Jadwal</Text>
+          </Pressable>
         </View>
 
         {missingRole ? (
@@ -307,7 +316,6 @@ export default function ScheduleListScreen() {
           </View>
         )}
       </ScrollView>
-      <BottomNav />
     </SafeAreaView>
   );
 }
@@ -393,7 +401,12 @@ const styles = StyleSheet.create({
     fontSize: 21,
     lineHeight: 28,
   },
+  filterScroll: {
+    flexGrow: 0,
+    flexShrink: 0,
+  },
   filterList: {
+    alignItems: 'center',
     gap: spacing.sm,
     paddingTop: spacing.lg,
   },
@@ -510,6 +523,23 @@ const styles = StyleSheet.create({
     marginTop: 2,
     color: colors.textMuted,
     fontFamily: fonts.regular,
+    fontSize: 11,
+  },
+  scheduleLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs + 2,
+    borderRadius: radius.pill,
+    backgroundColor: colors.primarySofter,
+  },
+  scheduleLinkPressed: {
+    opacity: 0.8,
+  },
+  scheduleLinkText: {
+    color: colors.primaryDark,
+    fontFamily: fonts.bold,
     fontSize: 11,
   },
   list: {

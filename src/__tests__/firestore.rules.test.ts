@@ -710,4 +710,21 @@ describeWithEmulator('Firestore Revisi 3 dan 4 access rules', () => {
       laboratoryId: 'lab-b',
     })).resolves.toBeUndefined();
   });
+
+  it('accepts scheduleId on sessions only when the schedule exists', async () => {
+    const odd = environment.authenticatedContext('asprak-odd', {
+      assistantSemesterParity: 'ganjil',
+    }).firestore();
+
+    await expect(setDoc(doc(odd, 'sessions/session-schedule-missing'), {
+      ...sessionRecord('class-ganjil', 'asprak-odd', 1),
+      scheduleId: 'schedule-tidak-ada',
+    })).rejects.toMatchObject({ code: 'permission-denied' });
+    await expect(setDoc(doc(odd, 'sessions/session-schedule-valid'), {
+      ...sessionRecord('class-ganjil', 'asprak-odd', 1),
+      startsAt: Timestamp.fromMillis(Date.now()),
+      endsAt: Timestamp.fromMillis(Date.now() + 3_600_000),
+      scheduleId: 'schedule-ganjil',
+    })).resolves.toBeUndefined();
+  });
 });
