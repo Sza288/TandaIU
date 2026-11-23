@@ -69,7 +69,7 @@ export default function BottomNav() {
         router.replace('/');
         return;
       }
-      router.replace('/schedule');
+      router.replace('/schedule/schedules');
       return;
     }
 
