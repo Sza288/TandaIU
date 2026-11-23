@@ -9,7 +9,6 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import BottomNav from '../../components/BottomNav';
 import ScreenHeader from '../../components/ScreenHeader';
 import { useReviews } from '../../hooks/useReview';
 import { useSessions } from '../../hooks/useSessions';
@@ -124,8 +123,6 @@ export default function AssistantReviewsScreen() {
           </View>
         )}
       </ScrollView>
-
-      <BottomNav />
     </SafeAreaView>
   );
 }

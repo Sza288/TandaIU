@@ -16,7 +16,12 @@ const TABS: { key: MainTab; label: string; icon: IconName; activeIcon: IconName 
   { key: 'profil', label: 'Profil', icon: 'person-outline', activeIcon: 'person' },
 ];
 
-function getActiveTab(pathname: string): MainTab {
+/**
+ * `null` berarti layar ini bukan salah satu tab utama, sehingga tidak ada tab
+ * yang ditandai aktif. Sebelumnya path tak dikenal jatuh ke 'beranda', membuat
+ * Beranda tampak terpilih sekaligus tidak bisa ditekan.
+ */
+function getActiveTab(pathname: string): MainTab | null {
   if (
     pathname === '/profile'
     || pathname.startsWith('/profile/')
@@ -33,7 +38,15 @@ function getActiveTab(pathname: string): MainTab {
   if (pathname === '/schedule' || pathname.startsWith('/schedule/')) {
     return 'jadwal';
   }
-  return 'beranda';
+  if (
+    pathname === '/assistant'
+    || pathname === '/praktikan'
+    || pathname === '/home'
+    || pathname === '/'
+  ) {
+    return 'beranda';
+  }
+  return null;
 }
 
 export default function BottomNav() {
