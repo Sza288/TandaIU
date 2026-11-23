@@ -50,8 +50,16 @@ export default function RootLayout() {
               options={{ title: 'Riwayat Presensi', headerShown: false }}
             />
             <Stack.Screen
+              name="assistant/rekap"
+              options={{ title: 'Rekap per Kelas', headerShown: false }}
+            />
+            <Stack.Screen
               name="assistant/rekap/[sessionId]"
               options={{ title: 'Rekap Presensi' }}
+            />
+            <Stack.Screen
+              name="assistant/rekap/kelas/[classId]"
+              options={{ title: 'Rekap Kelas', headerShown: false }}
             />
             <Stack.Screen name="praktikan/riwayat" options={{ title: 'Riwayat Presensi' }} />
             <Stack.Screen
