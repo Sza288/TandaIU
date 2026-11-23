@@ -190,7 +190,7 @@ service cloud.firestore {
         ])
         && data.keys().hasOnly([
           'classId', 'courseId', 'dayOfWeek', 'startTime', 'endTime', 'room',
-          'semesterParity', 'assistantUid'
+          'semesterParity', 'assistantUid', 'jumlahPertemuan'
         ])
         && data.classId is string
         && data.courseId is string
@@ -200,6 +200,10 @@ service cloud.firestore {
         && data.startTime is string
         && data.endTime is string
         && data.room is string
+        && ((!data.keys().hasAny(['jumlahPertemuan']))
+          || (data.jumlahPertemuan is int
+            && data.jumlahPertemuan >= 1
+            && data.jumlahPertemuan <= 20))
         && data.assistantUid == request.auth.uid
         && exists(/databases/$(database)/documents/classes/$(data.classId))
         && get(/databases/$(database)/documents/classes/$(data.classId)).data.assistantUid == request.auth.uid
@@ -281,11 +285,18 @@ service cloud.firestore {
     }
 
     match /classes/{classId} {
-      allow get, list: if (isAssistant()
+      allow get: if (isAssistant()
           && validClass(resource.data)
           && resource.data.assistantUid == request.auth.uid
           && resource.data.semesterParity == request.auth.token.assistantSemesterParity)
         || (praktikanEnrolledInClass(classId) && validClass(resource.data));
+      // A list query only exposes the fields it filters on, so the rule must not
+      // touch courseId/semester/createdAt here: doing so raises "property is
+      // undefined" and denies the whole list. Writes and get still validate fully.
+      allow list: if (isAssistant()
+          && resource.data.assistantUid == request.auth.uid
+          && resource.data.semesterParity == request.auth.token.assistantSemesterParity)
+        || praktikanEnrolledInClass(classId);
       allow create: if validClass(request.resource.data)
         && isAssistant()
         && request.resource.data.assistantUid == request.auth.uid
@@ -303,11 +314,18 @@ service cloud.firestore {
     }
 
     match /schedules/{scheduleId} {
-      allow get, list: if (isPraktikan()
+      allow get: if (isPraktikan()
           && resource.data.classId is string
           && praktikanEnrolledInClass(resource.data.classId))
         || (isAssistant()
           && scheduleRecordInAssistantScope(resource.data)
+          && resource.data.semesterParity == request.auth.token.assistantSemesterParity);
+      // Same constraint as classes: list may only rely on filtered fields.
+      allow list: if (isPraktikan()
+          && resource.data.classId is string
+          && praktikanEnrolledInClass(resource.data.classId))
+        || (isAssistant()
+          && resource.data.assistantUid == request.auth.uid
           && resource.data.semesterParity == request.auth.token.assistantSemesterParity);
       allow create: if scheduleRecordInAssistantScope(request.resource.data);
       allow update: if scheduleRecordInAssistantScope(resource.data)
@@ -389,7 +407,13 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/studentDirectory/$(request.resource.data.praktikanId)).data.name == request.resource.data.praktikanName
         && exists(userPath(request.resource.data.praktikanId))
         && get(userPath(request.resource.data.praktikanId)).data.role == 'praktikan';
-      allow update, delete: if false;
+      // Removing a student from a class only drops class access: attendance,
+      // permit, and review documents are keyed by {sessionId}_{uid} and keep
+      // their own history, so no reference is orphaned here.
+      allow delete: if isAssistant()
+        && validEnrollment(resource.data, enrollmentId)
+        && assistantOwnsClass(resource.data.classId);
+      allow update: if false;
     }
 
     match /attendances/{attendanceId} {
