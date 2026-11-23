@@ -153,6 +153,7 @@ export default function ScheduleListScreen() {
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
+          style={styles.filterScroll}
           contentContainerStyle={styles.filterList}
           accessibilityLabel="Filter status jadwal"
         >
@@ -393,7 +394,12 @@ const styles = StyleSheet.create({
     fontSize: 21,
     lineHeight: 28,
   },
+  filterScroll: {
+    flexGrow: 0,
+    flexShrink: 0,
+  },
   filterList: {
+    alignItems: 'center',
     gap: spacing.sm,
     paddingTop: spacing.lg,
   },
