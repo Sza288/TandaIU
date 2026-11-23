@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { courses } from '../../data/courses';
 import { dosen } from '../../data/dosen';
 import { useClasses } from '../../hooks/useClasses';
+import { useLaboratories } from '../../hooks/useLaboratories';
 import { useAuthSession } from '../auth/AuthSessionContext';
 import {
   createSession,
@@ -16,7 +17,6 @@ import type { SessionInput } from '../../types/praktikum';
 import {
   COURSE_OPTIONS,
   LECTURER_OPTIONS,
-  SESSION_STATUS_OPTIONS,
   addHoursToDateTime,
   combineDateTime,
   fieldForMessage,
@@ -38,8 +38,8 @@ type SessionField =
   | 'practicumName'
   | 'startsAt'
   | 'endsAt'
-  | 'status'
-  | 'lecturerId';
+  | 'lecturerId'
+  | 'laboratoryId';
 
 const SESSION_FIELDS: { field: SessionField; prefix: string }[] = [
   { field: 'classId', prefix: 'Kelas' },
@@ -47,9 +47,9 @@ const SESSION_FIELDS: { field: SessionField; prefix: string }[] = [
   { field: 'practicumName', prefix: 'Nama praktikum' },
   { field: 'startsAt', prefix: 'Waktu mulai' },
   { field: 'endsAt', prefix: 'Waktu selesai' },
-  { field: 'status', prefix: 'Status sesi' },
   { field: 'lecturerId', prefix: 'Dosen' },
   { field: 'lecturerId', prefix: 'Nama dosen' },
+  { field: 'laboratoryId', prefix: 'Laboratorium' },
 ];
 
 export default function SessionFormScreen() {
@@ -62,23 +62,23 @@ export default function SessionFormScreen() {
   const isEdit = Boolean(id);
 
   const classes = useClasses();
+  const laboratories = useLaboratories();
 
   const [ready, setReady] = useState(!id);
   const [classId, setClassId] = useState('');
   const [courseId, setCourseId] = useState('');
   const [practicumName, setPracticumName] = useState('');
   const [lecturerId, setLecturerId] = useState('');
+  const [laboratoryId, setLaboratoryId] = useState('');
   const [startDate, setStartDate] = useState(() => todayDateValue());
   const [startTime, setStartTime] = useState('08:00');
-  const [endDate, setEndDate] = useState(() => todayDateValue());
   const [endTime, setEndTime] = useState('10:00');
   const [originalStartsAt, setOriginalStartsAt] = useState<string>();
-  const [originalEndsAt, setOriginalEndsAt] = useState<string>();
-  const [status, setStatus] = useState('terjadwal');
+  const [originalStatus, setOriginalStatus] = useState<SessionStatus>('terjadwal');
   const [coursePickerVisible, setCoursePickerVisible] = useState(false);
   const [classPickerVisible, setClassPickerVisible] = useState(false);
   const [lecturerPickerVisible, setLecturerPickerVisible] = useState(false);
-  const [statusPickerVisible, setStatusPickerVisible] = useState(false);
+  const [laboratoryPickerVisible, setLaboratoryPickerVisible] = useState(false);
   const [errors, setErrors] = useState<Partial<Record<SessionField, string>>>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -97,15 +97,14 @@ export default function SessionFormScreen() {
           setCourseId(session.courseId);
           setPracticumName(session.practicumName);
           setLecturerId(session.lecturerId ?? '');
+          setLaboratoryId(session.laboratoryId ?? '');
           setOriginalStartsAt(session.startsAt);
-          setOriginalEndsAt(session.endsAt);
           const startParts = splitDateTimeInput(session.startsAt);
           const endParts = splitDateTimeInput(session.endsAt);
           setStartDate(startParts.date);
           setStartTime(startParts.time);
-          setEndDate(endParts.date);
           setEndTime(endParts.time);
-          setStatus(session.status);
+          setOriginalStatus(session.status);
         }
         setReady(true);
       })
@@ -138,6 +137,24 @@ export default function SessionFormScreen() {
     description: getCourseName(classDoc.courseId),
   }));
 
+  const selectedLaboratory = laboratories.data.find(
+    (laboratory) => laboratory.id === laboratoryId,
+  );
+
+  const laboratoryOptions = laboratories.data.map((laboratory) => ({
+    value: laboratory.id,
+    label: laboratory.name,
+    description: `Lantai ${laboratory.lantai} · radius ${laboratory.radius} m`,
+  }));
+
+  const laboratoryHint = laboratories.loading
+    ? 'Memuat daftar laboratorium...'
+    : laboratories.error
+      ? laboratories.error
+      : laboratories.data.length === 0
+        ? 'Belum ada laboratorium. Tambahkan laboratorium lebih dahulu agar sesi dapat dipakai untuk presensi.'
+        : 'Laboratorium menentukan lokasi dan radius presensi sesi ini.';
+
   const classHint = classes.loading
     ? 'Memuat daftar kelas...'
     : classes.error
@@ -166,22 +183,36 @@ export default function SessionFormScreen() {
   };
 
   const handleStartDateChange = (nextDate: string) => {
-    if (endDate === startDate) {
-      setEndDate(nextDate);
-    }
     setStartDate(nextDate);
   };
 
   const handleStartTimeChange = (nextTime: string) => {
     setStartTime(nextTime);
     const autoEnd = addHoursToDateTime(startDate, nextTime, 2);
-    setEndDate(autoEnd.date);
     setEndTime(autoEnd.time);
+  };
+
+  /**
+   * Sesi hanya punya satu tanggal. `endsAt` jatuh pada tanggal yang sama, kecuali
+   * jam selesai lebih kecil dari jam mulai (praktikum melewati tengah malam).
+   */
+  const resolveEndDateTime = (): string => {
+    const crossesMidnight = endTime <= startTime;
+    if (!crossesMidnight) {
+      return combineDateTime(startDate, endTime);
+    }
+    const nextDay = addHoursToDateTime(startDate, startTime, 24).date;
+    return combineDateTime(nextDay, endTime);
   };
 
   const handleSelectLecturer = (value: string) => {
     setLecturerId(value);
     setErrors((current) => ({ ...current, lecturerId: undefined }));
+  };
+
+  const handleSelectLaboratory = (value: string) => {
+    setLaboratoryId(value);
+    setErrors((current) => ({ ...current, laboratoryId: undefined }));
   };
 
   const handleSubmit = async () => {
@@ -203,16 +234,24 @@ export default function SessionFormScreen() {
       return;
     }
 
+    if (!id && !selectedLaboratory) {
+      setErrors({ laboratoryId: 'Laboratorium wajib dipilih.' });
+      return;
+    }
+
     const input: SessionInput = {
       classId: selectedClass.id,
       courseId: selectedClass.courseId,
       practicumName: selectedCourse.name,
       className: selectedClass.className,
       startsAt: combineDateTime(startDate, startTime, originalStartsAt),
-      endsAt: combineDateTime(endDate, endTime, originalEndsAt),
-      status: status as SessionStatus,
+      endsAt: resolveEndDateTime(),
+      // Status tidak diedit di sini: sesi baru selalu 'terjadwal', dan perubahan
+      // status hanya lewat aksi buka/tutup sesi milik asisten.
+      status: isEdit ? originalStatus : 'terjadwal',
       lecturerId: toLecturerId(lecturerId),
       lecturer: selectedLecturer.name,
+      ...(selectedLaboratory ? { laboratoryId: selectedLaboratory.id } : {}),
     };
 
     try {
@@ -244,12 +283,12 @@ export default function SessionFormScreen() {
   };
 
   if (!ready) {
-    return <FormLoadingScreen title={isEdit ? 'Edit Sesi' : 'Tambah Sesi'} />;
+    return <FormLoadingScreen title={isEdit ? 'Pindah Jadwal Sesi' : 'Tambah Sesi'} />;
   }
 
   return (
     <FormScaffold
-      title={isEdit ? 'Edit Sesi' : 'Tambah Sesi'}
+      title={isEdit ? 'Pindah Jadwal Sesi' : 'Tambah Sesi'}
       submitLabel="Simpan Sesi"
       onSubmit={() => {
         void handleSubmit();
@@ -257,55 +296,90 @@ export default function SessionFormScreen() {
       submitting={submitting}
       formError={formError}
     >
-      <FormPickerField
-        label="Mata kuliah"
-        value={selectedCourse?.name ?? ''}
-        placeholder="Pilih mata kuliah"
-        error={errors.courseId}
-        hint="Nama praktikum mengikuti mata kuliah yang dipilih."
-        onPress={() => setCoursePickerVisible(true)}
-      />
+      {isEdit ? (
+        <>
+          <FormReadOnlyField
+            label="Mata kuliah"
+            value={selectedCourse?.name ?? practicumName}
+            hint="Mata kuliah tidak diubah saat sesi dipindahkan."
+          />
 
-      <FormReadOnlyField
-        label="Nama praktikum"
-        value={selectedCourse?.name ?? practicumName}
-        placeholder="Pilih mata kuliah"
-        hint="Nama praktikum mengikuti mata kuliah yang dipilih."
-      />
+          <FormReadOnlyField
+            label="Kelas"
+            value={selectedClass ? `Kelas ${selectedClass.className}` : ''}
+            hint="Kelas sesi tidak berubah."
+          />
+
+          {lecturerId ? null : (
+            <FormPickerField
+              label="Dosen pengampu"
+              value={selectedLecturer?.name ?? ''}
+              placeholder="Pilih dosen pengampu"
+              error={errors.lecturerId}
+              hint="Sesi ini belum memiliki dosen, pilih salah satu dosen yang tersedia."
+              onPress={() => setLecturerPickerVisible(true)}
+            />
+          )}
+
+          <FormNote>
+            Ubah tanggal dan jam untuk memindahkan sesi ini ke jadwal lain, lalu pilih
+            laboratorium bila lokasinya ikut berpindah.
+          </FormNote>
+        </>
+      ) : (
+        <>
+          <FormPickerField
+            label="Mata kuliah"
+            value={selectedCourse?.name ?? ''}
+            placeholder="Pilih mata kuliah"
+            error={errors.courseId}
+            hint="Nama praktikum mengikuti mata kuliah yang dipilih."
+            onPress={() => setCoursePickerVisible(true)}
+          />
+
+          <FormReadOnlyField
+            label="Nama praktikum"
+            value={selectedCourse?.name ?? practicumName}
+            placeholder="Pilih mata kuliah"
+            hint="Nama praktikum mengikuti mata kuliah yang dipilih."
+          />
+
+          <FormPickerField
+            label="Kelas"
+            value={selectedClass ? `Kelas ${selectedClass.className}` : ''}
+            placeholder="Pilih kelas"
+            error={errors.classId}
+            hint={classHint}
+            disabled={classes.loading}
+            onPress={() => setClassPickerVisible(true)}
+          />
+
+          <FormPickerField
+            label="Dosen pengampu"
+            value={selectedLecturer?.name ?? ''}
+            placeholder="Pilih dosen pengampu"
+            error={errors.lecturerId}
+            hint="Pilih salah satu dosen yang tersedia."
+            onPress={() => setLecturerPickerVisible(true)}
+          />
+        </>
+      )}
 
       <FormPickerField
-        label="Kelas"
-        value={selectedClass ? `Kelas ${selectedClass.className}` : ''}
-        placeholder="Pilih kelas"
-        error={errors.classId}
-        hint={classHint}
-        disabled={classes.loading}
-        onPress={() => setClassPickerVisible(true)}
-      />
-
-      <FormPickerField
-        label="Dosen pengampu"
-        value={selectedLecturer?.name ?? ''}
-        placeholder="Pilih dosen pengampu"
-        error={errors.lecturerId}
-        hint="Pilih salah satu dosen yang tersedia."
-        onPress={() => setLecturerPickerVisible(true)}
-      />
-
-      <FormPickerField
-        label="Status sesi"
-        value={
-          SESSION_STATUS_OPTIONS.find((option) => option.value === status)?.label ?? ''
-        }
-        placeholder="Pilih status"
-        error={errors.status}
-        onPress={() => setStatusPickerVisible(true)}
+        label="Laboratorium"
+        value={selectedLaboratory?.name ?? ''}
+        placeholder="Pilih laboratorium"
+        error={errors.laboratoryId}
+        hint={laboratoryHint}
+        disabled={laboratories.loading}
+        onPress={() => setLaboratoryPickerVisible(true)}
       />
 
       <DateField
-        label="Tanggal mulai"
+        label="Tanggal"
         value={startDate}
         onChange={handleStartDateChange}
+        hint="Tanggal pertemuan sesi ini."
       />
 
       <TimeField
@@ -316,25 +390,12 @@ export default function SessionFormScreen() {
         hint="Jam selesai terisi otomatis 2 jam setelah jam mulai."
       />
 
-      <DateField
-        label="Tanggal selesai"
-        value={endDate}
-        onChange={setEndDate}
-        hint="Ikuti tanggal mulai, kecuali praktikum selesai di hari lain."
-      />
-
       <TimeField
         label="Jam selesai"
         value={endTime}
         onChange={setEndTime}
         error={errors.endsAt}
-        hint="Harus setelah waktu mulai."
       />
-
-      <FormNote>
-        Kelas dan dosen wajib dipilih untuk sesi baru maupun perubahan. Waktu menggunakan
-        zona waktu Asia/Jakarta (WIB).
-      </FormNote>
 
       <OptionPicker
         visible={coursePickerVisible}
@@ -364,12 +425,12 @@ export default function SessionFormScreen() {
       />
 
       <OptionPicker
-        visible={statusPickerVisible}
-        title="Pilih Status Sesi"
-        options={SESSION_STATUS_OPTIONS}
-        selectedValue={status}
-        onSelect={setStatus}
-        onClose={() => setStatusPickerVisible(false)}
+        visible={laboratoryPickerVisible}
+        title="Pilih Laboratorium"
+        options={laboratoryOptions}
+        selectedValue={laboratoryId}
+        onSelect={handleSelectLaboratory}
+        onClose={() => setLaboratoryPickerVisible(false)}
       />
     </FormScaffold>
   );
