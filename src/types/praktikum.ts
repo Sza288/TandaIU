@@ -36,11 +36,25 @@ export type SessionDoc = PracticumSession & {
   semester?: number;
   semesterParity?: 'ganjil' | 'genap';
   assistantUid?: string;
+  laboratoryId?: string;
+};
+
+export type LaboratoryDoc = {
+  id: string;
+  name: string;
+  latitude: number;
+  longitude: number;
+  radius: number;
+  lantai: number;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type ClassInput = Omit<ClassDoc, 'id'>;
 
 export type ScheduleInput = Omit<ScheduleDoc, 'id'>;
+
+export type LaboratoryInput = Omit<LaboratoryDoc, 'id'>;
 
 export type SessionInput = {
   classId: string;
@@ -52,10 +66,23 @@ export type SessionInput = {
   status: SessionStatus;
   lecturerId: LecturerId;
   lecturer: string;
+  laboratoryId?: string;
 };
+
+export const LABORATORY_LIMITS = {
+  minRadius: 1,
+  maxRadius: 500,
+  minLantai: 1,
+  maxLantai: 6,
+  minLatitude: -90,
+  maxLatitude: 90,
+  minLongitude: -180,
+  maxLongitude: 180,
+} as const;
 
 export const COLLECTIONS = {
   classes: 'classes',
   schedules: 'schedules',
   sessions: 'sessions',
+  laboratories: 'laboratories',
 } as const;

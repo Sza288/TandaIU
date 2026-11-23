@@ -7,6 +7,10 @@ import {
 } from './classesSessions';
 import { getCoursesDosenStep } from './coursesDosen';
 import {
+  laboratorySeedStep,
+  seedLaboratories,
+} from './laboratories';
+import {
   buildEnrollmentAccountMap,
   buildEnrollmentPlan,
   createMissingEnrollments,
@@ -225,6 +229,23 @@ export async function runMigrations(
     dryRun,
   );
 
+  let laboratoryStep: MigrationStepResult;
+  try {
+    const laboratoryResult = await seedLaboratories({ database, createdAt, dryRun });
+    laboratoryStep = laboratorySeedStep(laboratoryResult);
+  } catch (error) {
+    laboratoryStep = {
+      id: 'laboratories',
+      title: 'Laboratories',
+      status: firestoreErrorCode(error) === 'permission-denied' ? 'blocked' : 'failed',
+      summary: `Seed laboratorium gagal: ${describeFirestoreError(error)}`,
+      details: [
+        describeFirestoreError(error),
+        'Jalankan migrasi dengan akun asisten yang terautentikasi agar laboratories dapat ditulis.',
+      ],
+    };
+  }
+
   const verification: MigrationVerification = await verifyMigration(database, {
     uidByStudentCode: accountMap.uidByStudentCode,
     ...(classDocsResolved ? { classDocs } : {}),
@@ -239,6 +260,7 @@ export async function runMigrations(
     steps: [
       classesStep,
       enrollmentsStep,
+      laboratoryStep,
       getCoursesDosenStep(),
       ...getOtherDummyDataSteps(),
     ],
@@ -274,6 +296,13 @@ export {
   buildSeedValidation,
 } from './preflight';
 export { getCoursesDosenInventory, getCoursesDosenStep } from './coursesDosen';
+export {
+  buildLaboratorySeeds,
+  laboratorySeedStep,
+  LABORATORIES_COLLECTION,
+  seedLaboratories,
+  verifyLaboratories,
+} from './laboratories';
 export { getLocalDummyInventory, getOtherDummyDataSteps } from './otherDummyData';
 export {
   describeFirestoreError,

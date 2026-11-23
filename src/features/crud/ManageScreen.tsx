@@ -14,11 +14,14 @@ import BottomNav from '../../components/BottomNav';
 import ScreenHeader from '../../components/ScreenHeader';
 import StatusBadge from '../../components/StatusBadge';
 import { useClasses } from '../../hooks/useClasses';
+import { useLaboratories } from '../../hooks/useLaboratories';
 import { useSchedules } from '../../hooks/useSchedules';
 import { useSessions } from '../../hooks/useSessions';
 import {
   deleteSchedule,
 } from '../../services/practicumService';
+import { deleteLaboratory } from '../../services/laboratoryService';
+import type { LaboratoryDoc } from '../../types/praktikum';
 import { colors, fonts, radius, shadows, spacing } from '../../theme';
 import { formatDateShort, formatTimeRange } from '../../utils/format';
 import CrudCard from './CrudCard';
@@ -31,31 +34,36 @@ import {
   manageHref,
 } from './crud.utils';
 
-type TabKey = 'classes' | 'schedules' | 'sessions';
-type CrudKind = 'class' | 'schedule' | 'session';
+type TabKey = 'classes' | 'schedules' | 'sessions' | 'laboratories';
+type CrudKind = 'class' | 'schedule' | 'session' | 'laboratory';
 
 const TABS: { key: TabKey; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
   { key: 'classes', label: 'Kelas', icon: 'school-outline' },
   { key: 'schedules', label: 'Jadwal', icon: 'calendar-outline' },
   { key: 'sessions', label: 'Sesi', icon: 'time-outline' },
+  { key: 'laboratories', label: 'Lab', icon: 'business-outline' },
 ];
 
 const FORM_PATHS: Record<CrudKind, string> = {
   class: '/assistant/manage/class-form',
   schedule: '/assistant/manage/schedule-form',
   session: '/assistant/manage/session-form',
+  laboratory: '/assistant/manage/laboratory-form',
 };
 
 export default function ManageScreen() {
   const [tab, setTab] = useState<TabKey>('classes');
   const [deletingScheduleId, setDeletingScheduleId] = useState<string | null>(null);
+  const [deletingLaboratoryId, setDeletingLaboratoryId] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const classes = useClasses();
   const schedules = useSchedules();
   const sessions = useSessions();
+  const laboratories = useLaboratories();
 
   const classById = new Map(classes.data.map((item) => [item.id, item]));
+  const laboratoryById = new Map(laboratories.data.map((item) => [item.id, item]));
 
   const openForm = (kind: CrudKind, id?: string) => {
     router.push(manageHref(FORM_PATHS[kind], id));
@@ -79,6 +87,31 @@ export default function ManageScreen() {
       message: 'Data yang dihapus tidak dapat dikembalikan.',
       onConfirm: () => {
         void runDeleteSchedule(id);
+      },
+    });
+  };
+
+  const runDeleteLaboratory = async (id: string) => {
+    setDeletingLaboratoryId(id);
+    setDeleteError(null);
+    try {
+      await deleteLaboratory(id);
+    } catch (error) {
+      setDeleteError(getErrorMessage(error));
+    } finally {
+      setDeletingLaboratoryId(null);
+    }
+  };
+
+  const confirmDeleteLaboratory = (laboratory: LaboratoryDoc) => {
+    const usedBySession = sessions.data.some((session) => session.laboratoryId === laboratory.id);
+    confirmAction({
+      title: `Hapus ${laboratory.name}?`,
+      message: usedBySession
+        ? 'Laboratorium ini dipakai sesi praktikum. Sesi terkait akan kehilangan lokasi presensi dan ditandai belum diatur.'
+        : 'Data yang dihapus tidak dapat dikembalikan.',
+      onConfirm: () => {
+        void runDeleteLaboratory(laboratory.id);
       },
     });
   };
@@ -223,6 +256,9 @@ export default function ManageScreen() {
           >
             {sessions.data.map((item) => {
               const lecturerName = item.lecturer?.trim();
+              const laboratoryName = item.laboratoryId
+                ? laboratoryById.get(item.laboratoryId)?.name
+                : undefined;
 
               return (
                 <CrudCard
@@ -248,6 +284,16 @@ export default function ManageScreen() {
                       {lecturerName || 'Dosen belum diisi'}
                     </Text>
                   </View>
+                  <View style={styles.metaRow}>
+                    <Ionicons
+                      name="business-outline"
+                      size={13}
+                      color={laboratoryName ? colors.primary : colors.textMuted}
+                    />
+                    <Text style={[styles.meta, !laboratoryName ? styles.metaMuted : null]}>
+                      {laboratoryName || 'Laboratorium belum diatur'}
+                    </Text>
+                  </View>
                   <View style={styles.statusRow}>
                     <Text style={styles.meta}>Kelas {item.className}</Text>
                     <StatusBadge status={item.status} />
@@ -255,6 +301,44 @@ export default function ManageScreen() {
                 </CrudCard>
               );
             })}
+          </SectionShell>
+        ) : null}
+
+        {tab === 'laboratories' ? (
+          <SectionShell
+            title="Daftar Laboratorium"
+            addLabel="Tambah Laboratorium"
+            onAdd={() => openForm('laboratory')}
+            loading={laboratories.loading}
+            error={laboratories.error}
+            isEmpty={laboratories.data.length === 0}
+            emptyIcon="business-outline"
+            emptyTitle="Belum ada laboratorium"
+            emptyBody="Tambahkan laboratorium agar sesi praktikum dapat dipakai untuk presensi berbasis lokasi."
+            emptyAction={null}
+          >
+            {laboratories.data.map((item) => (
+              <CrudCard
+                key={item.id}
+                icon="business-outline"
+                eyebrow={`Lantai ${item.lantai}`}
+                title={item.name}
+                onEdit={() => openForm('laboratory', item.id)}
+                onDelete={() => confirmDeleteLaboratory(item)}
+                deleting={deletingLaboratoryId === item.id}
+              >
+                <View style={styles.metaRow}>
+                  <Ionicons name="location-outline" size={13} color={colors.textMuted} />
+                  <Text style={styles.meta}>
+                    {item.latitude}, {item.longitude}
+                  </Text>
+                </View>
+                <View style={styles.metaRow}>
+                  <Ionicons name="radio-outline" size={13} color={colors.textMuted} />
+                  <Text style={styles.meta}>Radius {item.radius} m</Text>
+                </View>
+              </CrudCard>
+            ))}
           </SectionShell>
         ) : null}
       </ScrollView>
