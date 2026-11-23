@@ -10,7 +10,6 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import BottomNav from '../../components/BottomNav';
 import ScreenHeader from '../../components/ScreenHeader';
 import StatusBadge from '../../components/StatusBadge';
 import { useClasses } from '../../hooks/useClasses';
@@ -235,6 +234,23 @@ export default function ManageScreen() {
                     {dayLabel} · {item.startTime}-{item.endTime}
                   </Text>
                   <Text style={styles.meta}>Ruang {item.room}</Text>
+                  <Text style={styles.meta}>
+                    {item.jumlahPertemuan
+                      ? `${item.jumlahPertemuan} pertemuan`
+                      : 'Jumlah pertemuan belum diisi'}
+                  </Text>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={`Buat sesi dari jadwal ${item.room}`}
+                    onPress={() => router.push(manageHref('/assistant/manage/schedule-generate', item.id))}
+                    style={({ pressed }) => [
+                      styles.generateButton,
+                      pressed ? styles.pressed : null,
+                    ]}
+                  >
+                    <Ionicons name="add-circle-outline" size={15} color={colors.primaryDark} />
+                    <Text style={styles.generateText}>Buat Sesi</Text>
+                  </Pressable>
                 </CrudCard>
               );
             })}
@@ -342,8 +358,6 @@ export default function ManageScreen() {
           </SectionShell>
         ) : null}
       </ScrollView>
-
-      <BottomNav />
     </SafeAreaView>
   );
 }
@@ -519,6 +533,23 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: spacing.sm,
+  },
+  generateButton: {
+    minHeight: 36,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    marginTop: spacing.xs,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    backgroundColor: colors.primarySofter,
+  },
+  generateText: {
+    color: colors.primaryDark,
+    fontFamily: fonts.bold,
+    fontSize: 12,
   },
   errorBanner: {
     flexDirection: 'row',
