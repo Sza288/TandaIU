@@ -10,6 +10,7 @@ export const MIGRATION_COLLECTIONS = [
   'classes',
   'schedules',
   'sessions',
+  'laboratories',
   'enrollments',
   'attendances',
   'permits',

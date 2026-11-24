@@ -116,6 +116,17 @@ const reviewRecord = (sessionId: string, studentId: string, studentName: string)
   createdAt: '2026-01-01T00:00:00.000Z',
 });
 
+const laboratoryRecord = (name = 'Laboratorium B', overrides: Record<string, unknown> = {}) => ({
+  name,
+  latitude: -7.0482469,
+  longitude: 110.4407531,
+  radius: 500,
+  lantai: 2,
+  createdAt: '2026-01-01T00:00:00.000Z',
+  updatedAt: '2026-01-01T00:00:00.000Z',
+  ...overrides,
+});
+
 async function seed(): Promise<void> {
   await environment.withSecurityRulesDisabled(async (context) => {
     const database = context.firestore();
@@ -133,6 +144,12 @@ async function seed(): Promise<void> {
       ['classes', 'class-genap', classRecord('asprak-even', 2)],
       ['classes', 'class-kosong', classRecord('asprak-odd', 1, 'B1')],
       ['sessions', 'session-ganjil', sessionRecord('class-ganjil', 'asprak-odd', 1)],
+      ['laboratories', 'lab-b', laboratoryRecord('Laboratorium B')],
+      ['laboratories', 'lab-c', laboratoryRecord('Laboratorium C')],
+      ['sessions', 'session-with-lab', {
+        ...sessionRecord('class-ganjil', 'asprak-odd', 1),
+        laboratoryId: 'lab-b',
+      }],
       ['sessions', 'session-genap', sessionRecord('class-genap', 'asprak-even', 2)],
       ['sessions', 'session-legacy-iso', {
         ...sessionRecord('class-ganjil', 'asprak-odd', 1),
@@ -610,5 +627,104 @@ describeWithEmulator('Firestore Revisi 3 dan 4 access rules', () => {
     await expect(setDoc(doc(student, 'reviews/session-ditutup_student-new'),
       reviewRecord('session-ditutup', 'student-new', 'Mahasiswa Baru')))
       .resolves.toBeUndefined();
+  });
+
+  it('allows every signed-in user to read laboratories but only assistants to write', async () => {
+    const student = environment.authenticatedContext('student-enrolled').firestore();
+    const odd = environment.authenticatedContext('asprak-odd', {
+      assistantSemesterParity: 'ganjil',
+    }).firestore();
+    const unauthenticated = environment.unauthenticatedContext().firestore();
+
+    expect((await getDoc(doc(student, 'laboratories/lab-b'))).exists()).toBe(true);
+    expect((await getDocs(collection(student, 'laboratories'))).size).toBe(2);
+    expect((await getDoc(doc(odd, 'laboratories/lab-c'))).exists()).toBe(true);
+    // Collection reads are allowed for any signed-in user because a list query
+    // cannot apply per-document field validation without denying the whole query.
+    expect((await getDocs(collection(odd, 'laboratories'))).size).toBe(2);
+    await expect(getDoc(doc(unauthenticated, 'laboratories/lab-b')))
+      .rejects.toMatchObject({ code: 'permission-denied' });
+    await expect(getDocs(collection(unauthenticated, 'laboratories')))
+      .rejects.toMatchObject({ code: 'permission-denied' });
+
+    await expect(setDoc(doc(student, 'laboratories/lab-student'), laboratoryRecord('Laboratorium Siswa')))
+      .rejects.toMatchObject({ code: 'permission-denied' });
+    await expect(updateDoc(doc(student, 'laboratories/lab-b'), { radius: 100 }))
+      .rejects.toMatchObject({ code: 'permission-denied' });
+    await expect(setDoc(doc(odd, 'laboratories/lab-odd'), laboratoryRecord('Laboratorium Ganjil')))
+      .resolves.toBeUndefined();
+    await expect(updateDoc(doc(odd, 'laboratories/lab-b'), { radius: 150 }))
+      .resolves.toBeUndefined();
+  });
+
+  it('rejects laboratory writes that break the attribute contract', async () => {
+    const odd = environment.authenticatedContext('asprak-odd', {
+      assistantSemesterParity: 'ganjil',
+    }).firestore();
+    const student = environment.authenticatedContext('student-enrolled').firestore();
+
+    await expect(setDoc(doc(odd, 'laboratories/lab-radius-0'),
+      laboratoryRecord('Lab Radius Nol', { radius: 0 })))
+      .rejects.toMatchObject({ code: 'permission-denied' });
+    await expect(setDoc(doc(odd, 'laboratories/lab-radius-700'),
+      laboratoryRecord('Lab Radius Besar', { radius: 700 })))
+      .rejects.toMatchObject({ code: 'permission-denied' });
+    await expect(setDoc(doc(odd, 'laboratories/lab-radius-fraction'),
+      laboratoryRecord('Lab Radius Pecahan', { radius: 12.5 })))
+      .rejects.toMatchObject({ code: 'permission-denied' });
+    await expect(setDoc(doc(odd, 'laboratories/lab-lat'),
+      laboratoryRecord('Lab Latitude', { latitude: 90.5 })))
+      .rejects.toMatchObject({ code: 'permission-denied' });
+    await expect(setDoc(doc(odd, 'laboratories/lab-lng'),
+      laboratoryRecord('Lab Longitude', { longitude: -180.5 })))
+      .rejects.toMatchObject({ code: 'permission-denied' });
+    await expect(setDoc(doc(odd, 'laboratories/lab-lantai'),
+      laboratoryRecord('Lab Lantai', { lantai: 0 })))
+      .rejects.toMatchObject({ code: 'permission-denied' });
+    await expect(setDoc(doc(odd, 'laboratories/lab-extra'),
+      laboratoryRecord('Lab Ekstra', { kapasitas: 30 })))
+      .rejects.toMatchObject({ code: 'permission-denied' });
+    await expect(setDoc(doc(odd, 'laboratories/lab-lantai-tinggi'),
+      laboratoryRecord('Lab Lantai Tinggi', { lantai: 7 })))
+      .rejects.toMatchObject({ code: 'permission-denied' });
+    await expect(deleteDoc(doc(student, 'laboratories/lab-b')))
+      .rejects.toMatchObject({ code: 'permission-denied' });
+    await expect(deleteDoc(doc(odd, 'laboratories/lab-b')))
+      .resolves.toBeUndefined();
+  });
+
+  it('accepts laboratoryId on sessions only when the laboratory exists', async () => {
+    const odd = environment.authenticatedContext('asprak-odd', {
+      assistantSemesterParity: 'ganjil',
+    }).firestore();
+
+    expect((await getDoc(doc(odd, 'sessions/session-with-lab'))).exists()).toBe(true);
+    await expect(setDoc(doc(odd, 'sessions/session-lab-missing'), {
+      ...sessionRecord('class-ganjil', 'asprak-odd', 1),
+      laboratoryId: 'lab-tidak-ada',
+    })).rejects.toMatchObject({ code: 'permission-denied' });
+    await expect(setDoc(doc(odd, 'sessions/session-lab-valid'), {
+      ...sessionRecord('class-ganjil', 'asprak-odd', 1),
+      startsAt: Timestamp.fromMillis(Date.now()),
+      endsAt: Timestamp.fromMillis(Date.now() + 3_600_000),
+      laboratoryId: 'lab-b',
+    })).resolves.toBeUndefined();
+  });
+
+  it('accepts scheduleId on sessions only when the schedule exists', async () => {
+    const odd = environment.authenticatedContext('asprak-odd', {
+      assistantSemesterParity: 'ganjil',
+    }).firestore();
+
+    await expect(setDoc(doc(odd, 'sessions/session-schedule-missing'), {
+      ...sessionRecord('class-ganjil', 'asprak-odd', 1),
+      scheduleId: 'schedule-tidak-ada',
+    })).rejects.toMatchObject({ code: 'permission-denied' });
+    await expect(setDoc(doc(odd, 'sessions/session-schedule-valid'), {
+      ...sessionRecord('class-ganjil', 'asprak-odd', 1),
+      startsAt: Timestamp.fromMillis(Date.now()),
+      endsAt: Timestamp.fromMillis(Date.now() + 3_600_000),
+      scheduleId: 'schedule-ganjil',
+    })).resolves.toBeUndefined();
   });
 });

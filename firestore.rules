@@ -121,14 +121,46 @@ service cloud.firestore {
         ])
         && data.keys().hasOnly([
           'classId', 'courseId', 'practicumName', 'className', 'startsAt', 'endsAt',
-          'status', 'semester', 'semesterParity', 'assistantUid', 'lecturerId', 'lecturer'
+          'status', 'semester', 'semesterParity', 'assistantUid', 'lecturerId', 'lecturer',
+          'laboratoryId', 'scheduleId'
         ])
         && data.practicumName is string
         && validSessionTimePair(data)
         && data.status in ['terjadwal', 'dibuka', 'ditutup']
         && ((!data.keys().hasAny(['lecturerId', 'lecturer']))
           || (data.lecturerId is string && data.lecturer is string))
+        && ((!data.keys().hasAny(['laboratoryId']))
+          || (data.laboratoryId is string
+            && exists(/databases/$(database)/documents/laboratories/$(data.laboratoryId))))
+        && ((!data.keys().hasAny(['scheduleId']))
+          || (data.scheduleId is string
+            && exists(/databases/$(database)/documents/schedules/$(data.scheduleId))))
         && sessionMatchesClass(data);
+    }
+
+    function validLaboratory(data) {
+      return data.keys().hasAll([
+          'name', 'latitude', 'longitude', 'radius', 'lantai', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'name', 'latitude', 'longitude', 'radius', 'lantai', 'createdAt', 'updatedAt'
+        ])
+        && data.name is string
+        && data.name.size() > 0
+        && (data.latitude is float || data.latitude is int)
+        && data.latitude >= -90
+        && data.latitude <= 90
+        && (data.longitude is float || data.longitude is int)
+        && data.longitude >= -180
+        && data.longitude <= 180
+        && data.radius is int
+        && data.radius >= 1
+        && data.radius <= 500
+        && data.lantai is int
+        && data.lantai >= 1
+        && data.lantai <= 6
+        && data.createdAt is string
+        && data.updatedAt is string;
     }
 
     function assistantOwnsSession(sessionId) {
@@ -158,7 +190,7 @@ service cloud.firestore {
         ])
         && data.keys().hasOnly([
           'classId', 'courseId', 'dayOfWeek', 'startTime', 'endTime', 'room',
-          'semesterParity', 'assistantUid'
+          'semesterParity', 'assistantUid', 'jumlahPertemuan'
         ])
         && data.classId is string
         && data.courseId is string
@@ -168,6 +200,10 @@ service cloud.firestore {
         && data.startTime is string
         && data.endTime is string
         && data.room is string
+        && ((!data.keys().hasAny(['jumlahPertemuan']))
+          || (data.jumlahPertemuan is int
+            && data.jumlahPertemuan >= 1
+            && data.jumlahPertemuan <= 20))
         && data.assistantUid == request.auth.uid
         && exists(/databases/$(database)/documents/classes/$(data.classId))
         && get(/databases/$(database)/documents/classes/$(data.classId)).data.assistantUid == request.auth.uid
@@ -249,11 +285,18 @@ service cloud.firestore {
     }
 
     match /classes/{classId} {
-      allow get, list: if (isAssistant()
+      allow get: if (isAssistant()
           && validClass(resource.data)
           && resource.data.assistantUid == request.auth.uid
           && resource.data.semesterParity == request.auth.token.assistantSemesterParity)
         || (praktikanEnrolledInClass(classId) && validClass(resource.data));
+      // A list query only exposes the fields it filters on, so the rule must not
+      // touch courseId/semester/createdAt here: doing so raises "property is
+      // undefined" and denies the whole list. Writes and get still validate fully.
+      allow list: if (isAssistant()
+          && resource.data.assistantUid == request.auth.uid
+          && resource.data.semesterParity == request.auth.token.assistantSemesterParity)
+        || praktikanEnrolledInClass(classId);
       allow create: if validClass(request.resource.data)
         && isAssistant()
         && request.resource.data.assistantUid == request.auth.uid
@@ -271,11 +314,18 @@ service cloud.firestore {
     }
 
     match /schedules/{scheduleId} {
-      allow get, list: if (isPraktikan()
+      allow get: if (isPraktikan()
           && resource.data.classId is string
           && praktikanEnrolledInClass(resource.data.classId))
         || (isAssistant()
           && scheduleRecordInAssistantScope(resource.data)
+          && resource.data.semesterParity == request.auth.token.assistantSemesterParity);
+      // Same constraint as classes: list may only rely on filtered fields.
+      allow list: if (isPraktikan()
+          && resource.data.classId is string
+          && praktikanEnrolledInClass(resource.data.classId))
+        || (isAssistant()
+          && resource.data.assistantUid == request.auth.uid
           && resource.data.semesterParity == request.auth.token.assistantSemesterParity);
       allow create: if scheduleRecordInAssistantScope(request.resource.data);
       allow update: if scheduleRecordInAssistantScope(resource.data)
@@ -312,6 +362,24 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    match /laboratories/{laboratoryId} {
+      // Laboratory coordinates and radius feed both attendance validation and the
+      // Maps screen, so every signed-in user needs read access. Any assistant may
+      // manage them: laboratories are shared facilities, not per-assistant records.
+      allow get, list: if isSignedIn();
+      allow create: if isAssistant() && validLaboratory(request.resource.data);
+      // The stored document is deliberately not re-validated: a record saved under
+      // an older, looser contract (for example lantai above the current maximum)
+      // must stay editable, otherwise it becomes permanently unreadable in the UI.
+      allow update: if isAssistant()
+        && validLaboratory(request.resource.data)
+        && request.resource.data.createdAt == resource.data.createdAt;
+      // Assistant-only deletion. Sessions keep a denormalized laboratoryId that
+      // becomes dangling if the document disappears; the UI warns before deleting
+      // and sessions without a resolvable laboratory are treated as unassigned.
+      allow delete: if isAssistant();
+    }
+
     match /enrollments/{enrollmentId} {
       allow get: if (isPraktikan()
           && resource.data.praktikanId == request.auth.uid
@@ -339,7 +407,13 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/studentDirectory/$(request.resource.data.praktikanId)).data.name == request.resource.data.praktikanName
         && exists(userPath(request.resource.data.praktikanId))
         && get(userPath(request.resource.data.praktikanId)).data.role == 'praktikan';
-      allow update, delete: if false;
+      // Removing a student from a class only drops class access: attendance,
+      // permit, and review documents are keyed by {sessionId}_{uid} and keep
+      // their own history, so no reference is orphaned here.
+      allow delete: if isAssistant()
+        && validEnrollment(resource.data, enrollmentId)
+        && assistantOwnsClass(resource.data.classId);
+      allow update: if false;
     }
 
     match /attendances/{attendanceId} {

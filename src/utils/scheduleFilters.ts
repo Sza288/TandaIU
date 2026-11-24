@@ -7,24 +7,20 @@ export type ScheduleStatusSession = Pick<
   'status' | 'startsAt' | 'endsAt'
 >;
 
+/**
+ * Status sesi adalah acuan utama (S3-SRS-12); jam jadwal hanya pelengkap.
+ * Sesi yang sedang dibuka tetap masuk kategori "dibuka" meskipun rentang
+ * jadwalnya sudah lewat, karena asisten belum menutupnya.
+ */
 export function getScheduleStatusCategory(
   session: ScheduleStatusSession,
   now = Date.now(),
 ): Exclude<ScheduleStatusFilter, 'semua'> {
+  if (session.status === 'dibuka') return 'dibuka';
   if (session.status === 'ditutup') return 'terlewati';
 
   const startTime = Date.parse(session.startsAt);
-  const endTime = Date.parse(session.endsAt);
-  // A session left in "dibuka" after its end is no longer an active option.
-  // Keep the persisted state as the category only while its attendance window
-  // has not elapsed.
-  if (session.status === 'dibuka' && (!Number.isFinite(endTime) || endTime > now)) {
-    return 'dibuka';
-  }
-  if (
-    (Number.isFinite(startTime) && startTime <= now)
-    || (Number.isFinite(endTime) && endTime <= now)
-  ) return 'terlewati';
+  if (Number.isFinite(startTime) && startTime <= now) return 'terlewati';
   return 'mendatang';
 }
 

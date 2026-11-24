@@ -3,7 +3,9 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   subscribeToAttendance,
   subscribeToPraktikanAttendance,
+  type AttendanceListener,
   type AttendanceRecord,
+  type ListenerErrorHandler,
 } from '../services/attendanceService';
 
 type AttendanceListenerState = {
@@ -74,6 +76,45 @@ export function usePraktikanAttendance(praktikanId?: string | null): AttendanceL
   );
 
   return useAttendanceSubscription(normalizedId || null, subscribe);
+}
+
+/**
+ * Presensi untuk sekumpulan sesi (misalnya semua sesi satu kelas) dalam satu
+ * listener gabungan. Setiap sesi tetap dibaca lewat query `sessionId ==`
+ * sendiri-sendiri karena Rules mengevaluasi kepemilikan per sesi.
+ */
+export function useSessionsAttendance(
+  sessionIds: readonly string[],
+): AttendanceListenerState {
+  const key = sessionIds.join('|');
+  const subscribe = useCallback(
+    (onData: AttendanceListener, onError: ListenerErrorHandler) => {
+      const ids = key ? key.split('|') : [];
+      if (ids.length === 0) {
+        onData([]);
+        return () => undefined;
+      }
+
+      const bySession = new Map<string, AttendanceRecord[]>();
+      const emit = () => onData([...bySession.values()].flat());
+
+      const unsubscribers = ids.map((sessionId) =>
+        subscribeToAttendance(
+          sessionId,
+          (records) => {
+            bySession.set(sessionId, records);
+            emit();
+          },
+          onError,
+        ),
+      );
+
+      return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
+    },
+    [key],
+  );
+
+  return useAttendanceSubscription(key || null, subscribe);
 }
 
 export function useSessionAttendance(

@@ -47,6 +47,7 @@ const validSession: SessionInput = {
   status: 'terjadwal',
   lecturerId: dosen[0].id,
   lecturer: dosen[0].name,
+  laboratoryId: 'lab-b',
 };
 
 const validSchedule: ScheduleInput = {
@@ -190,6 +191,19 @@ describe('validateScheduleInput', () => {
 
   it('accepts a valid schedule input', () => {
     expect(() => validateScheduleInput(validSchedule)).not.toThrow();
+  });
+
+  it('rejects an invalid jumlahPertemuan', () => {
+    expect(() => validateScheduleInput({ ...validSchedule, jumlahPertemuan: 0 })).toThrow(
+      /Jumlah pertemuan/i,
+    );
+    expect(() => validateScheduleInput({ ...validSchedule, jumlahPertemuan: 21 })).toThrow(
+      /Jumlah pertemuan/i,
+    );
+    expect(() => validateScheduleInput({ ...validSchedule, jumlahPertemuan: 2.5 })).toThrow(
+      /bulat/i,
+    );
+    expect(() => validateScheduleInput({ ...validSchedule, jumlahPertemuan: 14 })).not.toThrow();
   });
 });
 

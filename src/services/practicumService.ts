@@ -5,7 +5,9 @@ import {
   doc,
   getDoc,
   getDocs,
+  query,
   updateDoc,
+  where,
 } from 'firebase/firestore';
 import { auth, db } from '../lib/firebase';
 
@@ -77,6 +79,15 @@ export function validateScheduleInput(input: ScheduleInput): void {
     throw new Error('Hari harus berupa angka 0 sampai 6.');
   }
 
+  if (input.jumlahPertemuan !== undefined) {
+    if (!Number.isInteger(input.jumlahPertemuan)) {
+      throw new Error('Jumlah pertemuan harus berupa angka bulat.');
+    }
+    if (input.jumlahPertemuan < 1 || input.jumlahPertemuan > 20) {
+      throw new Error('Jumlah pertemuan harus berada antara 1 sampai 20.');
+    }
+  }
+
   const startMinutes = parseClockTime(input.startTime, 'Waktu mulai');
   const endMinutes = parseClockTime(input.endTime, 'Waktu selesai');
   if (endMinutes <= startMinutes) {
@@ -89,6 +100,9 @@ export function validateSessionInput(input: SessionInput): void {
   requireNonEmpty(input.courseId, 'Mata kuliah');
   requireNonEmpty(input.practicumName, 'Nama praktikum');
   requireNonEmpty(input.className, 'Nama kelas');
+  if (input.laboratoryId !== undefined && input.laboratoryId.trim() === '') {
+    throw new Error('Laboratorium wajib dipilih.');
+  }
 
   const startTimestamp = parseIsoDateTime(input.startsAt, 'Waktu mulai');
   const endTimestamp = parseIsoDateTime(input.endsAt, 'Waktu selesai');
@@ -99,6 +113,16 @@ export function validateSessionInput(input: SessionInput): void {
   if (!SESSION_STATUSES.includes(input.status)) {
     throw new Error('Status sesi tidak valid.');
   }
+}
+
+async function resolveLaboratory(laboratoryId?: string): Promise<string | null> {
+  if (!laboratoryId) return null;
+  requireNonEmpty(laboratoryId, 'Laboratorium');
+  const snapshot = await getDoc(doc(db, COLLECTIONS.laboratories, laboratoryId));
+  if (!snapshot.exists()) {
+    throw new Error('Laboratorium tidak ditemukan.');
+  }
+  return laboratoryId;
 }
 
 function resolveLecturer(lecturerId: LecturerId, lecturer: string): string {
@@ -276,6 +300,106 @@ export async function deleteSchedule(id: string): Promise<void> {
   });
 }
 
+export type GenerateSessionsInput = {
+  scheduleId: string;
+  dates: string[];
+  lecturerId: LecturerId;
+  lecturer: string;
+  laboratoryId: string;
+  startTime: ClockTime;
+  endTime: ClockTime;
+};
+
+/**
+ * Membuat satu sesi untuk setiap tanggal pertemuan yang dipilih. Tidak ada
+ * penghapusan atau penimpaan: tanggal yang sudah punya sesi dilewati.
+ */
+export async function generateSessionsFromSchedule(
+  input: GenerateSessionsInput,
+): Promise<{ created: string[]; skipped: string[]; failed: string[] }> {
+  if (input.dates.length === 0) {
+    throw new Error('Pilih minimal satu tanggal pertemuan.');
+  }
+  requireNonEmpty(input.laboratoryId, 'Laboratorium');
+
+  const schedule = await getScheduleById(input.scheduleId);
+  if (!schedule) {
+    throw new Error('Jadwal tidak ditemukan.');
+  }
+  const classDoc = await resolveSessionClass(schedule.classId, schedule.courseId);
+  if (classDoc.semesterParity !== 'ganjil' && classDoc.semesterParity !== 'genap') {
+    throw new Error('Semester kelas belum dikonfigurasi.');
+  }
+
+  const lecturer = resolveLecturer(input.lecturerId, input.lecturer);
+  const laboratoryId = await resolveLaboratory(input.laboratoryId);
+  if (!laboratoryId) {
+    throw new Error('Laboratorium tidak ditemukan.');
+  }
+
+  const existing = await getSessionsForClass(schedule.classId, classDoc.semesterParity);
+  const taken = new Set(
+    existing.map((session) => session.startsAt.slice(0, 10)),
+  );
+
+  const created: string[] = [];
+  const skipped: string[] = [];
+  const failed: string[] = [];
+
+  for (const date of input.dates) {
+    if (taken.has(date)) {
+      skipped.push(date);
+      continue;
+    }
+    const startsAt = combineDateAndTime(date, input.startTime);
+    const endsAt = combineDateAndTime(date, input.endTime);
+    const payload: Omit<SessionDoc, 'id'> = {
+      classId: classDoc.id,
+      courseId: classDoc.courseId,
+      practicumName: schedule.courseId === classDoc.courseId
+        ? courses.find((course) => course.id === classDoc.courseId)?.name ?? ''
+        : '',
+      className: classDoc.className,
+      startsAt,
+      endsAt,
+      status: 'terjadwal',
+      lecturerId: input.lecturerId,
+      lecturer,
+      semester: classDoc.semester,
+      semesterParity: classDoc.semesterParity,
+      assistantUid: classDoc.assistantUid,
+      laboratoryId,
+      scheduleId: schedule.id,
+    };
+    if (!payload.practicumName) {
+      throw new Error('Nama praktikum tidak ditemukan untuk kelas ini.');
+    }
+
+    try {
+      const reference = await addDoc(collection(db, COLLECTIONS.sessions), {
+        ...payload,
+        startsAt: isoToFirestoreDate(payload.startsAt),
+        endsAt: isoToFirestoreDate(payload.endsAt),
+      });
+      created.push(reference.id);
+    } catch {
+      failed.push(date);
+    }
+  }
+
+  return { created, skipped, failed };
+}
+
+function combineDateAndTime(date: string, time: ClockTime): string {
+  const [hours = '0', minutes = '0'] = time.split(':');
+  const iso = `${date}T${hours.padStart(2, '0')}:${minutes.padStart(2, '0')}:00+07:00`;
+  const timestamp = Date.parse(iso);
+  if (Number.isNaN(timestamp)) {
+    throw new Error('Tanggal atau waktu pertemuan tidak valid.');
+  }
+  return new Date(timestamp).toISOString();
+}
+
 export async function getScheduleById(
   id: string,
 ): Promise<ScheduleDoc | null> {
@@ -308,6 +432,10 @@ export async function createSession(input: SessionInput): Promise<SessionDoc> {
   if (classDoc.semesterParity !== 'ganjil' && classDoc.semesterParity !== 'genap') {
     throw new Error('Semester kelas belum dikonfigurasi.');
   }
+  if (!input.laboratoryId) {
+    throw new Error('Laboratorium wajib dipilih.');
+  }
+  const laboratoryId = await resolveLaboratory(input.laboratoryId);
   const payload: Omit<SessionDoc, 'id'> = {
     classId: classDoc.id,
     courseId: classDoc.courseId,
@@ -321,6 +449,8 @@ export async function createSession(input: SessionInput): Promise<SessionDoc> {
     semester: classDoc.semester,
     semesterParity: classDoc.semesterParity,
     assistantUid: classDoc.assistantUid,
+    ...(laboratoryId ? { laboratoryId } : {}),
+    ...(input.scheduleId ? { scheduleId: input.scheduleId } : {}),
   };
 
   return runFirestore(async () => {
@@ -338,11 +468,23 @@ export async function updateSession(
   input: SessionInput,
 ): Promise<SessionDoc> {
   validateSessionInput(input);
+  const current = await getSessionById(id);
+  if (!current) {
+    throw new Error('Sesi tidak ditemukan.');
+  }
+  if (current.status !== 'terjadwal') {
+    throw new Error(
+      current.status === 'dibuka'
+        ? 'Sesi yang sedang dibuka tidak dapat diubah. Tutup sesi terlebih dahulu.'
+        : 'Sesi yang sudah ditutup tidak dapat diubah.',
+    );
+  }
   const lecturer = resolveLecturer(input.lecturerId, input.lecturer);
   const classDoc = await resolveSessionClass(input.classId, input.courseId);
   if (classDoc.semesterParity !== 'ganjil' && classDoc.semesterParity !== 'genap') {
     throw new Error('Semester kelas belum dikonfigurasi.');
   }
+  const laboratoryId = await resolveLaboratory(input.laboratoryId);
   const payload: Omit<SessionDoc, 'id'> = {
     classId: classDoc.id,
     courseId: classDoc.courseId,
@@ -356,6 +498,8 @@ export async function updateSession(
     semester: classDoc.semester,
     semesterParity: classDoc.semesterParity,
     assistantUid: classDoc.assistantUid,
+    ...(laboratoryId ? { laboratoryId } : {}),
+    ...(input.scheduleId ? { scheduleId: input.scheduleId } : {}),
   };
 
   return runFirestore(async () => {
@@ -381,6 +525,33 @@ export async function getSessionById(id: string): Promise<SessionDoc | null> {
       startsAt: firestoreDateToIso(data.startsAt),
       endsAt: firestoreDateToIso(data.endsAt),
     };
+  });
+}
+
+/**
+ * Sesi milik satu kelas, dibaca lewat query yang memakai filter sehingga
+ * Firestore Rules dapat mengevaluasinya (list tanpa filter selalu ditolak).
+ */
+export async function getSessionsForClass(
+  classId: string,
+  semesterParity: 'ganjil' | 'genap',
+): Promise<SessionDoc[]> {
+  return runFirestore(async () => {
+    const snapshot = await getDocs(query(
+      collection(db, COLLECTIONS.sessions),
+      where('assistantUid', '==', auth.currentUser?.uid ?? ''),
+      where('semesterParity', '==', semesterParity),
+      where('classId', '==', classId),
+    ));
+    return snapshot.docs.map((document) => {
+      const data = document.data() as Omit<SessionDoc, 'id'>;
+      return {
+        ...data,
+        id: document.id,
+        startsAt: firestoreDateToIso(data.startsAt),
+        endsAt: firestoreDateToIso(data.endsAt),
+      };
+    });
   });
 }
 
