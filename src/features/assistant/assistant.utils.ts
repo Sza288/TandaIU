@@ -1,4 +1,4 @@
-import { Attendance, ExcuseReason, Praktikan } from '../../types';
+import { Attendance, ExcuseReason, PracticumSession, Praktikan } from '../../types';
 import { formatTime } from '../../utils/format';
 
 export type AttendanceStatus = 'hadir' | 'belum_presensi' | 'izin' | 'sakit' | 'alpha';
@@ -69,6 +69,114 @@ export function deriveAttendanceRecap(
       excuseReason: record?.excuseReason,
     };
   });
+}
+
+export type ClassRecapMeeting = {
+  sessionId: string;
+  meetingNumber: number;
+  status: PracticumSession['status'];
+  startsAt: string;
+  endsAt: string;
+};
+
+export type ClassRecapStudent = {
+  praktikanId: string;
+  praktikanName: string;
+  studentCode?: string;
+  semester: number;
+  hadir: number;
+  izin: number;
+  sakit: number;
+  alpha: number;
+  belumPresensi: number;
+  attendanceRate: number;
+};
+
+export type ClassRecap = {
+  meetings: ClassRecapMeeting[];
+  students: ClassRecapStudent[];
+  totalMeetings: number;
+  closedMeetings: number;
+};
+
+/**
+ * Rekap satu kelas lintas pertemuan yang sudah/akan berlangsung. Hanya sesi
+ * berstatus `ditutup` yang dihitung alpha, sama seperti rekap per sesi, agar
+ * pertemuan yang belum selesai tidak menumpuk sebagai alpha.
+ */
+export function buildClassRecap({
+  sessions,
+  attendances,
+  enrollments,
+}: {
+  sessions: PracticumSession[];
+  attendances: Attendance[];
+  enrollments: { praktikanId: string; praktikanName: string; studentCode?: string; semester: number }[];
+}): ClassRecap {
+  const orderedSessions = [...sessions].sort(
+    (a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt),
+  );
+
+  const meetings: ClassRecapMeeting[] = orderedSessions.map((session, index) => ({
+    sessionId: session.id,
+    meetingNumber: index + 1,
+    status: session.status,
+    startsAt: session.startsAt,
+    endsAt: session.endsAt,
+  }));
+
+  const attendanceByKey = new Map<string, Attendance>();
+  for (const attendance of attendances) {
+    const key = `${attendance.sessionId}::${attendance.praktikanId}`;
+    if (!attendanceByKey.has(key)) attendanceByKey.set(key, attendance);
+  }
+
+  const students: ClassRecapStudent[] = enrollments
+    .map((enrollment) => {
+      let hadir = 0;
+      let izin = 0;
+      let sakit = 0;
+      let alpha = 0;
+      let belumPresensi = 0;
+
+      for (const session of orderedSessions) {
+        const record = attendanceByKey.get(`${session.id}::${enrollment.praktikanId}`);
+        if (record) {
+          if (record.status === 'izin') {
+            if (record.excuseReason === 'sakit') sakit += 1;
+            else izin += 1;
+          } else {
+            hadir += 1;
+          }
+        } else if (session.status === 'ditutup') {
+          alpha += 1;
+        } else {
+          belumPresensi += 1;
+        }
+      }
+
+      const total = orderedSessions.length;
+      return {
+        praktikanId: enrollment.praktikanId,
+        praktikanName: enrollment.praktikanName,
+        studentCode: enrollment.studentCode,
+        semester: enrollment.semester,
+        hadir,
+        izin,
+        sakit,
+        alpha,
+        belumPresensi,
+        attendanceRate: total === 0 ? 0 : hadir / total,
+      };
+    })
+    .sort((a, b) => a.praktikanName.localeCompare(b.praktikanName, 'id'));
+
+  return {
+    meetings,
+    students,
+    totalMeetings: meetings.length,
+    closedMeetings: meetings.filter((meeting) => meeting.status === 'ditutup').length,
+  };
 }
 
 export function calculateAttendanceStats(recapItems: AttendanceRecapItem[]): AttendanceStats {

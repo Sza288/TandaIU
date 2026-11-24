@@ -11,7 +11,6 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import BottomNav from '../../components/BottomNav';
 import ScreenHeader from '../../components/ScreenHeader';
 import { assistantIdentity } from '../../data/assistantIdentity';
 import { useAuthSession } from '../auth/AuthSessionContext';
@@ -202,8 +201,6 @@ export default function AssistantPermitsScreen() {
           </View>
         )}
       </ScrollView>
-
-      <BottomNav />
     </SafeAreaView>
   );
 }

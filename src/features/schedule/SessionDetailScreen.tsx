@@ -17,7 +17,6 @@ import {
 import type { ScrollViewInstance } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
-import BottomNav from '../../components/BottomNav';
 import ConfirmationModal from '../../components/ConfirmationModal';
 import { SupportContactCard } from '../../components/DashboardWidgets';
 import StatusBadge from '../../components/StatusBadge';
@@ -799,7 +798,6 @@ export default function SessionDetailScreen() {
         onCancel={() => setPendingAction(null)}
         onConfirm={() => void handleConfirmAction()}
       />
-      <BottomNav />
     </SafeAreaView>
   );
 }

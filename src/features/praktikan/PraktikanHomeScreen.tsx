@@ -101,6 +101,38 @@ export default function PraktikanHomeScreen() {
 
           {activePraktikan ? (
             <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Pintasan</Text>
+              <View style={styles.quickGrid}>
+                <QuickCard
+                  icon="calendar-outline"
+                  title="Sesi"
+                  caption="Lihat semua sesi praktikum"
+                  onPress={handleOpenSchedule}
+                />
+                <QuickCard
+                  icon="time-outline"
+                  title="Riwayat"
+                  caption="Lihat catatan kehadiranmu"
+                  onPress={handleOpenHistory}
+                />
+                <QuickCard
+                  icon="document-text-outline"
+                  title="Ajukan Izin"
+                  caption="Kirim izin dan pantau statusnya"
+                  onPress={handleOpenPermit}
+                />
+                <QuickCard
+                  icon="chatbubble-ellipses-outline"
+                  title="Ulasan"
+                  caption="Beri ulasan setelah praktikum selesai"
+                  onPress={handleOpenReview}
+                />
+              </View>
+            </View>
+          ) : null}
+
+          {activePraktikan ? (
+            <View style={styles.section}>
               <View style={styles.sectionHeading}>
                 <View style={styles.sectionCopy}>
                   <Text style={styles.sectionTitle}>Sesi Menunggu Presensi</Text>
@@ -211,36 +243,6 @@ export default function PraktikanHomeScreen() {
               )}
             </View>
           ) : null}
-
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Pintasan</Text>
-            <View style={styles.quickGrid}>
-              <QuickCard
-                icon="calendar-outline"
-                title="Jadwal"
-                caption="Lihat semua jadwal praktikum"
-                onPress={handleOpenSchedule}
-              />
-              <QuickCard
-                icon="time-outline"
-                title="Riwayat"
-                caption="Lihat catatan kehadiranmu"
-                onPress={handleOpenHistory}
-              />
-              <QuickCard
-                icon="document-text-outline"
-                title="Ajukan Izin"
-                caption="Kirim izin dan pantau statusnya"
-                onPress={handleOpenPermit}
-              />
-              <QuickCard
-                icon="chatbubble-ellipses-outline"
-                title="Ulasan"
-                caption="Beri ulasan setelah praktikum selesai"
-                onPress={handleOpenReview}
-              />
-            </View>
-          </View>
         </View>
       </ScrollView>
 
