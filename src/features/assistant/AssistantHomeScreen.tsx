@@ -64,6 +64,7 @@ export default function AssistantHomeScreen() {
   const goToReviews = () => router.push('/assistant/reviews');
 
   const goToKelola = () => router.push('/assistant/manage');
+  const goToMaps = () => router.push('/maps');
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
@@ -145,6 +146,12 @@ export default function AssistantHomeScreen() {
             title="Kelola Praktikum"
             caption="Atur kelas, jadwal, sesi, dan lab"
             onPress={goToKelola}
+          />
+          <QuickCard
+            icon="map-outline"
+            title="Maps"
+            caption="Lokasi dan aktivitas laboratorium"
+            onPress={goToMaps}
           />
         </View>
 
