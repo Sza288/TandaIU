@@ -10,6 +10,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import AttendanceLocationDetails from '../../components/AttendanceLocationDetails';
 import ConfirmationModal from '../../components/ConfirmationModal';
 import ScreenHeader from '../../components/ScreenHeader';
 import StatusBadge from '../../components/StatusBadge';
@@ -28,6 +29,7 @@ import {
 import { colors, fonts, radius, shadows, spacing } from '../../theme';
 import type { PracticumSession } from '../../types';
 import { formatDateLong, formatTime, formatTimeRange } from '../../utils/format';
+import { acquireDeviceLocation } from '../../utils/location';
 
 const statusRank: Record<PracticumSession['status'], number> = {
   dibuka: 0,
@@ -139,12 +141,33 @@ export default function PraktikanAttendanceScreen() {
     setSelectedSession(null);
     setSubmittingSessionId(session.id);
 
-    const result = await checkIn(session.id, currentUser);
+    const location = await acquireDeviceLocation();
+    if (!location.ok) {
+      setSubmittingSessionId(null);
+      setFeedback({ tone: 'error', message: location.reason });
+      return;
+    }
+    const result = await checkIn(session.id, currentUser, {
+      latitude: location.latitude,
+      longitude: location.longitude,
+      accuracyMeters: location.accuracyMeters,
+    });
     setSubmittingSessionId(null);
+    const locationDetails = [
+      typeof result.distanceMeters === 'number'
+        ? `Jarak ${Math.round(result.distanceMeters)} meter dari laboratorium`
+        : '',
+      typeof result.radiusMeters === 'number'
+        ? `radius ${Math.round(result.radiusMeters)} meter`
+        : '',
+      typeof result.accuracyMeters === 'number'
+        ? `akurasi ${Math.round(result.accuracyMeters)} meter`
+        : '',
+    ].filter(Boolean).join(', ');
     setFeedback({
       tone: result.ok ? 'success' : 'error',
       message: result.ok
-        ? `Presensi ${session.practicumName} berhasil dicatat.`
+        ? `Presensi ${session.practicumName} berhasil dicatat.${locationDetails ? ` ${locationDetails}.` : ''}`
         : result.reason ?? 'Presensi tidak berhasil. Silakan coba lagi.',
     });
   };
@@ -274,12 +297,17 @@ export default function PraktikanAttendanceScreen() {
           <View style={styles.list}>
             {visibleSessions.map((session) => {
               const attendance = attendanceBySession.get(session.id);
-              const alreadyCheckedIn = attendance !== undefined;
+              const alreadyCheckedIn =
+                attendance !== undefined && attendance.status !== 'dibatalkan';
+              const isCancelled = attendance?.status === 'dibatalkan';
               const isOpen = session.status === 'dibuka';
-              const disabled = alreadyCheckedIn || !isOpen || submittingSessionId !== null;
+              const disabled =
+                alreadyCheckedIn || isCancelled || !isOpen || submittingSessionId !== null;
 
               const buttonLabel = alreadyCheckedIn
                 ? 'Sudah Presensi'
+                : isCancelled
+                  ? 'Presensi Dibatalkan'
                 : isOpen
                   ? 'Presensi Sekarang'
                   : session.status === 'terjadwal'
@@ -314,17 +342,23 @@ export default function PraktikanAttendanceScreen() {
                     </View>
                   </View>
 
-                  {alreadyCheckedIn ? (
-                    <View style={styles.checkedInBanner}>
-                      <Ionicons name="checkmark-circle" size={15} color={colors.success} />
-                      <Text style={styles.checkedInText}>
-                        Presensi tercatat
-                        {attendance.attendedAt
-                          ? ` pukul ${formatTime(attendance.attendedAt)} WIB`
-                          : ''}
+                  {attendance ? (
+                    <View style={[styles.checkedInBanner, isCancelled && styles.cancelledBanner]}>
+                      <Ionicons
+                        name={isCancelled ? 'close-circle' : 'checkmark-circle'}
+                        size={15}
+                        color={isCancelled ? colors.warning : colors.success}
+                      />
+                      <Text style={[styles.checkedInText, isCancelled && styles.cancelledText]}>
+                        {isCancelled
+                          ? 'Presensi sebelumnya dibatalkan oleh asisten.'
+                          : `Presensi tercatat${attendance.attendedAt
+                            ? ` pukul ${formatTime(attendance.attendedAt)} WIB`
+                            : ''}`}
                       </Text>
                     </View>
                   ) : null}
+                  {attendance ? <AttendanceLocationDetails attendance={attendance} /> : null}
 
                   <Pressable
                     accessibilityRole="button"
@@ -338,7 +372,11 @@ export default function PraktikanAttendanceScreen() {
                     ]}
                   >
                     <Ionicons
-                      name={alreadyCheckedIn ? 'checkmark-circle' : 'checkmark-done-circle'}
+                      name={isCancelled
+                        ? 'close-circle'
+                        : alreadyCheckedIn
+                          ? 'checkmark-circle'
+                          : 'checkmark-done-circle'}
                       size={18}
                       color={disabled ? colors.textMuted : colors.textOnPrimary}
                     />
@@ -352,11 +390,31 @@ export default function PraktikanAttendanceScreen() {
                     </Text>
                   </Pressable>
 
-                  {!alreadyCheckedIn && session.status === 'terjadwal' ? (
+                  {isOpen && !alreadyCheckedIn && !isCancelled ? (
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={`Scan QR Asprak untuk ${session.practicumName}`}
+                      disabled={submittingSessionId !== null}
+                      onPress={() => router.push({
+                        pathname: '/praktikan/qr-scan',
+                        params: { sessionId: session.id },
+                      })}
+                      style={({ pressed }) => [
+                        styles.qrActionButton,
+                        submittingSessionId !== null && styles.actionButtonDisabled,
+                        pressed && submittingSessionId === null && styles.pressed,
+                      ]}
+                    >
+                      <Ionicons name="qr-code-outline" size={18} color={colors.primaryDark} />
+                      <Text style={styles.qrActionButtonText}>Scan QR Asprak</Text>
+                    </Pressable>
+                  ) : null}
+
+                  {!alreadyCheckedIn && !isCancelled && session.status === 'terjadwal' ? (
                     <Text style={styles.actionHint}>
                       Tombol aktif setelah asisten membuka sesi.
                     </Text>
-                  ) : !alreadyCheckedIn && session.status === 'ditutup' ? (
+                  ) : !alreadyCheckedIn && !isCancelled && session.status === 'ditutup' ? (
                     <Text style={styles.actionHint}>
                       Sesi sudah ditutup, presensi tidak dapat dilakukan.
                     </Text>
@@ -580,6 +638,12 @@ const styles = StyleSheet.create({
     fontFamily: fonts.semiBold,
     fontSize: 11,
   },
+  cancelledBanner: {
+    backgroundColor: colors.warningBg,
+  },
+  cancelledText: {
+    color: colors.warning,
+  },
   actionButton: {
     minHeight: 44,
     flexDirection: 'row',
@@ -588,6 +652,22 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     borderRadius: radius.md,
     backgroundColor: colors.primaryDark,
+  },
+  qrActionButton: {
+    minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.primarySoft,
+    backgroundColor: colors.surface,
+  },
+  qrActionButtonText: {
+    color: colors.primaryDark,
+    fontFamily: fonts.bold,
+    fontSize: 13,
   },
   actionButtonDisabled: {
     backgroundColor: colors.neutralBg,

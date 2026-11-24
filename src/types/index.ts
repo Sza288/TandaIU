@@ -19,6 +19,8 @@ export type PracticumSession = {
   startsAt: string; // ISO 8601 in app models; Firestore stores Timestamp.
   endsAt: string;   // ISO 8601 in app models; Firestore stores Timestamp.
   status: SessionStatus;
+  laboratoryId?: string;
+  assistantUid?: string;
 };
 
 export type Praktikan = {
@@ -34,8 +36,19 @@ export type Attendance = {
   sessionId: string;
   praktikanId: string;
   attendedAt: string; // ISO 8601 in app models; new Firestore writes use serverTimestamp.
-  status?: 'hadir' | 'izin';
+  status?: 'hadir' | 'izin' | 'dibatalkan';
+  attendanceMethod?: 'location' | 'qr';
   excuseReason?: ExcuseReason;
+  latitude?: number;
+  longitude?: number;
+  distanceMeters?: number;
+  accuracyMeters?: number;
+  radiusMeters?: number;
+  laboratoryId?: string;
+  laboratoryName?: string;
+  cancelledAt?: string;
+  cancelledBy?: string;
+  cancelReason?: string;
 };
 
 export type Role = 'asisten' | 'praktikan';
@@ -43,4 +56,9 @@ export type Role = 'asisten' | 'praktikan';
 export type MutationResult = {
   ok: boolean;
   reason?: string;
+  distanceMeters?: number;
+  radiusMeters?: number;
+  latitude?: number;
+  longitude?: number;
+  accuracyMeters?: number;
 };

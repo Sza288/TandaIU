@@ -52,6 +52,7 @@ export default function PraktikanHomeScreen() {
   const hasEnrollment = enrollmentResult.data.length > 0;
 
   const handleOpenSchedule = () => router.push('/schedule');
+  const handleOpenAttendance = () => router.push('/praktikan/attendance');
   const handleOpenHistory = () => router.push('/praktikan/riwayat');
   const handleOpenPermit = () => router.push('/praktikan/permit');
   const handleOpenReview = () => router.push('/praktikan/review');
@@ -215,6 +216,12 @@ export default function PraktikanHomeScreen() {
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Pintasan</Text>
             <View style={styles.quickGrid}>
+              <QuickCard
+                icon="qr-code-outline"
+                title="Presensi"
+                caption="Buka sesi dan pilih lokasi atau Scan QR Asprak"
+                onPress={handleOpenAttendance}
+              />
               <QuickCard
                 icon="calendar-outline"
                 title="Jadwal"

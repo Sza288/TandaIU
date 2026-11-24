@@ -15,12 +15,16 @@ const {
   getFirestore,
   query,
   runTransaction,
-  serverTimestamp,
   setDoc,
   terminate,
   updateDoc,
   where,
 } = require('firebase/firestore');
+const {
+  connectFunctionsEmulator,
+  getFunctions,
+  httpsCallable,
+} = require('firebase/functions');
 
 const PROJECT_ID = 'demo-tandaiu-rules';
 const API_KEY = process.env.EXPO_PUBLIC_FIREBASE_API_KEY;
@@ -46,6 +50,8 @@ const firebaseAuth = getAuth(firebaseApp);
 connectAuthEmulator(firebaseAuth, authBase, { disableWarnings: true });
 const firebaseDb = getFirestore(firebaseApp);
 connectFirestoreEmulator(firebaseDb, emulatorHost, 8080);
+const firebaseFunctions = getFunctions(firebaseApp, 'us-central1');
+connectFunctionsEmulator(firebaseFunctions, emulatorHost, 5001);
 
 async function signInWithSdk(email) {
   return signInWithEmailAndPassword(firebaseAuth, email, password);
@@ -178,25 +184,14 @@ test('Praktikan uses enrolled-session attendance, permit, review, and private hi
   assert.ok(closedSession);
 
   const attendanceRef = doc(firebaseDb, 'attendances', `${openSession.id}_${uid}`);
-  await runTransaction(firebaseDb, async (transaction) => {
-    const [sessionSnapshot, enrollmentSnapshot, profileSnapshot, attendanceSnapshot] = await Promise.all([
-      transaction.get(openSession.ref),
-      transaction.get(doc(firebaseDb, 'enrollments', `${enrollment.classId}_${uid}`)),
-      transaction.get(doc(firebaseDb, 'users', uid)),
-      transaction.get(attendanceRef),
-    ]);
-    assert.equal(sessionSnapshot.exists(), true);
-    assert.equal(enrollmentSnapshot.exists(), true);
-    assert.equal(profileSnapshot.exists(), true);
-    assert.equal(attendanceSnapshot.exists(), false);
-    transaction.set(attendanceRef, {
-      sessionId: openSession.id,
-      praktikanId: uid,
-      praktikanName: profileSnapshot.data().name,
-      attendedAt: serverTimestamp(),
-      status: 'hadir',
-    });
+  const submitAttendance = httpsCallable(firebaseFunctions, 'submitAttendance');
+  const attendance = await submitAttendance({
+    sessionId: openSession.id,
+    latitude: 0,
+    longitude: 0,
+    accuracyMeters: 10,
   });
+  assert.equal(attendance.data.ok, true);
 
   const attendanceHistory = await getDocs(query(
     collection(firebaseDb, 'attendances'),

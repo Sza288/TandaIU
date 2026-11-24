@@ -52,11 +52,13 @@ export function deriveAttendanceRecap(
     const record = attendanceMap.get(praktikan.id);
     const status: AttendanceStatus = record?.status === 'izin'
       ? record.excuseReason === 'sakit' ? 'sakit' : 'izin'
-      : record
-        ? 'hadir'
-        : isClosed
-          ? 'alpha'
-          : 'belum_presensi';
+      : record?.status === 'dibatalkan'
+        ? isClosed ? 'alpha' : 'belum_presensi'
+        : record
+          ? 'hadir'
+          : isClosed
+            ? 'alpha'
+            : 'belum_presensi';
 
     return {
       praktikanId: praktikan.id,

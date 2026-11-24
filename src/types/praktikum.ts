@@ -36,6 +36,7 @@ export type SessionDoc = PracticumSession & {
   semester?: number;
   semesterParity?: 'ganjil' | 'genap';
   assistantUid?: string;
+  laboratoryId?: string;
 };
 
 export type ClassInput = Omit<ClassDoc, 'id'>;
@@ -52,10 +53,23 @@ export type SessionInput = {
   status: SessionStatus;
   lecturerId: LecturerId;
   lecturer: string;
+  laboratoryId?: string;
+};
+
+export type LaboratoryDoc = {
+  id: string;
+  name: string;
+  lat: number;
+  lon: number;
+  radius: number;
+  lantai: number | string;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export const COLLECTIONS = {
   classes: 'classes',
   schedules: 'schedules',
   sessions: 'sessions',
+  laboratories: 'laboratories',
 } as const;

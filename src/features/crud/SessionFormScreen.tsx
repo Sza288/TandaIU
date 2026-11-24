@@ -8,11 +8,12 @@ import { useAuthSession } from '../auth/AuthSessionContext';
 import {
   createSession,
   getSessionById,
+  getAllLaboratories,
   updateSession,
   validateSessionInput,
 } from '../../services/practicumService';
 import type { SessionStatus } from '../../types';
-import type { SessionInput } from '../../types/praktikum';
+import type { LaboratoryDoc, SessionInput } from '../../types/praktikum';
 import {
   COURSE_OPTIONS,
   LECTURER_OPTIONS,
@@ -39,7 +40,8 @@ type SessionField =
   | 'startsAt'
   | 'endsAt'
   | 'status'
-  | 'lecturerId';
+  | 'lecturerId'
+  | 'laboratoryId';
 
 const SESSION_FIELDS: { field: SessionField; prefix: string }[] = [
   { field: 'classId', prefix: 'Kelas' },
@@ -50,6 +52,7 @@ const SESSION_FIELDS: { field: SessionField; prefix: string }[] = [
   { field: 'status', prefix: 'Status sesi' },
   { field: 'lecturerId', prefix: 'Dosen' },
   { field: 'lecturerId', prefix: 'Nama dosen' },
+  { field: 'laboratoryId', prefix: 'Laboratorium' },
 ];
 
 export default function SessionFormScreen() {
@@ -75,6 +78,9 @@ export default function SessionFormScreen() {
   const [originalStartsAt, setOriginalStartsAt] = useState<string>();
   const [originalEndsAt, setOriginalEndsAt] = useState<string>();
   const [status, setStatus] = useState('terjadwal');
+  const [laboratoryId, setLaboratoryId] = useState('');
+  const [laboratories, setLaboratories] = useState<LaboratoryDoc[]>([]);
+  const [laboratoryPickerVisible, setLaboratoryPickerVisible] = useState(false);
   const [coursePickerVisible, setCoursePickerVisible] = useState(false);
   const [classPickerVisible, setClassPickerVisible] = useState(false);
   const [lecturerPickerVisible, setLecturerPickerVisible] = useState(false);
@@ -106,6 +112,7 @@ export default function SessionFormScreen() {
           setEndDate(endParts.date);
           setEndTime(endParts.time);
           setStatus(session.status);
+          setLaboratoryId(session.laboratoryId ?? '');
         }
         setReady(true);
       })
@@ -120,9 +127,29 @@ export default function SessionFormScreen() {
     };
   }, [id]);
 
+  useEffect(() => {
+    let cancelled = false;
+    getAllLaboratories()
+      .then((items) => {
+        if (!cancelled) setLaboratories(items);
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) setFormError(getErrorMessage(error));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const selectedCourse = courses.find((course) => course.id === courseId);
   const selectedClass = classes.data.find((classDoc) => classDoc.id === classId);
   const selectedLecturer = dosen.find((lecturer) => lecturer.id === lecturerId);
+  const selectedLaboratory = laboratories.find((laboratory) => laboratory.id === laboratoryId);
+  const laboratoryOptions = laboratories.map((laboratory) => ({
+    value: laboratory.id,
+    label: laboratory.name,
+    description: `Lantai ${laboratory.lantai} · Radius ${Math.round(laboratory.radius)} meter`,
+  }));
   const courseOptions = COURSE_OPTIONS.filter((option) => {
     const course = courses.find((item) => item.id === option.value);
     return parity && course && (course.semester % 2 === 1 ? 'ganjil' : 'genap') === parity;
@@ -203,6 +230,11 @@ export default function SessionFormScreen() {
       return;
     }
 
+    if (!selectedLaboratory) {
+      setErrors({ laboratoryId: 'Laboratorium wajib dipilih.' });
+      return;
+    }
+
     const input: SessionInput = {
       classId: selectedClass.id,
       courseId: selectedClass.courseId,
@@ -213,6 +245,7 @@ export default function SessionFormScreen() {
       status: status as SessionStatus,
       lecturerId: toLecturerId(lecturerId),
       lecturer: selectedLecturer.name,
+      laboratoryId: selectedLaboratory.id,
     };
 
     try {
@@ -293,6 +326,20 @@ export default function SessionFormScreen() {
       />
 
       <FormPickerField
+        label="Laboratorium"
+        value={selectedLaboratory?.name ?? ''}
+        placeholder="Pilih laboratorium"
+        error={errors.laboratoryId}
+        hint={
+          laboratories.length === 0
+            ? 'Data laboratorium belum tersedia.'
+            : 'Lokasi dan radius mengikuti data laboratorium.'
+        }
+        onPress={() => setLaboratoryPickerVisible(true)}
+        disabled={laboratories.length === 0}
+      />
+
+      <FormPickerField
         label="Status sesi"
         value={
           SESSION_STATUS_OPTIONS.find((option) => option.value === status)?.label ?? ''
@@ -370,6 +417,18 @@ export default function SessionFormScreen() {
         selectedValue={status}
         onSelect={setStatus}
         onClose={() => setStatusPickerVisible(false)}
+      />
+
+      <OptionPicker
+        visible={laboratoryPickerVisible}
+        title="Pilih Laboratorium"
+        options={laboratoryOptions}
+        selectedValue={laboratoryId}
+        onSelect={(value) => {
+          setLaboratoryId(value);
+          setErrors((current) => ({ ...current, laboratoryId: undefined }));
+        }}
+        onClose={() => setLaboratoryPickerVisible(false)}
       />
     </FormScaffold>
   );

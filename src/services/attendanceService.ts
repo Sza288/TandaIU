@@ -4,7 +4,6 @@ import {
   onSnapshot,
   query,
   runTransaction,
-  serverTimestamp,
   where,
   type DocumentData,
   type Firestore,
@@ -16,6 +15,7 @@ import { praktikans } from '../data/praktikans';
 import type { CurrentUser } from '../lib/currentSession';
 import type { Attendance, MutationResult, PracticumSession } from '../types';
 import { firestoreDateToIso, isoToFirestoreDate } from '../utils/firestoreDate';
+import { httpsCallable } from 'firebase/functions';
 
 export type AttendanceRecord = Attendance & {
   id: string;
@@ -27,6 +27,11 @@ export type SessionListener = (session: PracticumSession | null) => void;
 export type SessionsListener = (sessions: PracticumSession[]) => void;
 export type ListenerErrorHandler = (message: string) => void;
 export type AttendanceUnsubscribe = Unsubscribe;
+export type AttendanceLocation = {
+  latitude: number;
+  longitude: number;
+  accuracyMeters: number;
+};
 
 type ServiceMode = 'firestore' | 'mock';
 
@@ -34,7 +39,11 @@ export type AttendanceService = {
   mode: ServiceMode;
   openSession: (sessionId: string) => Promise<MutationResult>;
   closeSession: (sessionId: string) => Promise<MutationResult>;
-  checkIn: (sessionId: string, user?: CurrentUser | null) => Promise<MutationResult>;
+  checkIn: (
+    sessionId: string,
+    user?: CurrentUser | null,
+    location?: AttendanceLocation | null,
+  ) => Promise<MutationResult>;
   subscribeToAttendance: (
     sessionId: string,
     onData: AttendanceListener,
@@ -76,6 +85,57 @@ const GENERIC_LISTENER_ERROR =
   'Gagal memuat data presensi. Periksa koneksi dan konfigurasi Firebase.';
 const FIREBASE_NOT_CONFIGURED_MESSAGE =
   'Firebase belum dikonfigurasi. Isi variabel EXPO_PUBLIC_FIREBASE_* pada .env.';
+const CALLABLE_DOMAIN_ERROR_MESSAGES: Record<string, string> = {
+  SESSION_NOT_OPEN: 'Presensi tidak bisa dilakukan, karena jam di luar sesi praktikum.',
+  SESSION_NOT_STARTED: 'Presensi belum dapat dilakukan karena sesi praktikum belum dimulai.',
+  SESSION_ENDED: 'Presensi tidak bisa dilakukan karena waktu sesi praktikum telah berakhir.',
+  SESSION_CLOSED: 'Presensi tidak bisa dilakukan karena sesi praktikum telah ditutup.',
+  SESSION_TIME_INVALID: 'Presensi tidak bisa dilakukan karena waktu sesi praktikum tidak valid.',
+  SESSION_NOT_FOUND: 'Sesi praktikum tidak ditemukan.',
+  LABORATORY_NOT_FOUND: 'Data laboratorium sesi ini tidak ditemukan.',
+  ATTENDANCE_NOT_FOUND: 'Data presensi tidak ditemukan.',
+};
+
+export function callableErrorMessage(error: unknown, fallback: string): string {
+  if (typeof error !== 'object' || error === null) return fallback;
+  const callableError = error as {
+    code?: unknown;
+    message?: unknown;
+    details?: unknown;
+  };
+  const details = typeof callableError.details === 'object' && callableError.details !== null
+    ? callableError.details as { reasonCode?: unknown }
+    : null;
+  if (typeof details?.reasonCode === 'string') {
+    const domainMessage = CALLABLE_DOMAIN_ERROR_MESSAGES[details.reasonCode];
+    if (domainMessage) return domainMessage;
+  }
+  const code = typeof callableError.code === 'string' ? callableError.code : '';
+  if (code === 'functions/not-found'
+    || (typeof callableError.message === 'string'
+      && /not found.*404|404.*not found/i.test(callableError.message))) {
+    return 'Layanan presensi tidak ditemukan pada backend yang terhubung. Periksa konfigurasi Firebase/Emulator lalu coba lagi.';
+  }
+  if (code === 'functions/unavailable') {
+    return 'Layanan presensi sedang tidak tersedia. Periksa koneksi dan coba lagi.';
+  }
+  if (code === 'functions/internal' || code === 'functions/unknown') return fallback;
+  if (code.startsWith('functions/')
+    && ![
+      'functions/already-exists',
+      'functions/deadline-exceeded',
+      'functions/failed-precondition',
+      'functions/invalid-argument',
+      'functions/permission-denied',
+      'functions/unauthenticated',
+    ].includes(code)) {
+    return fallback;
+  }
+  if (!code.startsWith('functions/')) return fallback;
+  return typeof callableError.message === 'string' && callableError.message.trim()
+    ? callableError.message
+    : fallback;
+}
 
 /**
  * Kontrak hasil mutasi presensi: setiap operasi selalu mengembalikan
@@ -316,7 +376,12 @@ export function describeListenerError(error: unknown): string {
 }
 
 function mapAttendance(id: string, data: DocumentData): AttendanceRecord {
-  const status = data.status === 'izin' ? 'izin' : 'hadir';
+  const status =
+    data.status === 'izin'
+      ? 'izin'
+      : data.status === 'dibatalkan'
+        ? 'dibatalkan'
+        : 'hadir';
   const excuseReason =
     data.excuseReason === 'sakit' || data.excuseReason === 'izin-lainnya'
       ? data.excuseReason
@@ -329,7 +394,21 @@ function mapAttendance(id: string, data: DocumentData): AttendanceRecord {
     praktikanName: String(data.praktikanName ?? 'Praktikan'),
     attendedAt: firestoreDateToIso(data.attendedAt),
     status,
+    attendanceMethod:
+      data.attendanceMethod === 'qr' || data.attendanceMethod === 'location'
+        ? data.attendanceMethod
+        : undefined,
     excuseReason,
+    latitude: typeof data.latitude === 'number' ? data.latitude : undefined,
+    longitude: typeof data.longitude === 'number' ? data.longitude : undefined,
+    distanceMeters: typeof data.distanceMeters === 'number' ? data.distanceMeters : undefined,
+    accuracyMeters: typeof data.accuracyMeters === 'number' ? data.accuracyMeters : undefined,
+    radiusMeters: typeof data.radiusMeters === 'number' ? data.radiusMeters : undefined,
+    laboratoryId: typeof data.laboratoryId === 'string' ? data.laboratoryId : undefined,
+    laboratoryName: typeof data.laboratoryName === 'string' ? data.laboratoryName : undefined,
+    cancelledAt: data.cancelledAt ? firestoreDateToIso(data.cancelledAt) : undefined,
+    cancelledBy: typeof data.cancelledBy === 'string' ? data.cancelledBy : undefined,
+    cancelReason: typeof data.cancelReason === 'string' ? data.cancelReason : undefined,
   };
 }
 
@@ -345,6 +424,8 @@ function mapSession(id: string, data: DocumentData): PracticumSession {
     startsAt: firestoreDateToIso(data.startsAt),
     endsAt: firestoreDateToIso(data.endsAt),
     status,
+    laboratoryId: typeof data.laboratoryId === 'string' ? data.laboratoryId : undefined,
+    assistantUid: typeof data.assistantUid === 'string' ? data.assistantUid : undefined,
   };
 }
 
@@ -452,6 +533,7 @@ function createMockBackend(options: Required<Pick<AttendanceServiceOptions, 'get
   const checkIn = async (
     sessionId: string,
     user: CurrentUser | null = options.getCurrentUser(),
+    location: AttendanceLocation | null = null,
   ): Promise<MutationResult> => {
     const currentUser = options.getCurrentUser();
 
@@ -630,6 +712,7 @@ function createFirestoreBackend(
   const checkIn = async (
     sessionId: string,
     user: CurrentUser | null = options.getCurrentUser(),
+    location: AttendanceLocation | null = null,
   ): Promise<MutationResult> => {
     const currentUser = options.getCurrentUser();
 
@@ -643,80 +726,46 @@ function createFirestoreBackend(
       return { ok: false, reason: ATTENDANCE_IDENTITY_INVALID_REASON };
     }
 
+    if (!location) {
+      return { ok: false, reason: 'Lokasi belum berhasil diperoleh. Silakan coba lagi.' };
+    }
     try {
-      await runTransaction(database, async (transaction) => {
-        const sessionRef = doc(database, 'sessions', sessionId);
-        const attendanceRef = doc(
-          database,
-          'attendances',
-          getAttendanceDocId(sessionId, user.uid),
-        );
-        const profileRef = doc(database, 'users', user.uid);
-
-        const sessionSnapshot = await transaction.get(sessionRef);
-        if (!sessionSnapshot.exists()) {
-          throw new AttendanceServiceError('Sesi tidak ditemukan.');
-        }
-        const sessionData = sessionSnapshot.data();
-        if (sessionData.status !== 'dibuka') {
-          throw new AttendanceServiceError(ATTENDANCE_SESSION_NOT_OPEN_REASON);
-        }
-
-        const classId =
-          typeof sessionData.classId === 'string' ? sessionData.classId.trim() : '';
-        if (!classId) {
-          throw new AttendanceServiceError(ATTENDANCE_ENROLLMENT_UNVERIFIED_REASON);
-        }
-
-        const enrollmentRef = doc(
-          database,
-          'enrollments',
-          `${classId}_${user.uid}`,
-        );
-        const enrollmentSnapshot = await transaction.get(enrollmentRef);
-        const enrollment = enrollmentSnapshot.exists()
-          ? enrollmentSnapshot.data()
-          : null;
-        if (
-          !enrollment
-          || enrollment.praktikanId !== user.uid
-          || enrollment.classId !== classId
-        ) {
-          throw new AttendanceServiceError(ATTENDANCE_ENROLLMENT_UNVERIFIED_REASON);
-        }
-
-        const profileSnapshot = await transaction.get(profileRef);
-        const profile = profileSnapshot.exists() ? profileSnapshot.data() : null;
-        const profileUid = profile?.uid;
-        const profileRole = profile?.role;
-        const profileName =
-          typeof profile?.name === 'string' ? profile.name.trim() : '';
-
-        if (
-          !profile
-          || (profileUid !== undefined && profileUid !== user.uid)
-          || profileRole !== 'praktikan'
-          || !profileName
-        ) {
-          throw new AttendanceServiceError(ATTENDANCE_IDENTITY_INVALID_REASON);
-        }
-
-        const attendanceSnapshot = await transaction.get(attendanceRef);
-        if (attendanceSnapshot.exists()) {
-          throw new AttendanceServiceError(ATTENDANCE_ALREADY_CHECKED_IN_REASON);
-        }
-
-        transaction.set(attendanceRef, {
-          sessionId,
-          praktikanId: user.uid,
-          praktikanName: profileName,
-          attendedAt: serverTimestamp(),
-          status: 'hadir',
-        });
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const firebase = require('../lib/firebase') as typeof import('../lib/firebase');
+      const submitAttendance = httpsCallable<
+        {
+          sessionId: string;
+          latitude: number;
+          longitude: number;
+          accuracyMeters: number;
+        },
+        { distanceMeters: number; radiusMeters: number }
+      >(firebase.functions, 'submitAttendance');
+      const response = await submitAttendance({
+        sessionId,
+        latitude: location.latitude,
+        longitude: location.longitude,
+        accuracyMeters: location.accuracyMeters,
       });
-      return { ok: true };
+      if (!Number.isFinite(response.data.distanceMeters)
+        || response.data.distanceMeters < 0
+        || !Number.isFinite(response.data.radiusMeters)
+        || response.data.radiusMeters <= 0) {
+        return { ok: false, reason: 'Respons validasi presensi dari server tidak valid.' };
+      }
+      return {
+        ok: true,
+        distanceMeters: response.data.distanceMeters,
+        radiusMeters: response.data.radiusMeters,
+        latitude: location.latitude,
+        longitude: location.longitude,
+        accuracyMeters: location.accuracyMeters,
+      };
     } catch (error) {
-      return toMutationFailure(error, 'checkIn');
+      return {
+        ok: false,
+        reason: callableErrorMessage(error, 'Presensi ditolak oleh server.'),
+      };
     }
   };
 
@@ -868,7 +917,182 @@ export const attendanceService = createAttendanceService({
 export const attendanceServiceMode = attendanceService.mode;
 
 export const openSession = (sessionId: string) => attendanceService.openSession(sessionId);
-export const closeSession = (sessionId: string) => attendanceService.closeSession(sessionId);
+export const closeSession = async (sessionId: string): Promise<MutationResult> => {
+  if (attendanceService.mode === 'mock') {
+    return attendanceService.closeSession(sessionId);
+  }
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const firebase = require('../lib/firebase') as typeof import('../lib/firebase');
+    const close = httpsCallable<{ sessionId: string }, { ok: true }>(
+      firebase.functions,
+      'closeSession',
+    );
+    await close({ sessionId });
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      reason: callableErrorMessage(error, 'Sesi tidak dapat ditutup. Silakan coba lagi.'),
+    };
+  }
+};
+export const cancelAttendance = async (
+  sessionId: string,
+  attendanceId: string,
+  reason?: string,
+): Promise<MutationResult> => {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const firebase = require('../lib/firebase') as typeof import('../lib/firebase');
+    const cancel = httpsCallable(firebase.functions, 'cancelAttendance');
+    await cancel({ sessionId, attendanceId, reason: reason?.trim() ?? '' });
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      reason: callableErrorMessage(error, 'Pembatalan presensi ditolak oleh server.'),
+    };
+  }
+};
+
+type AttendanceQrResponse = {
+  ok: true;
+  qrPayload: string;
+  expiresAt: string;
+};
+
+export type AttendanceQrResult =
+  | AttendanceQrResponse
+  | { ok: false; reason: string };
+
+export type AttendanceQrValidationResult =
+  | {
+      ok: true;
+      practicumName: string;
+      className: string;
+      expiresAt: string;
+    }
+  | { ok: false; reason: string };
+
+export const issueAttendanceQr = async (sessionId: string): Promise<AttendanceQrResult> => {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const firebase = require('../lib/firebase') as typeof import('../lib/firebase');
+    const issue = httpsCallable<{ sessionId: string }, AttendanceQrResponse>(
+      firebase.functions,
+      'issueAttendanceQr',
+    );
+    const response = await issue({ sessionId });
+    if (response.data.ok !== true
+      || typeof response.data.qrPayload !== 'string'
+      || typeof response.data.expiresAt !== 'string') {
+      return { ok: false, reason: 'Server mengirim data QR yang tidak valid.' };
+    }
+    return response.data;
+  } catch (error) {
+    return {
+      ok: false,
+      reason: callableErrorMessage(error, 'QR tidak dapat diterbitkan. Silakan coba lagi.'),
+    };
+  }
+};
+
+export const revokeAttendanceQr = async (sessionId: string): Promise<MutationResult> => {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const firebase = require('../lib/firebase') as typeof import('../lib/firebase');
+    const revoke = httpsCallable<{ sessionId: string }, { ok: true; revoked: boolean }>(
+      firebase.functions,
+      'revokeAttendanceQr',
+    );
+    await revoke({ sessionId });
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      reason: callableErrorMessage(error, 'QR tidak dapat dicabut. Silakan coba lagi.'),
+    };
+  }
+};
+
+export const validateAttendanceQr = async (
+  sessionId: string,
+  qrPayload: string,
+): Promise<AttendanceQrValidationResult> => {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const firebase = require('../lib/firebase') as typeof import('../lib/firebase');
+    const validate = httpsCallable<
+      { sessionId: string; qrPayload: string },
+      {
+        ok: true;
+        practicumName: string;
+        className: string;
+        expiresAt: string;
+      }
+    >(firebase.functions, 'validateAttendanceQr');
+    const response = await validate({ sessionId, qrPayload });
+    if (response.data.ok !== true
+      || typeof response.data.expiresAt !== 'string') {
+      return { ok: false, reason: 'Respons validasi QR dari server tidak valid.' };
+    }
+    return response.data;
+  } catch (error) {
+    return {
+      ok: false,
+      reason: callableErrorMessage(error, 'QR tidak dapat divalidasi. Silakan coba lagi.'),
+    };
+  }
+};
+
+export const submitQrAttendance = async (
+  sessionId: string,
+  qrPayload: string,
+  location: AttendanceLocation,
+): Promise<MutationResult> => {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const firebase = require('../lib/firebase') as typeof import('../lib/firebase');
+    const submit = httpsCallable<
+      {
+        sessionId: string;
+        qrPayload: string;
+        latitude: number;
+        longitude: number;
+        accuracyMeters: number;
+      },
+      { ok: true; distanceMeters: number; radiusMeters: number }
+    >(firebase.functions, 'submitQrAttendance');
+    const response = await submit({
+      sessionId,
+      qrPayload,
+      latitude: location.latitude,
+      longitude: location.longitude,
+      accuracyMeters: location.accuracyMeters,
+    });
+    if (response.data.ok !== true
+      || !Number.isFinite(response.data.distanceMeters)
+      || response.data.distanceMeters < 0
+      || !Number.isFinite(response.data.radiusMeters)
+      || response.data.radiusMeters <= 0) {
+      return { ok: false, reason: 'Respons validasi QR dari server tidak valid.' };
+    }
+    return {
+      ok: true,
+      distanceMeters: response.data.distanceMeters,
+      radiusMeters: response.data.radiusMeters,
+      latitude: location.latitude,
+      longitude: location.longitude,
+      accuracyMeters: location.accuracyMeters,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      reason: callableErrorMessage(error, 'Presensi QR gagal diproses. Silakan coba lagi.'),
+    };
+  }
+};
 /**
  * Check-in praktikan untuk satu sesi (SRS-09). `user` default diambil dari
  * identitas Auth aktif; `null` diperlakukan sebagai identitas tidak valid.
@@ -877,8 +1101,11 @@ export const closeSession = (sessionId: string) => attendanceService.closeSessio
  * atau `{ ok: false, reason }` sesuai daftar alasan pada dokumentasi konstanta
  * `ATTENDANCE_*_REASON` di atas.
  */
-export const checkIn = (sessionId: string, user?: CurrentUser | null) =>
-  attendanceService.checkIn(sessionId, user);
+export const checkIn = (
+  sessionId: string,
+  user?: CurrentUser | null,
+  location?: AttendanceLocation | null,
+) => attendanceService.checkIn(sessionId, user, location);
 export const subscribeToAttendance = (
   sessionId: string,
   onData: AttendanceListener,

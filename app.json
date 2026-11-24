@@ -27,6 +27,20 @@
     "plugins": [
       "expo-router",
       [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "TandaIU menggunakan lokasi perangkat hanya untuk memvalidasi presensi di laboratorium."
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "TandaIU menggunakan kamera untuk memindai QR presensi praktikum.",
+          "recordAudioAndroid": false,
+          "microphonePermission": false
+        }
+      ],
+      [
         "expo-splash-screen",
         {
           "backgroundColor": "#FFF6F8"

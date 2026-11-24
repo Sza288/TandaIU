@@ -121,13 +121,15 @@ service cloud.firestore {
         ])
         && data.keys().hasOnly([
           'classId', 'courseId', 'practicumName', 'className', 'startsAt', 'endsAt',
-          'status', 'semester', 'semesterParity', 'assistantUid', 'lecturerId', 'lecturer'
+          'status', 'semester', 'semesterParity', 'assistantUid', 'lecturerId', 'lecturer', 'laboratoryId'
         ])
         && data.practicumName is string
         && validSessionTimePair(data)
         && data.status in ['terjadwal', 'dibuka', 'ditutup']
         && ((!data.keys().hasAny(['lecturerId', 'lecturer']))
           || (data.lecturerId is string && data.lecturer is string))
+        && ((!data.keys().hasAny(['laboratoryId']))
+          || data.laboratoryId is string)
         && sessionMatchesClass(data);
     }
 
@@ -343,8 +345,9 @@ service cloud.firestore {
     }
 
     match /attendances/{attendanceId} {
-      // Transactional check-in reads its not-yet-created deterministic record.
-      // A missing-document read reveals no data; existing reads stay owner-scoped.
+      // Successful attendance may only be written by the trusted Cloud Function.
+      // Reading a missing document reveals no attendance data and supports the
+      // owner's idempotent check-in lookup without granting any write access.
       allow get: if (isPraktikan() && resource == null)
         || (isPraktikan()
           && resource.data.praktikanId == request.auth.uid
@@ -352,23 +355,12 @@ service cloud.firestore {
         || assistantOwnsSession(resource.data.sessionId);
       allow list: if (isPraktikan() && resource.data.praktikanId == request.auth.uid)
         || assistantOwnsSession(resource.data.sessionId);
-      allow create: if isPraktikan()
-        && request.resource.data.keys().hasAll(['sessionId', 'praktikanId', 'praktikanName', 'attendedAt', 'status'])
-        && request.resource.data.keys().hasOnly(['sessionId', 'praktikanId', 'praktikanName', 'attendedAt', 'status'])
-        && request.resource.data.praktikanId == request.auth.uid
-        && request.resource.data.praktikanName == get(userPath(request.auth.uid)).data.name
-        && request.resource.data.attendedAt is timestamp
-        && request.resource.data.attendedAt == request.time
-        && request.resource.data.status == 'hadir'
-        && attendanceId == request.resource.data.sessionId + '_' + request.auth.uid
-        && exists(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId))
-        && validSession(get(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId)).data)
-        && get(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId)).data.startsAt is timestamp
-        && get(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId)).data.endsAt is timestamp
-        && get(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId)).data.status == 'dibuka'
-        && request.time >= get(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId)).data.startsAt
-        && request.time < get(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId)).data.endsAt
-        && praktikanEnrolledInClass(get(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId)).data.classId);
+      allow create, update, delete: if false;
+    }
+
+    match /laboratories/{laboratoryId} {
+      allow get, list: if isSignedIn()
+        && (isPraktikan() || isAssistant());
       allow update, delete: if false;
     }
 
@@ -433,6 +425,10 @@ service cloud.firestore {
         && resource.data.keys().hasAll(['praktikanId'])
         && resource.data.praktikanId == request.auth.uid;
       allow create, update, delete: if false;
+    }
+
+    match /attendanceQrTokens/{sessionId} {
+      allow read, write: if false;
     }
 
     // Deny every collection that has no explicit policy above.

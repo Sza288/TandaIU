@@ -17,6 +17,8 @@ import {
 import type { ScrollViewInstance } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
+import AttendanceDetailModal from '../../components/AttendanceDetailModal';
+import AttendanceLocationDetails from '../../components/AttendanceLocationDetails';
 import BottomNav from '../../components/BottomNav';
 import ConfirmationModal from '../../components/ConfirmationModal';
 import { SupportContactCard } from '../../components/DashboardWidgets';
@@ -26,9 +28,13 @@ import { useEnrollments } from '../../hooks/useEnrollments';
 import { useSessions } from '../../hooks/useSessions';
 import type { CurrentUser } from '../../lib/currentSession';
 import {
+  cancelAttendance,
   checkIn,
   closeSession,
+  issueAttendanceQr,
   openSession,
+  revokeAttendanceQr,
+  type AttendanceQrResult,
   type AttendanceRecord,
 } from '../../services/attendanceService';
 import type { EnrollmentRecord } from '../../services/enrollmentService';
@@ -38,6 +44,7 @@ import { getLabLabel, getMeetingNumber } from '../../utils/session';
 import { getCourseById } from '../../utils/academic';
 import { colors, fonts, radius, shadows, spacing } from '../../theme';
 import type { MutationResult } from '../../types';
+import { acquireDeviceLocation } from '../../utils/location';
 
 type PendingSessionAction = 'open' | 'close' | 'checkin';
 
@@ -126,14 +133,15 @@ export default function SessionDetailScreen() {
   const detailScrollRef = useRef<ScrollViewInstance | null>(null);
   const rosterOffset = useRef(0);
   const [statusCardSize, setStatusCardSize] = useState({ width: 0, height: 0 });
-  const [visibleQrKey, setVisibleQrKey] = useState<string | null>(null);
-  const [currentTime, setCurrentTime] = useState(() => Date.now());
-  useEffect(() => {
-    const timer = setInterval(() => setCurrentTime(Date.now()), 30_000);
-    return () => clearInterval(timer);
-  }, []);
-  const qrKey = session ? `${session.id}:${session.status}` : '';
-  const qrVisible = qrKey !== '' && visibleQrKey === qrKey;
+  const [issuedQr, setIssuedQr] = useState<
+    Extract<AttendanceQrResult, { ok: true }> | null
+  >(null);
+  const [qrBusy, setQrBusy] = useState(false);
+  const [qrError, setQrError] = useState<string | null>(null);
+  const [qrClock, setQrClock] = useState(0);
+  const qrRemainingSeconds = issuedQr
+    ? Math.max(0, Math.ceil((Date.parse(issuedQr.expiresAt) - qrClock) / 1000))
+    : 0;
   const enrolledPraktikans: EnrollmentRecord[] = classEnrollmentResult.data;
   const enrolledIds = new Set(enrolledPraktikans.map((praktikan) => praktikan.praktikanId));
   const attendanceByPraktikan = useMemo(() => {
@@ -173,7 +181,7 @@ export default function SessionDetailScreen() {
   }, [enrolledPraktikans, attendanceByPraktikan]);
   const presentPraktikans = rosterEntries.filter((praktikan) => {
     const attendance = attendanceByPraktikan.get(praktikan.praktikanId);
-    return attendance !== undefined && attendance.status !== 'izin';
+    return attendance?.status === 'hadir';
   });
   const sickPraktikans = rosterEntries.filter((praktikan) => {
     const attendance = attendanceByPraktikan.get(praktikan.praktikanId);
@@ -184,7 +192,10 @@ export default function SessionDetailScreen() {
     return attendance?.status === 'izin' && attendance.excuseReason !== 'sakit';
   });
   const notRecordedPraktikans = rosterEntries.filter(
-    (praktikan) => !attendanceByPraktikan.has(praktikan.praktikanId),
+    (praktikan) => {
+      const attendance = attendanceByPraktikan.get(praktikan.praktikanId);
+      return !attendance || attendance.status === 'dibatalkan';
+    },
   );
   const enrollmentTotalKnown = enrolledPraktikans.length > 0;
   const presentPercentage = enrolledPraktikans.length === 0
@@ -216,15 +227,8 @@ export default function SessionDetailScreen() {
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [diagKey]);
-  const alreadyCheckedIn = activeAttendance !== undefined;
-  const withinAttendanceWindow = Boolean(
-    session
-    && currentTime >= Date.parse(session.startsAt)
-    && currentTime < Date.parse(session.endsAt),
-  );
-  const attendanceWindowElapsed = Boolean(
-    session && currentTime >= Date.parse(session.endsAt),
-  );
+  const alreadyCheckedIn =
+    activeAttendance !== undefined && activeAttendance.status !== 'dibatalkan';
   const enrollmentLoading = isAssistant
     ? classEnrollmentResult.loading
     : praktikanEnrollmentResult.loading;
@@ -234,6 +238,18 @@ export default function SessionDetailScreen() {
   const [pendingAction, setPendingAction] = useState<PendingSessionAction | null>(null);
   const [actionFeedback, setActionFeedback] = useState<ActionFeedback | null>(null);
   const [submittingAction, setSubmittingAction] = useState(false);
+  const [selectedAttendance, setSelectedAttendance] = useState<AttendanceRecord | null>(null);
+  const [cancelRecord, setCancelRecord] = useState<AttendanceRecord | null>(null);
+  const [cancelReason, setCancelReason] = useState('');
+  const canManageAttendance = Boolean(
+    isAssistant && profile?.uid && session?.assistantUid === profile.uid,
+  );
+
+  useEffect(() => {
+    if (!issuedQr) return undefined;
+    const timer = setInterval(() => setQrClock(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [issuedQr]);
 
   const handleBack = () => {
     if (router.canGoBack()) {
@@ -275,7 +291,6 @@ export default function SessionDetailScreen() {
       || !activePraktikanId
       || !isEnrolledPraktikan
       || alreadyCheckedIn
-      || !withinAttendanceWindow
       || enrollmentLoading
       || enrollmentError
       || attendanceResult.loading
@@ -301,6 +316,7 @@ export default function SessionDetailScreen() {
       setSubmittingAction(true);
       const result = await closeSession(session.id);
       setSubmittingAction(false);
+      if (result.ok) setIssuedQr(null);
       showActionResult(result, 'Sesi ditutup', 'Sesi praktikum berhasil ditutup.');
       return;
     }
@@ -314,9 +330,59 @@ export default function SessionDetailScreen() {
     }
 
     setSubmittingAction(true);
-    const result = await checkIn(session.id, currentUser);
+    const location = await acquireDeviceLocation();
+    if (!location.ok) {
+      setSubmittingAction(false);
+      showActionResult(
+        { ok: false, reason: location.reason },
+        '',
+        '',
+      );
+      return;
+    }
+    const result = await checkIn(session.id, currentUser, {
+      latitude: location.latitude,
+      longitude: location.longitude,
+      accuracyMeters: location.accuracyMeters,
+    });
     setSubmittingAction(false);
-    showActionResult(result, 'Presensi berhasil.', '');
+    const locationDetails = [
+      typeof result.distanceMeters === 'number'
+        ? `Jarak ${Math.round(result.distanceMeters)} meter dari laboratorium`
+        : '',
+      typeof result.radiusMeters === 'number'
+        ? `radius ${Math.round(result.radiusMeters)} meter`
+        : '',
+      typeof result.accuracyMeters === 'number'
+        ? `akurasi ${Math.round(result.accuracyMeters)} meter`
+        : '',
+    ].filter(Boolean).join(', ');
+    showActionResult(
+      result,
+      'Presensi berhasil.',
+      result.ok ? locationDetails : '',
+    );
+  };
+
+  const handleConfirmCancel = async () => {
+    if (!session || !cancelRecord || submittingAction) return;
+    const record = cancelRecord;
+    const reason = cancelReason;
+    setCancelRecord(null);
+    setCancelReason('');
+    setSubmittingAction(true);
+    const result = await cancelAttendance(session.id, record.id, reason);
+    setSubmittingAction(false);
+    showActionResult(
+      result,
+      'Presensi dibatalkan',
+      result.ok ? `Presensi ${record.praktikanName} tidak lagi dihitung hadir.` : '',
+    );
+  };
+
+  const handleRequestCancel = (record: AttendanceRecord, reason: string) => {
+    setCancelRecord(record);
+    setCancelReason(reason);
   };
 
   const shareAttendanceLink = async () => {
@@ -355,6 +421,48 @@ export default function SessionDetailScreen() {
     }
   };
 
+  const handleIssueQr = async () => {
+    if (!session || session.status !== 'dibuka' || !isAssistant || qrBusy) return;
+    setQrBusy(true);
+    setQrError(null);
+    const result = await issueAttendanceQr(session.id);
+    setQrBusy(false);
+    if (!result.ok) {
+      setQrError(result.reason);
+      return;
+    }
+    setIssuedQr(result);
+    setQrClock(new Date().getTime());
+  };
+
+  const handleRevokeQr = () => {
+    if (!session || !issuedQr || qrBusy) return;
+    Alert.alert(
+      'Cabut QR presensi?',
+      'QR yang sedang ditampilkan tidak dapat digunakan lagi. Asisten dapat menerbitkan QR baru.',
+      [
+        { text: 'Batal', style: 'cancel' },
+        {
+          text: 'Cabut QR',
+          style: 'destructive',
+          onPress: () => {
+            void (async () => {
+              setQrBusy(true);
+              setQrError(null);
+              const result = await revokeAttendanceQr(session.id);
+              setQrBusy(false);
+              if (!result.ok) {
+                setQrError(result.reason ?? 'QR tidak dapat dicabut.');
+                return;
+              }
+              setIssuedQr(null);
+            })();
+          },
+        },
+      ],
+    );
+  };
+
   const buttonLabel = isAssistant
     ? submittingAction
       ? 'Memproses...'
@@ -376,9 +484,7 @@ export default function SessionDetailScreen() {
       : alreadyCheckedIn
         ? activeAttendance?.status === 'izin' ? 'Izin Tercatat' : 'Sudah Presensi'
         : session?.status === 'dibuka'
-          ? withinAttendanceWindow
-            ? 'Presensi Sekarang'
-            : attendanceWindowElapsed ? 'Waktu Presensi Berakhir' : 'Presensi Belum Dimulai'
+          ? 'Presensi Sekarang'
           : session?.status === 'terjadwal'
             ? 'Presensi Belum Tersedia'
             : 'Sesi Telah Ditutup';
@@ -393,7 +499,6 @@ export default function SessionDetailScreen() {
       || attendanceResult.loading
       || !isEnrolledPraktikan
       || alreadyCheckedIn
-      || !withinAttendanceWindow
       || session.status !== 'dibuka'
     ));
   const actionHint = activeRole === null
@@ -414,11 +519,7 @@ export default function SessionDetailScreen() {
         ? 'Memeriksa apakah presensi sudah tercatat...'
       : !isEnrolledPraktikan
         ? 'Akun ini tidak terdaftar pada kelas praktikum tersebut.'
-      : session?.status === 'dibuka' && !withinAttendanceWindow
-        ? attendanceWindowElapsed
-          ? 'Waktu presensi sesi ini sudah berakhir (WIB).'
-          : 'Presensi tersedia setelah waktu mulai sesi (WIB).'
-        : alreadyCheckedIn
+      : alreadyCheckedIn
           ? activeAttendance?.status === 'izin'
             ? 'Status izinnya sudah tercatat untuk sesi ini.'
             : ''
@@ -566,6 +667,12 @@ export default function SessionDetailScreen() {
               </View>
             </View>
 
+            {!isAssistant && activeAttendance ? (
+              <View style={styles.locationDetailsWrap}>
+                <AttendanceLocationDetails attendance={activeAttendance} />
+              </View>
+            ) : null}
+
             {isAssistant ? (
               <>
                 <View style={styles.attendanceCard}>
@@ -628,7 +735,7 @@ export default function SessionDetailScreen() {
                 <View style={styles.shareBlock}>
                   {session.status === 'dibuka' ? (
                     <>
-                      <Text style={styles.shareLabel}>Link presensi aktif</Text>
+                      <Text style={styles.shareLabel}>Link detail sesi</Text>
                       <Text style={styles.shareLink} selectable>{attendanceLink}</Text>
                       <Pressable
                         onPress={() => void shareAttendanceLink()}
@@ -639,31 +746,84 @@ export default function SessionDetailScreen() {
                         <Ionicons name="share-social-outline" size={18} color={colors.textOnPrimary} />
                         <Text style={styles.shareButtonText}>Bagikan Link</Text>
                       </Pressable>
-                      <Pressable
-                        onPress={() => setVisibleQrKey(qrVisible ? null : qrKey)}
-                        accessibilityRole="button"
-                        accessibilityLabel={qrVisible ? 'Sembunyikan QR presensi' : 'Tampilkan QR presensi'}
-                        style={({ pressed }) => [styles.shareButton, styles.qrButton, pressed && styles.buttonPressed]}
-                      >
-                        <Ionicons name="qr-code-outline" size={18} color={colors.primaryDark} />
-                        <Text style={styles.qrButtonText}>
-                          {qrVisible ? 'Sembunyikan QR Code' : 'Tampilkan QR Code'}
-                        </Text>
-                      </Pressable>
-                      {qrVisible ? (
-                        <View style={styles.qrContainer}>
-                          <QRCode value={attendanceLink} size={200} />
-                          <Text style={styles.qrCaption}>
-                            Pindai untuk membuka sesi {session.practicumName}.
+                        <View style={styles.qrPanel}>
+                          <Text style={styles.shareLabel}>QR PRESENSI ASISTEN</Text>
+                          <Text style={styles.qrSessionInfo}>
+                            {session.practicumName} · Kelas {session.className}
                           </Text>
+                          {issuedQr && qrRemainingSeconds > 0 ? (
+                            <View style={styles.qrContainer}>
+                              <QRCode value={issuedQr.qrPayload} size={200} />
+                              <Text style={styles.qrCaption}>
+                                Berlaku {Math.floor(qrRemainingSeconds / 60)}:
+                                {String(qrRemainingSeconds % 60).padStart(2, '0')} lagi
+                                {' · sampai '}
+                                {new Date(issuedQr.expiresAt).toLocaleTimeString('id-ID', {
+                                  hour: '2-digit',
+                                  minute: '2-digit',
+                                  second: '2-digit',
+                                })}
+                              </Text>
+                            </View>
+                          ) : issuedQr ? (
+                            <Text style={styles.inactiveShareText}>
+                              QR kedaluwarsa. Perbarui untuk menerbitkan token baru.
+                            </Text>
+                          ) : (
+                            <Text style={styles.inactiveShareText}>
+                              QR memiliki masa berlaku singkat dan terikat pada sesi ini.
+                            </Text>
+                          )}
+                          <Pressable
+                            accessibilityRole="button"
+                            disabled={qrBusy}
+                            onPress={() => void handleIssueQr()}
+                            style={({ pressed }) => [
+                              styles.shareButton,
+                              styles.qrButton,
+                              qrBusy && styles.disabledButton,
+                              pressed && !qrBusy && styles.buttonPressed,
+                            ]}
+                          >
+                            {qrBusy ? (
+                              <ActivityIndicator size="small" color={colors.primaryDark} />
+                            ) : (
+                              <Ionicons name="qr-code-outline" size={18} color={colors.primaryDark} />
+                            )}
+                            <Text style={styles.qrButtonText}>
+                              {qrBusy
+                                ? 'Memproses...'
+                                : issuedQr
+                                  ? 'Perbarui QR'
+                                  : 'Buat QR Presensi'}
+                            </Text>
+                          </Pressable>
+                          {issuedQr ? (
+                            <Pressable
+                              accessibilityRole="button"
+                              disabled={qrBusy}
+                              onPress={handleRevokeQr}
+                              style={({ pressed }) => [
+                                styles.revokeQrButton,
+                                qrBusy && styles.disabledButton,
+                                pressed && !qrBusy && styles.buttonPressed,
+                              ]}
+                            >
+                              <Text style={styles.revokeQrText}>Cabut QR</Text>
+                            </Pressable>
+                          ) : null}
+                          {qrError ? (
+                            <Text accessibilityLiveRegion="polite" style={styles.qrError}>
+                              {qrError}
+                            </Text>
+                          ) : null}
                         </View>
-                      ) : null}
                     </>
                   ) : (
                     <Text style={styles.inactiveShareText}>
                       {session.status === 'terjadwal'
-                        ? 'Link dan QR presensi tersedia setelah sesi dibuka.'
-                        : 'Sesi sudah ditutup. Link dan QR tidak dapat digunakan untuk presensi.'}
+                          ? 'Link dan QR presensi tersedia setelah sesi dibuka.'
+                          : 'Sesi sudah ditutup. QR tidak dapat diterbitkan atau digunakan.'}
                     </Text>
                   )}
                 </View>
@@ -689,15 +849,35 @@ export default function SessionDetailScreen() {
                   {rosterEntries.map((praktikan) => {
                     const attendance = attendanceByPraktikan.get(praktikan.praktikanId);
                     const isExcused = attendance?.status === 'izin';
-                    const hasAttended = attendance !== undefined && !isExcused;
-                    const statusLabel = isExcused
+                    const isCancelled = attendance?.status === 'dibatalkan';
+                    const hasAttended = attendance?.status === 'hadir';
+                    const statusLabel = isCancelled
+                      ? 'Presensi dibatalkan'
+                      : isExcused
                       ? attendance.excuseReason === 'sakit' ? 'Sakit' : 'Izin lainnya'
                       : hasAttended
                         ? `Hadir · ${formatTime(attendance.attendedAt)} WIB`
                         : session.status === 'ditutup' ? 'Alpha' : 'Belum melakukan presensi';
+                    const methodLabel = attendance?.attendanceMethod
+                      ? ` · ${attendance.attendanceMethod === 'qr' ? 'QR Asprak' : 'Lokasi'}`
+                      : '';
 
                     return (
-                      <View key={praktikan.praktikanId} style={styles.personRow}>
+                      <Pressable
+                        key={praktikan.praktikanId}
+                        accessibilityRole={attendance ? 'button' : undefined}
+                        accessibilityLabel={attendance
+                          ? `Lihat detail presensi ${praktikan.praktikanName}`
+                          : undefined}
+                        disabled={!attendance}
+                        onPress={() => {
+                          if (attendance) setSelectedAttendance(attendance);
+                        }}
+                        style={({ pressed }) => [
+                          styles.personRow,
+                          pressed && attendance && styles.mainActionPressed,
+                        ]}
+                      >
                         <View style={styles.personAvatar}>
                           <Text style={styles.personInitial}>
                             {praktikan.praktikanName.charAt(0)}
@@ -706,15 +886,39 @@ export default function SessionDetailScreen() {
                         <View style={styles.personCopy}>
                           <Text style={styles.personName}>{praktikan.praktikanName}</Text>
                           <Text style={styles.personDetail}>
-                            {praktikan.semester ? `Semester ${praktikan.semester} · ` : ''}{statusLabel}
+                            {praktikan.semester ? `Semester ${praktikan.semester} · ` : ''}
+                            {statusLabel}{methodLabel}
                           </Text>
+                          {typeof attendance?.distanceMeters === 'number' ? (
+                            <Text style={styles.personDetail}>
+                              Jarak {Math.round(attendance.distanceMeters)} m
+                              {typeof attendance.accuracyMeters === 'number'
+                                ? ` · Akurasi ${Math.round(attendance.accuracyMeters)} m`
+                                : ''}
+                            </Text>
+                          ) : null}
+                          {attendance ? (
+                            <Text style={styles.personDetail}>Ketuk untuk detail dan tindakan</Text>
+                          ) : null}
                         </View>
                         <Ionicons
-                          name={isExcused ? 'document-text-outline' : hasAttended ? 'checkmark-circle' : 'time-outline'}
+                          name={attendance
+                            ? 'chevron-forward'
+                            : isExcused
+                                ? 'document-text-outline'
+                                : hasAttended
+                                  ? 'checkmark-circle'
+                                  : 'time-outline'}
                           size={20}
-                          color={isExcused ? colors.primary : hasAttended ? colors.success : colors.warning}
+                          color={attendance
+                            ? colors.primary
+                            : isExcused
+                                ? colors.primary
+                                : hasAttended
+                                  ? colors.success
+                                  : colors.warning}
                         />
-                      </View>
+                      </Pressable>
                     );
                   })}
                 </View>
@@ -757,7 +961,7 @@ export default function SessionDetailScreen() {
                 </Pressable>
               </View>
             ) : null}
-            {!isAssistant && activeAttendance && activeAttendance.status !== 'izin' ? (
+            {!isAssistant && activeAttendance?.status === 'hadir' ? (
               <View style={styles.attendanceStamp}>
                 <Ionicons name="checkmark-circle" size={14} color={colors.success} />
                 <Text style={styles.attendanceStampText}>
@@ -787,6 +991,24 @@ export default function SessionDetailScreen() {
                 {buttonLabel}
               </Text>
             </Pressable>
+            {!isAssistant
+              && activeRole === 'praktikan'
+              && session.status === 'dibuka'
+              && isEnrolledPraktikan
+              && !alreadyCheckedIn ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Scan QR Asprak"
+                onPress={() => router.push({
+                  pathname: '/praktikan/qr-scan',
+                  params: { sessionId: session.id },
+                })}
+                style={({ pressed }) => [styles.qrScanButton, pressed && styles.mainActionPressed]}
+              >
+                <Ionicons name="qr-code-outline" size={19} color={colors.primaryDark} />
+                <Text style={styles.qrScanButtonText}>Scan QR Asprak</Text>
+              </Pressable>
+            ) : null}
           </View>
         </>
       )}
@@ -798,6 +1020,27 @@ export default function SessionDetailScreen() {
         destructive={actionConfirmation?.destructive ?? false}
         onCancel={() => setPendingAction(null)}
         onConfirm={() => void handleConfirmAction()}
+      />
+      <ConfirmationModal
+        visible={cancelRecord !== null}
+        title="Batalkan presensi praktikan?"
+        message={
+          cancelRecord
+            ? `Presensi ${cancelRecord.praktikanName} akan dibatalkan dan tidak lagi dihitung hadir.${cancelReason ? ` Alasan: ${cancelReason}` : ''}`
+            : 'Presensi akan dibatalkan.'
+        }
+        confirmLabel="Batalkan Presensi"
+        destructive
+        onCancel={() => {
+          setCancelRecord(null);
+          setCancelReason('');
+        }}
+        onConfirm={() => void handleConfirmCancel()}
+      />
+      <AttendanceDetailModal
+        record={selectedAttendance}
+        onClose={() => setSelectedAttendance(null)}
+        onCancel={canManageAttendance ? handleRequestCancel : undefined}
       />
       <BottomNav />
     </SafeAreaView>
@@ -881,6 +1124,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
     ...shadows.card,
+  },
+  locationDetailsWrap: {
+    marginHorizontal: spacing.xl,
+    marginTop: spacing.md,
   },
   sessionHeading: {
     flexDirection: 'row',
@@ -1102,6 +1349,18 @@ const styles = StyleSheet.create({
     fontFamily: fonts.bold,
     fontSize: 13,
   },
+  qrPanel: {
+    gap: spacing.xs,
+    marginTop: spacing.md,
+    padding: spacing.md,
+    borderRadius: radius.md,
+    backgroundColor: colors.surface,
+  },
+  qrSessionInfo: {
+    color: colors.text,
+    fontFamily: fonts.semiBold,
+    fontSize: 13,
+  },
   qrButton: {
     borderWidth: 1,
     borderColor: colors.primarySoft,
@@ -1122,6 +1381,29 @@ const styles = StyleSheet.create({
     fontFamily: fonts.regular,
     fontSize: 12,
     textAlign: 'center',
+  },
+  revokeQrButton: {
+    minHeight: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: spacing.xs,
+    borderRadius: radius.md,
+    backgroundColor: colors.dangerBg,
+  },
+  revokeQrText: {
+    color: colors.danger,
+    fontFamily: fonts.bold,
+    fontSize: 12,
+  },
+  qrError: {
+    marginTop: spacing.xs,
+    color: colors.danger,
+    fontFamily: fonts.semiBold,
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  disabledButton: {
+    opacity: 0.55,
   },
   inactiveShareText: {
     color: colors.textSecondary,
@@ -1296,6 +1578,23 @@ const styles = StyleSheet.create({
   },
   mainActionTextDisabled: {
     color: colors.neutral,
+  },
+  qrScanButton: {
+    minHeight: 46,
+    marginTop: spacing.sm,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.primarySoft,
+    backgroundColor: colors.primarySofter,
+  },
+  qrScanButtonText: {
+    color: colors.primaryDark,
+    fontFamily: fonts.bold,
+    fontSize: 13,
   },
   missing: {
     flex: 1,

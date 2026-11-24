@@ -28,6 +28,11 @@ jest.mock('firebase/firestore', () => ({
   getFirestore: jest.fn(() => ({ name: 'test-firestore' })),
 }));
 
+jest.mock('firebase/functions', () => ({
+  getFunctions: jest.fn(() => ({ name: 'test-functions' })),
+  connectFunctionsEmulator: jest.fn(),
+}));
+
 jest.mock('react-native', () => ({
   Platform: { OS: 'android' },
 }));

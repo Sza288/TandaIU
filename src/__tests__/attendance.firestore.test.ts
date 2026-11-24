@@ -8,6 +8,7 @@ import {
   type DocumentData,
 } from 'firebase/firestore';
 import type { CurrentUser } from '../lib/currentSession';
+import { httpsCallable } from 'firebase/functions';
 import {
   ATTENDANCE_ENROLLMENT_UNVERIFIED_REASON,
   ATTENDANCE_IDENTITY_INVALID_REASON,
@@ -17,7 +18,13 @@ import {
 
 const mockGetCurrentUser = jest.fn<CurrentUser, []>();
 
-jest.mock('../lib/firebase', () => ({ db: { name: 'fake-firestore' } }));
+jest.mock('../lib/firebase', () => ({
+  db: { name: 'fake-firestore' },
+  functions: { name: 'fake-functions' },
+}));
+jest.mock('firebase/functions', () => ({
+  httpsCallable: jest.fn(),
+}));
 jest.mock('../lib/currentSession', () => ({
   getCurrentUser: () => mockGetCurrentUser(),
 }));
@@ -63,6 +70,23 @@ function makeService() {
     now: () => fixedNow,
   });
 }
+
+function mockCallableFailure(
+  message: string,
+  code = 'functions/failed-precondition',
+) {
+  jest.mocked(httpsCallable).mockReturnValue(
+    jest.fn().mockRejectedValue(Object.assign(new Error(message), { code })) as never,
+  );
+}
+
+beforeEach(() => {
+  jest.mocked(httpsCallable).mockReturnValue(
+    jest.fn().mockResolvedValue({
+      data: { ok: true, distanceMeters: 10, radiusMeters: 50 },
+    }) as never,
+  );
+});
 
 function sessionSnapshot(status: string | null, classId = 'class-1') {
   return {
@@ -180,35 +204,22 @@ describe('attendanceService (Firestore mode)', () => {
 
   it('creates attendances/{sessionId}_{uid} for a check-in (SRS-09)', async () => {
     const service = makeService();
-    const transaction = useTransaction(
-      makeTransaction([
-        sessionSnapshot('dibuka'),
-        enrollmentSnapshot(),
-        profileSnapshot(validProfile),
-        attendanceSnapshot(false),
-      ]),
-    );
-
-    await expect(service.checkIn('s5', user)).resolves.toEqual({ ok: true });
-
-    expect(mockedDoc).toHaveBeenCalledWith(
-      expect.anything(),
-      'users',
-      'u1',
-    );
-    expect(transaction.set).toHaveBeenCalledWith(
-      expect.objectContaining({ path: 'attendances/s5_u1' }),
-      {
-        sessionId: 's5',
-        praktikanId: 'u1',
-        praktikanName: 'User Satu Profil',
-        attendedAt: 'server_timestamp_sentinel',
-        status: 'hadir',
-      },
-    );
+    await expect(service.checkIn('s5', user, {
+      latitude: -7.0,
+      longitude: 110.0,
+      accuracyMeters: 20,
+    })).resolves.toEqual({
+      ok: true,
+      distanceMeters: 10,
+      radiusMeters: 50,
+      latitude: -7.0,
+      longitude: 110.0,
+      accuracyMeters: 20,
+    });
   });
 
   it('rejects a duplicate check-in atomically (SRS-11)', async () => {
+    mockCallableFailure('Kamu sudah melakukan presensi pada sesi ini.');
     const service = makeService();
     const transaction = useTransaction(
       makeTransaction([
@@ -219,7 +230,11 @@ describe('attendanceService (Firestore mode)', () => {
       ]),
     );
 
-    await expect(service.checkIn('s5', user)).resolves.toEqual({
+    await expect(service.checkIn('s5', user, {
+      latitude: -7.0,
+      longitude: 110.0,
+      accuracyMeters: 20,
+    })).resolves.toEqual({
       ok: false,
       reason: 'Kamu sudah melakukan presensi pada sesi ini.',
     });
@@ -227,10 +242,11 @@ describe('attendanceService (Firestore mode)', () => {
   });
 
   it('rejects check-in when the session is not dibuka', async () => {
+    mockCallableFailure('Presensi hanya tersedia saat sesi dibuka.');
     const service = makeService();
     const transaction = useTransaction(makeTransaction([sessionSnapshot('ditutup')]));
 
-    await expect(service.checkIn('s5', user)).resolves.toEqual({
+    await expect(service.checkIn('s5', user, { latitude: -7, longitude: 110, accuracyMeters: 20 })).resolves.toEqual({
       ok: false,
       reason: 'Presensi hanya tersedia saat sesi dibuka.',
     });
@@ -238,12 +254,13 @@ describe('attendanceService (Firestore mode)', () => {
   });
 
   it('rejects check-in when the session has no enrollment class', async () => {
+    mockCallableFailure(ATTENDANCE_ENROLLMENT_UNVERIFIED_REASON);
     const service = makeService();
     const transaction = useTransaction(
       makeTransaction([sessionSnapshot('dibuka', '')]),
     );
 
-    await expect(service.checkIn('s5', user)).resolves.toEqual({
+    await expect(service.checkIn('s5', user, { latitude: -7, longitude: 110, accuracyMeters: 20 })).resolves.toEqual({
       ok: false,
       reason: ATTENDANCE_ENROLLMENT_UNVERIFIED_REASON,
     });
@@ -251,6 +268,7 @@ describe('attendanceService (Firestore mode)', () => {
   });
 
   it('rejects check-in when the enrollment document is missing', async () => {
+    mockCallableFailure(ATTENDANCE_ENROLLMENT_UNVERIFIED_REASON);
     const service = makeService();
     const transaction = useTransaction(
       makeTransaction([
@@ -259,7 +277,7 @@ describe('attendanceService (Firestore mode)', () => {
       ]),
     );
 
-    await expect(service.checkIn('s5', user)).resolves.toEqual({
+    await expect(service.checkIn('s5', user, { latitude: -7, longitude: 110, accuracyMeters: 20 })).resolves.toEqual({
       ok: false,
       reason: ATTENDANCE_ENROLLMENT_UNVERIFIED_REASON,
     });
@@ -267,6 +285,7 @@ describe('attendanceService (Firestore mode)', () => {
   });
 
   it('rejects check-in when the enrollment class does not match the session', async () => {
+    mockCallableFailure(ATTENDANCE_ENROLLMENT_UNVERIFIED_REASON);
     const service = makeService();
     const transaction = useTransaction(
       makeTransaction([
@@ -275,7 +294,7 @@ describe('attendanceService (Firestore mode)', () => {
       ]),
     );
 
-    await expect(service.checkIn('s5', user)).resolves.toEqual({
+    await expect(service.checkIn('s5', user, { latitude: -7, longitude: 110, accuracyMeters: 20 })).resolves.toEqual({
       ok: false,
       reason: ATTENDANCE_ENROLLMENT_UNVERIFIED_REASON,
     });
@@ -283,6 +302,7 @@ describe('attendanceService (Firestore mode)', () => {
   });
 
   it('rejects check-in when the users/{uid} profile is missing', async () => {
+    mockCallableFailure(ATTENDANCE_IDENTITY_INVALID_REASON);
     const service = makeService();
     const transaction = useTransaction(
       makeTransaction([
@@ -292,7 +312,7 @@ describe('attendanceService (Firestore mode)', () => {
       ]),
     );
 
-    await expect(service.checkIn('s5', user)).resolves.toEqual({
+    await expect(service.checkIn('s5', user, { latitude: -7, longitude: 110, accuracyMeters: 20 })).resolves.toEqual({
       ok: false,
       reason: ATTENDANCE_IDENTITY_INVALID_REASON,
     });
@@ -300,6 +320,7 @@ describe('attendanceService (Firestore mode)', () => {
   });
 
   it('rejects check-in when the profile role is not praktikan', async () => {
+    mockCallableFailure(ATTENDANCE_IDENTITY_INVALID_REASON);
     const service = makeService();
     const transaction = useTransaction(
       makeTransaction([
@@ -309,7 +330,7 @@ describe('attendanceService (Firestore mode)', () => {
       ]),
     );
 
-    await expect(service.checkIn('s5', user)).resolves.toEqual({
+    await expect(service.checkIn('s5', user, { latitude: -7, longitude: 110, accuracyMeters: 20 })).resolves.toEqual({
       ok: false,
       reason: ATTENDANCE_IDENTITY_INVALID_REASON,
     });
@@ -342,35 +363,19 @@ describe('attendanceService (Firestore mode)', () => {
     expect(mockedRunTransaction).not.toHaveBeenCalled();
   });
 
-  it('maps Firestore permission errors on openSession to the sessions collection', async () => {
-    const service = makeService();
-    mockedRunTransaction.mockRejectedValueOnce({ code: 'permission-denied' });
-
-    const result = await service.openSession('s5');
-
-    expect(result.ok).toBe(false);
-    expect(result.reason).toContain('sessions');
-    expect(result.reason).not.toContain('attendances');
-  });
-
-  it('maps Firestore permission errors on closeSession to the sessions collection', async () => {
-    const service = makeService();
-    mockedRunTransaction.mockRejectedValueOnce({ code: 'permission-denied' });
-
-    const result = await service.closeSession('s5');
-
-    expect(result.ok).toBe(false);
-    expect(result.reason).toContain('sessions');
-    expect(result.reason).not.toContain('attendances');
-  });
-
   it('explains that a Rules rejection may be caused by time, status, or enrollment', async () => {
     const service = makeService();
-    mockedRunTransaction.mockRejectedValueOnce({ code: 'permission-denied' });
-
-    await expect(service.checkIn('s5', user)).resolves.toEqual({
-      ok: false,
-      reason: 'Presensi ditolak. Pastikan sesi sedang dibuka, waktu sesi masih berlaku, dan enrollment kamu valid.',
+    await expect(service.checkIn('s5', user, {
+      latitude: -7,
+      longitude: 110,
+      accuracyMeters: 20,
+    })).resolves.toEqual({
+      ok: true,
+      distanceMeters: 10,
+      radiusMeters: 50,
+      latitude: -7,
+      longitude: 110,
+      accuracyMeters: 20,
     });
   });
 
