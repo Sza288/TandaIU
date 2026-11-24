@@ -9,9 +9,11 @@ const PROJECT_ID = 'demo-tandaiu-rules';
 const AUTH_EMULATOR = '127.0.0.1:9099';
 const FIRESTORE_EMULATOR = '127.0.0.1:8080';
 const API_KEY = 'demo-api-key';
+const LABORATORY_ID = 'emu-laboratory-main';
 const COLLECTIONS = [
   'users', 'courseCatalog', 'studentDirectory', 'classes',
   'schedules', 'sessions', 'enrollments', 'attendances', 'permits', 'reviews',
+  'laboratories',
 ];
 const RESET_COLLECTIONS = ['enrollments', 'attendances', 'permits', 'reviews'];
 
@@ -190,6 +192,16 @@ function buildFirestoreDocuments(now) {
     semesterParity: student.semester % 2 ? 'ganjil' : 'genap',
   }));
 
+  add('laboratories', LABORATORY_ID, {
+    name: 'Laboratorium Emulator',
+    lat: 0,
+    lon: 0,
+    radius: 100,
+    lantai: 2,
+    createdAt: new Date('2026-01-01T00:00:00.000Z'),
+    updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+  });
+
   const sessionsByClass = new Map();
   for (const course of courses) {
     const windows = [
@@ -212,6 +224,7 @@ function buildFirestoreDocuments(now) {
         semester: course.semester,
         semesterParity: course.parity,
         assistantUid: course.assistantUid,
+        laboratoryId: LABORATORY_ID,
       });
       if (!sessionsByClass.has(course.classId)) sessionsByClass.set(course.classId, []);
       sessionsByClass.get(course.classId).push(id);

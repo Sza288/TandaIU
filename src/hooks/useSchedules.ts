@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { db } from '../lib/firebase';
 import { useAuthSession } from '../features/auth/AuthSessionContext';
 import { COLLECTIONS, type ScheduleDoc } from '../types/praktikum';
+import { subscribeToEnrollments } from '../services/enrollmentService';
 
 export type SchedulesFilter = {
   classId?: string;
@@ -38,8 +39,12 @@ export function useSchedules(filter?: SchedulesFilter): UseSchedulesResult {
     : null;
   const assistantUid = assistant?.uid ?? '';
   const assistantSemesterParity = assistant?.assistantSemesterParity;
+  const praktikan = authSession?.status === 'authenticated' && authSession.profile.role === 'praktikan'
+    ? authSession.profile
+    : null;
+  const praktikanUid = praktikan?.uid ?? '';
   const assignmentMissing = Boolean(assistant && !assistantSemesterParity);
-  const filterKey = `${classId ?? ''}::${assistantUid}::${assistantSemesterParity ?? ''}`;
+  const filterKey = `${classId ?? ''}::${assistantUid}::${assistantSemesterParity ?? ''}::${praktikanUid}`;
   const [data, setData] = useState<ScheduleDoc[]>([]);
   const [errorState, setErrorState] = useState<string | null>(null);
   const [resolvedKey, setResolvedKey] = useState<string | null>(null);
@@ -51,6 +56,58 @@ export function useSchedules(filter?: SchedulesFilter): UseSchedulesResult {
 
   useEffect(() => {
     if (assignmentMissing) return undefined;
+    if (praktikanUid) {
+      let scheduleUnsubscribers: (() => void)[] = [];
+      const unsubscribeEnrollments = subscribeToEnrollments(
+        { praktikanId: praktikanUid },
+        (enrollments) => {
+          scheduleUnsubscribers.forEach((unsubscribe) => unsubscribe());
+          scheduleUnsubscribers = enrollments.map((enrollment) =>
+            onSnapshot(
+              query(
+                collection(db, COLLECTIONS.schedules),
+                where('classId', '==', enrollment.classId),
+              ),
+              (snapshot) => {
+                setData((previous) => {
+                  const next = new Map(previous.map((item) => [item.id, item]));
+                  snapshot.docs.forEach((document) => {
+                    next.set(document.id, {
+                      id: document.id,
+                      ...(document.data() as Omit<ScheduleDoc, 'id'>),
+                    });
+                  });
+                  const enrolledIds = new Set(enrollments.map((item) => item.classId));
+                  return [...next.values()]
+                    .filter((item) => enrolledIds.has(item.classId))
+                    .filter((item) => !classId || item.classId === classId);
+                });
+                setErrorState(null);
+                setResolvedKey(filterKey);
+              },
+              (snapshotError) => {
+                setErrorState(mapLoadError(snapshotError));
+                setResolvedKey(filterKey);
+              },
+            ),
+          );
+          if (enrollments.length === 0) {
+            setData([]);
+            setErrorState(null);
+            setResolvedKey(filterKey);
+          }
+        },
+        (message) => {
+          setData([]);
+          setErrorState(message);
+          setResolvedKey(filterKey);
+        },
+      );
+      return () => {
+        unsubscribeEnrollments();
+        scheduleUnsubscribers.forEach((unsubscribe) => unsubscribe());
+      };
+    }
     const constraints = [];
     if (assistantUid) {
       constraints.push(where('assistantUid', '==', assistantUid));
@@ -78,7 +135,7 @@ export function useSchedules(filter?: SchedulesFilter): UseSchedulesResult {
     );
 
     return unsubscribe;
-  }, [assignmentMissing, assistantUid, assistantSemesterParity, classId, filterKey]);
+  }, [assignmentMissing, assistantUid, assistantSemesterParity, praktikanUid, classId, filterKey]);
 
   return { data: assignmentMissing ? [] : data, loading, error };
 }

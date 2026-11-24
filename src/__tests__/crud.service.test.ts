@@ -1,8 +1,9 @@
-import { addDoc, getDoc, setDoc } from 'firebase/firestore';
+import { addDoc, getDoc, getDocs, setDoc } from 'firebase/firestore';
 
 import { dosen } from '../data/dosen';
 import {
   createSession,
+  getAllLaboratories,
   validateClassInput,
   validateScheduleInput,
   validateSessionInput,
@@ -131,6 +132,7 @@ describe('createSession lecturer validation', () => {
   });
 
   it('writes once for a valid session input', async () => {
+    const sessionInput = { ...validSession, laboratoryId: 'lab-1' };
     (getDoc as jest.Mock).mockResolvedValue({
       id: validSession.classId,
       exists: () => true,
@@ -145,14 +147,90 @@ describe('createSession lecturer validation', () => {
     });
     (addDoc as jest.Mock).mockResolvedValue({ id: 's1' });
 
-    await expect(createSession(validSession)).resolves.toMatchObject({ id: 's1' });
+    await expect(createSession(sessionInput)).resolves.toMatchObject({ id: 's1' });
 
     expect(addDoc).toHaveBeenCalledTimes(1);
     const writtenSession = (addDoc as jest.Mock).mock.calls[0][1];
+    expect(writtenSession.laboratoryId).toBe('lab-1');
     expect(writtenSession.startsAt).toBeInstanceOf(Date);
     expect(writtenSession.endsAt).toBeInstanceOf(Date);
     expect(writtenSession.startsAt.getTime()).toBe(Date.parse(validSession.startsAt));
     expect(writtenSession.endsAt.getTime()).toBe(Date.parse(validSession.endsAt));
+  });
+});
+
+describe('laboratory reader', () => {
+  it('maps the shared laboratory contract for session selection', async () => {
+    const createdAt = new Date('2026-10-27T08:00:00.000Z');
+    const updatedAt = new Date('2026-10-28T08:00:00.000Z');
+    (getDocs as jest.Mock).mockResolvedValue({
+      docs: [{
+        id: 'lab-b',
+        data: () => ({
+          name: 'Lab B',
+          lat: -6.9,
+          lon: 110.4,
+          radius: 50,
+          lantai: 2,
+          createdAt,
+          updatedAt,
+        }),
+      }],
+    });
+
+    await expect(getAllLaboratories()).resolves.toEqual([{
+      id: 'lab-b',
+      name: 'Lab B',
+      lat: -6.9,
+      lon: 110.4,
+      radius: 50,
+      lantai: 2,
+      createdAt: createdAt.toISOString(),
+      updatedAt: updatedAt.toISOString(),
+    }]);
+  });
+
+  it('rejects a laboratory radius outside the shared 1-500 meter range', async () => {
+    (getDocs as jest.Mock).mockResolvedValue({
+      docs: [{
+        id: 'lab-invalid',
+        data: () => ({
+          name: 'Lab Invalid',
+          lat: -6.9,
+          lon: 110.4,
+          radius: 0.5,
+          lantai: '2',
+          createdAt: new Date('2026-10-27T08:00:00.000Z'),
+          updatedAt: new Date('2026-10-28T08:00:00.000Z'),
+        }),
+      }],
+    });
+
+    await expect(getAllLaboratories()).rejects.toThrow(
+      'Data laboratorium lab-invalid tidak valid.',
+    );
+  });
+
+  it.each([1, 500])('accepts a laboratory radius of %i meters', async (radius) => {
+    (getDocs as jest.Mock).mockResolvedValue({
+      docs: [{
+        id: 'lab-boundary',
+        data: () => ({
+          name: 'Lab Boundary',
+          lat: -6.9,
+          lon: 110.4,
+          radius,
+          lantai: 2,
+          createdAt: new Date('2026-10-27T08:00:00.000Z'),
+          updatedAt: new Date('2026-10-28T08:00:00.000Z'),
+        }),
+      }],
+    });
+
+    await expect(getAllLaboratories()).resolves.toMatchObject([{
+      id: 'lab-boundary',
+      radius,
+    }]);
   });
 });
 

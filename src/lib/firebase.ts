@@ -9,6 +9,7 @@ import {
 import * as FirebaseAuth from 'firebase/auth';
 import { connectFirestoreEmulator, getFirestore } from 'firebase/firestore';
 import { Platform } from 'react-native';
+import { connectFunctionsEmulator, getFunctions } from 'firebase/functions';
 
 // Firebase's React Native runtime exports this API, but its shared types omit it.
 const getReactNativePersistence = (
@@ -35,6 +36,7 @@ export const auth =
         persistence: getReactNativePersistence(AsyncStorage),
       });
 export const db = getFirestore(app);
+export const functions = getFunctions(app, 'us-central1');
 
 const emulatorFlag = process.env.EXPO_PUBLIC_USE_FIREBASE_EMULATOR;
 if (emulatorFlag && emulatorFlag !== 'true' && emulatorFlag !== 'false') {
@@ -53,7 +55,7 @@ if (emulatorFlag === 'true') {
     throw new Error('Isi EXPO_PUBLIC_FIREBASE_EMULATOR_HOST dengan IP LAN laptop tanpa protokol.');
   }
 
-  type EmulatorConnectionState = { authHost?: string; firestoreHost?: string };
+  type EmulatorConnectionState = { authHost?: string; firestoreHost?: string; functionsHost?: string };
   type FirebaseGlobal = typeof globalThis & {
     __tandaiuFirebaseEmulatorConnections?: Map<string, EmulatorConnectionState>;
   };
@@ -76,6 +78,13 @@ if (emulatorFlag === 'true') {
   if (!state.firestoreHost) {
     connectFirestoreEmulator(db, emulatorHost, 8080);
     state.firestoreHost = emulatorHost;
+  }
+  if (state.functionsHost && state.functionsHost !== emulatorHost) {
+    throw new Error('Functions Emulator sudah tersambung ke host lain. Restart Expo sebelum mengganti IP.');
+  }
+  if (!state.functionsHost) {
+    connectFunctionsEmulator(functions, emulatorHost, 5001);
+    state.functionsHost = emulatorHost;
   }
 
   connections.set(app.name, state);

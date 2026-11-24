@@ -19,6 +19,7 @@ import {
   type ClassInput,
   type ClockTime,
   type LecturerId,
+  type LaboratoryDoc,
   type ScheduleDoc,
   type ScheduleInput,
   type SessionDoc,
@@ -163,6 +164,9 @@ function mapFirestoreError(error: unknown): Error {
       ? String((error as FirestoreErrorLike).code)
       : '';
 
+  if (!code && error instanceof Error) {
+    return error;
+  }
   if (code.includes('permission-denied')) {
     return new Error('Anda tidak memiliki izin untuk melakukan aksi ini');
   }
@@ -321,6 +325,7 @@ export async function createSession(input: SessionInput): Promise<SessionDoc> {
     semester: classDoc.semester,
     semesterParity: classDoc.semesterParity,
     assistantUid: classDoc.assistantUid,
+    laboratoryId: input.laboratoryId?.trim(),
   };
 
   return runFirestore(async () => {
@@ -356,6 +361,7 @@ export async function updateSession(
     semester: classDoc.semester,
     semesterParity: classDoc.semesterParity,
     assistantUid: classDoc.assistantUid,
+    laboratoryId: input.laboratoryId?.trim(),
   };
 
   return runFirestore(async () => {
@@ -396,6 +402,58 @@ export async function getAllSessions(): Promise<SessionDoc[]> {
         endsAt: firestoreDateToIso(data.endsAt),
       };
     });
+  });
+}
+
+function mapLaboratory(id: string, data: Record<string, unknown>): LaboratoryDoc {
+  const name = typeof data.name === 'string' ? data.name.trim() : '';
+  const lantai = typeof data.lantai === 'string'
+    ? data.lantai.trim()
+    : typeof data.lantai === 'number' && Number.isFinite(data.lantai)
+      ? data.lantai
+      : null;
+  const { lat, lon, radius } = data;
+  const createdAt = firestoreDateToIso(data.createdAt);
+  const updatedAt = firestoreDateToIso(data.updatedAt);
+  if (!name
+    || lantai === null
+    || lantai === ''
+    || typeof lat !== 'number'
+    || !Number.isFinite(lat)
+    || lat < -90
+    || lat > 90
+    || typeof lon !== 'number'
+    || !Number.isFinite(lon)
+    || lon < -180
+    || lon > 180
+    || typeof radius !== 'number'
+    || !Number.isFinite(radius)
+    || radius < 1
+    || radius > 500
+    || !createdAt
+    || Number.isNaN(Date.parse(createdAt))
+    || !updatedAt
+    || Number.isNaN(Date.parse(updatedAt))) {
+    throw new Error(`Data laboratorium ${id} tidak valid.`);
+  }
+  return { id, name, lat, lon, radius, lantai, createdAt, updatedAt };
+}
+
+export async function getLaboratoryById(id: string): Promise<LaboratoryDoc | null> {
+  if (!id.trim()) return null;
+  return runFirestore(async () => {
+    const snapshot = await getDoc(doc(db, COLLECTIONS.laboratories, id));
+    if (!snapshot.exists()) return null;
+    return mapLaboratory(snapshot.id, snapshot.data());
+  });
+}
+
+export async function getAllLaboratories(): Promise<LaboratoryDoc[]> {
+  return runFirestore(async () => {
+    const snapshot = await getDocs(collection(db, COLLECTIONS.laboratories));
+    return snapshot.docs.map((document) =>
+      mapLaboratory(document.id, document.data()),
+    );
   });
 }
 

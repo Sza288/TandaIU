@@ -55,6 +55,10 @@ export default function RootLayout() {
             />
             <Stack.Screen name="praktikan/riwayat" options={{ title: 'Riwayat Presensi' }} />
             <Stack.Screen
+              name="praktikan/qr-scan"
+              options={{ title: 'Scan QR Asprak', headerShown: false }}
+            />
+            <Stack.Screen
               name="assistant/permits"
               options={{ title: 'Review Izin', headerShown: false }}
             />

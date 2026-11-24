@@ -7,6 +7,7 @@ import {
   Text,
   View,
 } from 'react-native';
+import AttendanceDetailModal from './AttendanceDetailModal';
 import {
   subscribeToAttendance,
   type AttendanceRecord,
@@ -19,6 +20,7 @@ type Props = {
   title?: string;
   emptyMessage?: string;
   showStats?: boolean;
+  onCancelAttendance?: (record: AttendanceRecord, reason: string) => void;
 };
 
 type ListenerState = {
@@ -32,6 +34,7 @@ export default function AttendanceSummary({
   title = 'Rekap Presensi',
   emptyMessage = 'Belum ada praktikan yang melakukan presensi pada sesi ini.',
   showStats = true,
+  onCancelAttendance,
 }: Props) {
   const [state, setState] = useState<ListenerState>({
     records: [],
@@ -39,6 +42,7 @@ export default function AttendanceSummary({
     error: null,
   });
   const [reloadKey, setReloadKey] = useState(0);
+  const [detailRecord, setDetailRecord] = useState<AttendanceRecord | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -62,12 +66,15 @@ export default function AttendanceSummary({
   }, [sessionId, reloadKey]);
 
   const stats = useMemo(() => {
-    const hadir = state.records.filter((record) => record.status !== 'izin').length;
-    return { hadir, izin: state.records.length - hadir };
+    const hadir = state.records.filter((record) => record.status === 'hadir').length;
+    const izin = state.records.filter((record) => record.status === 'izin').length;
+    const dibatalkan = state.records.filter((record) => record.status === 'dibatalkan').length;
+    return { hadir, izin, dibatalkan, tercatat: state.records.length };
   }, [state.records]);
 
   return (
-    <View style={styles.card}>
+    <>
+      <View style={styles.card}>
       <View style={styles.header}>
         <View style={styles.headerCopy}>
           <Text style={styles.eyebrow}>REALTIME</Text>
@@ -90,8 +97,8 @@ export default function AttendanceSummary({
             <Text style={styles.statLabel}>Izin</Text>
           </View>
           <View style={styles.statBox}>
-            <Text style={styles.statValue}>{state.records.length}</Text>
-            <Text style={styles.statLabel}>Tercatat</Text>
+            <Text style={styles.statValue}>{stats.dibatalkan}</Text>
+            <Text style={styles.statLabel}>Dibatalkan</Text>
           </View>
         </View>
       ) : null}
@@ -127,7 +134,9 @@ export default function AttendanceSummary({
       ) : (
         <View style={styles.list}>
           {state.records.map((record) => {
-            const isPresent = record.status !== 'izin';
+            const isPresent = record.status === 'hadir';
+            const isCancelled = record.status === 'dibatalkan';
+            const badgeText = isCancelled ? 'Dibatalkan' : isPresent ? 'Hadir' : 'Izin';
             return (
               <View key={record.id} style={styles.row}>
                 <View style={styles.avatar}>
@@ -142,8 +151,33 @@ export default function AttendanceSummary({
                       ? `Presensi pukul ${formatTime(record.attendedAt)} WIB`
                       : 'Waktu presensi tidak tercatat'}
                   </Text>
+                  {record.attendanceMethod ? (
+                    <Text style={styles.time}>
+                      Metode {record.attendanceMethod === 'qr' ? 'QR Asprak' : 'Lokasi'}
+                    </Text>
+                  ) : null}
+                  {typeof record.distanceMeters === 'number' ? (
+                    <Text style={styles.time}>Jarak {Math.round(record.distanceMeters)} m</Text>
+                  ) : null}
+                  {typeof record.accuracyMeters === 'number' ? (
+                    <Text style={styles.time}>Akurasi {Math.round(record.accuracyMeters)} m</Text>
+                  ) : null}
+                  {isCancelled && record.cancelReason ? (
+                    <Text style={styles.time}>Alasan: {record.cancelReason}</Text>
+                  ) : null}
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={`Lihat detail presensi ${record.praktikanName}`}
+                    onPress={() => setDetailRecord(record)}
+                    style={({ pressed }) => [styles.detailButton, pressed && styles.pressed]}
+                  >
+                    <Text style={styles.detailButtonText}>Lihat Detail</Text>
+                  </Pressable>
                 </View>
-                <View style={[styles.badge, isPresent ? styles.badgeHadir : styles.badgeIzin]}>
+                <View style={[
+                  styles.badge,
+                  isPresent ? styles.badgeHadir : isCancelled ? styles.badgeIzin : styles.badgeIzin,
+                ]}>
                   <Ionicons
                     name={isPresent ? 'checkmark-circle' : 'document-text-outline'}
                     size={12}
@@ -155,7 +189,7 @@ export default function AttendanceSummary({
                       isPresent ? styles.badgeTextHadir : styles.badgeTextIzin,
                     ]}
                   >
-                    {isPresent ? 'Hadir' : 'Izin'}
+                    {badgeText}
                   </Text>
                 </View>
               </View>
@@ -163,7 +197,13 @@ export default function AttendanceSummary({
           })}
         </View>
       )}
-    </View>
+      </View>
+      <AttendanceDetailModal
+        record={detailRecord}
+        onClose={() => setDetailRecord(null)}
+        onCancel={onCancelAttendance}
+      />
+    </>
   );
 }
 
@@ -285,6 +325,19 @@ const styles = StyleSheet.create({
     color: colors.primaryDark,
     fontFamily: fonts.bold,
     fontSize: 12,
+  },
+  detailButton: {
+    alignSelf: 'flex-start',
+    marginTop: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: radius.pill,
+    backgroundColor: colors.primarySofter,
+  },
+  detailButtonText: {
+    color: colors.primaryDark,
+    fontFamily: fonts.bold,
+    fontSize: 11,
   },
   pressed: {
     opacity: 0.85,

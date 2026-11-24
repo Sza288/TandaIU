@@ -151,6 +151,11 @@ async function seed(): Promise<void> {
       ['studentDirectory', 'student-even', directoryRecord('Mahasiswa Genap', '456', 2)],
       ['studentDirectory', 'student-even-new', directoryRecord('Mahasiswa Genap Baru', '457', 2)],
       ['studentDirectory', 'student-outside', directoryRecord('Mahasiswa Luar', '789', 1)],
+      ['laboratories', 'lab-b', {
+        name: 'Lab B', lat: -6.9, lon: 110.4, radius: 50, lantai: 2,
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      }],
       ['attendances', 'session-ganjil_student-enrolled', {
         sessionId: 'session-ganjil', praktikanId: 'student-enrolled',
         praktikanName: 'Mahasiswa Terdaftar', attendedAt: '2026-01-01T09:00:00.000Z', status: 'hadir',
@@ -427,7 +432,7 @@ describeWithEmulator('Firestore Revisi 3 dan 4 access rules', () => {
       .rejects.toMatchObject({ code: 'permission-denied' });
   });
 
-  it('requires an enrolled practikan and an open session for attendance', async () => {
+  it('denies client attendance writes regardless of enrollment or session status', async () => {
     const student = environment.authenticatedContext('student-new').firestore();
     const outside = environment.authenticatedContext('student-outside').firestore();
     const odd = environment.authenticatedContext('asprak-odd', {
@@ -438,11 +443,10 @@ describeWithEmulator('Firestore Revisi 3 dan 4 access rules', () => {
       praktikanName: 'Mahasiswa Baru', attendedAt: serverTimestamp(), status: 'hadir',
     };
 
-    expect((await getDoc(doc(student, 'attendances/session-ganjil_student-new'))).exists()).toBe(false);
     await expect(getDoc(doc(outside, 'attendances/session-ganjil_student-enrolled')))
       .rejects.toMatchObject({ code: 'permission-denied' });
     await expect(setDoc(doc(student, 'attendances/session-ganjil_student-new'), attendance))
-      .resolves.toBeUndefined();
+      .rejects.toMatchObject({ code: 'permission-denied' });
     await expect(updateDoc(doc(student, 'attendances/session-ganjil_student-new'), {
       attendedAt: serverTimestamp(),
     })).rejects.toMatchObject({ code: 'permission-denied' });
@@ -462,6 +466,26 @@ describeWithEmulator('Firestore Revisi 3 dan 4 access rules', () => {
       .rejects.toMatchObject({ code: 'permission-denied' });
     await expect(deleteDoc(doc(odd, 'attendances/session-ganjil_student-enrolled')))
       .rejects.toMatchObject({ code: 'permission-denied' });
+  });
+
+  it('allows laboratory reads for app roles and denies client laboratory writes', async () => {
+    const student = environment.authenticatedContext('student-new').firestore();
+    const assistant = environment.authenticatedContext('asprak-odd', {
+      assistantSemesterParity: 'ganjil',
+    }).firestore();
+    const outside = environment.authenticatedContext('student-outside').firestore();
+
+    const laboratory = await getDoc(doc(student, 'laboratories/lab-b'));
+    expect(laboratory.exists()).toBe(true);
+    const assistantLaboratories = await getDocs(collection(assistant, 'laboratories'));
+    expect(assistantLaboratories.size).toBe(1);
+    await expect(getDoc(doc(environment.unauthenticatedContext().firestore(), 'laboratories/lab-b')))
+      .rejects.toMatchObject({ code: 'permission-denied' });
+    await expect(setDoc(doc(outside, 'laboratories/lab-forged'), {
+      name: 'Lab Palsu', lat: 0, lon: 0, radius: 500, lantai: 1,
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    })).rejects.toMatchObject({ code: 'permission-denied' });
   });
 
   it('scopes assistant attendance and permit queries to sessions owned by that assistant', async () => {
@@ -491,7 +515,7 @@ describeWithEmulator('Firestore Revisi 3 dan 4 access rules', () => {
       .rejects.toMatchObject({ code: 'permission-denied' });
   });
 
-  it('accepts only a server timestamp inside the open session window', async () => {
+  it('denies direct client attendance writes even with server timestamps and an open session', async () => {
     const student = environment.authenticatedContext('student-new').firestore();
     const attendanceRef = doc(student, 'attendances/session-ganjil_student-new');
     const now = Date.now();
@@ -503,10 +527,11 @@ describeWithEmulator('Firestore Revisi 3 dan 4 access rules', () => {
     await expect(setDoc(attendanceRef, {
       ...attendance, attendedAt: Timestamp.fromMillis(now - 1_000),
     })).rejects.toMatchObject({ code: 'permission-denied' });
-    await expect(setDoc(attendanceRef, attendance)).resolves.toBeUndefined();
+    await expect(setDoc(attendanceRef, attendance))
+      .rejects.toMatchObject({ code: 'permission-denied' });
   });
 
-  it('rejects server-timestamp check-in before the session starts and after it ends', async () => {
+  it('denies client attendance writes before the session starts and after it ends', async () => {
     const student = environment.authenticatedContext('student-new').firestore();
     const setSessionWindow = async (startsAt: Timestamp, endsAt: Timestamp) => {
       await environment.withSecurityRulesDisabled(async (context) => {
