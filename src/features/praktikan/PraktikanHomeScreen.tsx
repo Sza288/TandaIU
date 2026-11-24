@@ -55,6 +55,7 @@ export default function PraktikanHomeScreen() {
   const handleOpenHistory = () => router.push('/praktikan/riwayat');
   const handleOpenPermit = () => router.push('/praktikan/permit');
   const handleOpenReview = () => router.push('/praktikan/review');
+  const handleOpenMaps = () => router.push('/maps');
   const handleOpenSession = (sessionId: string) => {
     router.push({ pathname: '/schedule/[id]', params: { id: sessionId } });
   };
@@ -126,6 +127,12 @@ export default function PraktikanHomeScreen() {
                   title="Ulasan"
                   caption="Beri ulasan setelah praktikum selesai"
                   onPress={handleOpenReview}
+                />
+                <QuickCard
+                  icon="map-outline"
+                  title="Maps"
+                  caption="Lokasi dan aktivitas laboratorium"
+                  onPress={handleOpenMaps}
                 />
               </View>
             </View>

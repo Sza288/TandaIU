@@ -4,8 +4,8 @@ import type {
 } from '../types/laboratorium';
 import { processLaboratoryActivities } from './laboratoryActivities';
 
-const labA = 'lab-a';
-const labB = 'lab-b';
+const laboratoryId = 'lab-a';
+const otherLaboratoryId = 'lab-b';
 const now = Date.parse('2026-11-23T10:00:00+07:00');
 
 function session(
@@ -15,7 +15,6 @@ function session(
 ): LaboratorySessionRecord {
   return {
     id,
-    laboratoryId: labA,
     classId: 'class-a',
     courseId: 'course-a',
     practicumName: 'Praktikum A',
@@ -23,6 +22,7 @@ function session(
     startsAt: '2026-11-23T08:00:00+07:00',
     endsAt: '2026-11-23T12:00:00+07:00',
     status,
+    laboratoryId,
     ...overrides,
   };
 }
@@ -33,143 +33,203 @@ function schedule(
 ): LaboratoryScheduleRecord {
   return {
     id,
-    laboratoryId: labA,
     classId: 'class-a',
     courseId: 'course-a',
-    practicumName: 'Praktikum A',
-    className: 'Kelas A',
     dayOfWeek: 1,
     startTime: '08:00',
     endTime: '12:00',
+    room: 'Ruang A',
     ...overrides,
   };
 }
 
 describe('processLaboratoryActivities', () => {
-  test('menampilkan satu sesi dibuka', () => {
+  test('menampilkan sesi dibuka meskipun waktunya sudah lewat', () => {
     const result = processLaboratoryActivities(
-      labA,
-      [schedule('s1')],
-      [session('x1', 'dibuka')],
+      laboratoryId,
+      [],
+      [session('x1', 'dibuka', {
+        startsAt: '2026-11-22T08:00:00+07:00',
+        endsAt: '2026-11-22T10:00:00+07:00',
+      })],
       now,
     );
+
     expect(result.ongoing).toHaveLength(1);
     expect(result.ongoing[0].status).toBe('dibuka');
   });
 
-  test('menampilkan beberapa sesi dibuka', () => {
+  test('menampilkan semua sesi dibuka dengan urutan mulai', () => {
     const result = processLaboratoryActivities(
-      labA,
+      laboratoryId,
       [],
       [
-        session('x1', 'dibuka', { practicumName: 'Praktikum 1' }),
-        session('x2', 'dibuka', { practicumName: 'Praktikum 2' }),
+        session('x2', 'dibuka', { startsAt: '2026-11-23T09:00:00+07:00' }),
+        session('x1', 'dibuka', { startsAt: '2026-11-23T08:00:00+07:00' }),
       ],
       now,
     );
-    expect(result.ongoing).toHaveLength(2);
+
+    expect(result.ongoing.map((activity) => activity.id)).toEqual(['x1', 'x2']);
   });
 
-  test('menampilkan jadwal yang sedang berlangsung tanpa sesi dibuka', () => {
+  test('jadwal sesi terjadwal yang sedang berlangsung tampil dengan statusnya', () => {
     const result = processLaboratoryActivities(
-      labA,
-      [schedule('s1')],
+      laboratoryId,
+      [schedule('schedule-1')],
       [session('x1', 'terjadwal')],
       now,
     );
+
     expect(result.ongoing).toHaveLength(1);
+    expect(result.ongoing[0].status).toBe('terjadwal');
+    expect(result.ongoing[0].scheduleId).toBeUndefined();
   });
 
-  test('sesi ditutup tidak ditampilkan pada rentang jadwal', () => {
+  test('sesi ditutup tidak ditampilkan dalam rentang waktunya', () => {
     const result = processLaboratoryActivities(
-      labA,
-      [schedule('s1')],
+      laboratoryId,
+      [],
       [session('x1', 'ditutup')],
       now,
     );
+
     expect(result.ongoing).toHaveLength(0);
   });
 
-  test('tidak ada aktivitas berlangsung', () => {
+  test('tidak menampilkan aktivitas yang tidak berlangsung', () => {
     const result = processLaboratoryActivities(
-      labA,
-      [schedule('s1', { dayOfWeek: 2 })],
+      laboratoryId,
       [],
+      [session('x1', 'terjadwal', {
+        startsAt: '2026-11-23T13:00:00+07:00',
+        endsAt: '2026-11-23T15:00:00+07:00',
+      })],
       now,
     );
+
     expect(result.ongoing).toHaveLength(0);
   });
 
-  test('memilih jadwal berikutnya', () => {
+  test('memilih sesi terjadwal berikutnya dan melampirkan metadata jadwal', () => {
     const result = processLaboratoryActivities(
-      labA,
-      [schedule('s1', { dayOfWeek: 1, startTime: '13:00', endTime: '15:00' })],
+      laboratoryId,
+      [schedule('schedule-1', { room: 'Ruang B' })],
+      [session('x1', 'terjadwal', {
+        startsAt: '2026-11-23T13:00:00+07:00',
+        endsAt: '2026-11-23T15:00:00+07:00',
+        scheduleId: 'schedule-1',
+      })],
+      now,
+    );
+
+    expect(result.next?.id).toBe('x1');
+    expect(result.next?.scheduleId).toBe('schedule-1');
+    expect(result.next?.room).toBe('Ruang B');
+  });
+
+  test('mengembalikan jadwal kosong bila tidak ada sesi berikutnya', () => {
+    const result = processLaboratoryActivities(
+      laboratoryId,
+      [schedule('schedule-1')],
       [],
       now,
     );
-    expect(result.next?.scheduleId).toBe('s1');
+
+    expect(result.next).toBeNull();
   });
 
-  test('tidak ada jadwal berikutnya', () => {
+  test('tidak memilih sesi terjadwal yang telah lewat', () => {
     const result = processLaboratoryActivities(
-      labA,
-      [schedule('s1', { dayOfWeek: 1, startTime: '08:00', endTime: '09:00' })],
+      laboratoryId,
       [],
+      [session('x1', 'terjadwal', {
+        startsAt: '2026-11-23T07:00:00+07:00',
+        endsAt: '2026-11-23T09:00:00+07:00',
+      })],
       now,
     );
+
     expect(result.next).toBeNull();
   });
 
-  test('jadwal yang sudah lewat tidak dipilih', () => {
+  test('tidak menyertakan sesi milik laboratorium lain', () => {
     const result = processLaboratoryActivities(
-      labA,
-      [schedule('s1', { dayOfWeek: 1, startTime: '07:00', endTime: '09:00' })],
+      laboratoryId,
       [],
-      now,
-    );
-    expect(result.next).toBeNull();
-  });
-
-  test('data laboratorium lain tidak ikut ditampilkan', () => {
-    const result = processLaboratoryActivities(
-      labA,
-      [schedule('s1', { laboratoryId: labB })],
-      [session('x1', 'dibuka', { laboratoryId: labB })],
-      now,
-    );
-    expect(result.ongoing).toHaveLength(0);
-  });
-
-  test('sesi dibuka tidak dipilih sebagai jadwal berikutnya', () => {
-    const result = processLaboratoryActivities(
-      labA,
-      [schedule('s1', { dayOfWeek: 1, startTime: '13:00', endTime: '15:00', sessionId: 'x1' })],
-      [session('x1', 'dibuka', { startsAt: '2026-11-23T13:00:00+07:00', endsAt: '2026-11-23T15:00:00+07:00' })],
-      now,
-    );
-    expect(result.next).toBeNull();
-  });
-
-  test('sesi ditutup tidak dipilih sebagai jadwal berikutnya', () => {
-    const result = processLaboratoryActivities(
-      labA,
-      [schedule('s1', { dayOfWeek: 1, startTime: '13:00', endTime: '15:00', sessionId: 'x1' })],
-      [session('x1', 'ditutup', { startsAt: '2026-11-23T13:00:00+07:00', endsAt: '2026-11-23T15:00:00+07:00' })],
-      now,
-    );
-    expect(result.next).toBeNull();
-  });
-
-  test('jadwal mendatang terdekat dipilih', () => {
-    const result = processLaboratoryActivities(
-      labA,
       [
-        schedule('later', { dayOfWeek: 1, startTime: '15:00', endTime: '17:00' }),
-        schedule('nearest', { dayOfWeek: 1, startTime: '13:00', endTime: '15:00' }),
+        session('x1', 'dibuka', { laboratoryId: otherLaboratoryId }),
+        session('x2', 'terjadwal', {
+          laboratoryId: otherLaboratoryId,
+          startsAt: '2026-11-23T13:00:00+07:00',
+          endsAt: '2026-11-23T15:00:00+07:00',
+        }),
       ],
-      [],
       now,
     );
-    expect(result.next?.scheduleId).toBe('nearest');
+
+    expect(result.ongoing).toHaveLength(0);
+    expect(result.next).toBeNull();
+  });
+
+  test('sesi dibuka tidak dipilih sebagai sesi berikutnya', () => {
+    const result = processLaboratoryActivities(
+      laboratoryId,
+      [],
+      [session('x1', 'dibuka', {
+        startsAt: '2026-11-23T13:00:00+07:00',
+        endsAt: '2026-11-23T15:00:00+07:00',
+      })],
+      now,
+    );
+
+    expect(result.ongoing).toHaveLength(1);
+    expect(result.next).toBeNull();
+  });
+
+  test('sesi ditutup tidak dipilih sebagai sesi berikutnya', () => {
+    const result = processLaboratoryActivities(
+      laboratoryId,
+      [],
+      [session('x1', 'ditutup', {
+        startsAt: '2026-11-23T13:00:00+07:00',
+        endsAt: '2026-11-23T15:00:00+07:00',
+      })],
+      now,
+    );
+
+    expect(result.next).toBeNull();
+  });
+
+  test('memilih sesi terjadwal terdekat dari beberapa kandidat', () => {
+    const result = processLaboratoryActivities(
+      laboratoryId,
+      [],
+      [
+        session('later', 'terjadwal', {
+          startsAt: '2026-11-23T15:00:00+07:00',
+          endsAt: '2026-11-23T17:00:00+07:00',
+        }),
+        session('nearest', 'terjadwal', {
+          startsAt: '2026-11-23T13:00:00+07:00',
+          endsAt: '2026-11-23T15:00:00+07:00',
+        }),
+      ],
+      now,
+    );
+
+    expect(result.next?.id).toBe('nearest');
+  });
+
+  test('menghindari sesi tanpa waktu valid', () => {
+    const result = processLaboratoryActivities(
+      laboratoryId,
+      [],
+      [session('invalid', 'dibuka', { startsAt: 'invalid', endsAt: 'invalid' })],
+      now,
+    );
+
+    expect(result.ongoing).toHaveLength(0);
+    expect(result.next).toBeNull();
   });
 });

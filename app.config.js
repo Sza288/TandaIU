@@ -1,7 +1,13 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-const googleServicesFile = './google-services.json';
+// Determine which google‑services.json to use.
+// • In local development we keep the file at the project root.
+// • In an EAS build we rely on a File Environment Variable named
+//   GOOGLE_SERVICES_JSON which EAS injects as an absolute path.
+const googleServicesFile = process.env.GOOGLE_SERVICES_JSON
+  ? process.env.GOOGLE_SERVICES_JSON
+  : './google-services.json';
 
 module.exports = ({ config }) => ({
   ...config,
@@ -11,4 +17,13 @@ module.exports = ({ config }) => ({
       ? { googleServicesFile }
       : {}),
   },
+  plugins: [
+    ...(config.plugins ?? []),
+    [
+      'react-native-maps',
+      {
+        androidGoogleMapsApiKey: process.env.GOOGLE_MAPS_API_KEY,
+      },
+    ],
+  ],
 });

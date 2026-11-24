@@ -43,6 +43,7 @@ export default function RootLayout() {
             <Stack.Screen name="profile" options={{ title: 'Profil', headerShown: false }} />
             <Stack.Screen name="assistant" options={{ title: 'Asisten', headerShown: false }} />
             <Stack.Screen name="praktikan" options={{ title: 'Praktikan', headerShown: false }} />
+            <Stack.Screen name="maps" options={{ title: 'Maps Laboratorium', headerShown: false }} />
             <Stack.Screen name="schedule" options={{ title: 'Jadwal', headerShown: false }} />
             <Stack.Screen
               name="schedule/schedules"
