@@ -36,6 +36,37 @@ test('sessionOpened mengirim notifikasi untuk terjadwal ke dibuka', async () => 
   assert.equal(mocks.sentMessages[0].android.notification.channelId, 'default');
 });
 
+test('sessionOpened tetap selesai saat token invalid dihapus dan token valid terkirim', async () => {
+  const mocks = createDepsMock({
+    enrollments: { c1: [{ classId: 'c1', praktikanId: 'u1' }] },
+    tokensByUid: {
+      u1: [
+        { id: 'invalid-doc', uid: 'u1', token: 'mock-invalid-u1' },
+        { id: 'valid-doc', uid: 'u1', token: 'mock-token-u1' },
+      ],
+    },
+    responder: (messages) => ({
+      responses: messages.map((item) => (
+        item.token.startsWith('mock-invalid-')
+          ? { success: false, error: { code: 'messaging/registration-token-not-registered' } }
+          : { success: true }
+      )),
+    }),
+  });
+
+  await assert.doesNotReject(
+    handleSessionOpened(
+      { sessionId: 'ses-1', change: { before: { status: 'terjadwal' }, after: sessionAfter } },
+      mocks.deps,
+    ),
+  );
+
+  assert.deepEqual(mocks.removedTokenIds, ['invalid-doc']);
+  assert.deepEqual(mocks.sentMessages.map((item) => item.token), ['mock-invalid-u1', 'mock-token-u1']);
+  assert.deepEqual(mocks.errorMessages, []);
+  assert.equal(mocks.logMessages.some((entry) => entry.includes('invalid-doc')), true);
+});
+
 test('sessionOpened tidak mengirim untuk transisi lain', async () => {
   const mocks = createDepsMock({
     enrollments: { c1: [{ classId: 'c1', praktikanId: 'u1' }] },

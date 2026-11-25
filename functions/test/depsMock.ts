@@ -1,10 +1,11 @@
 import type { NotificationDeps } from '../src/admin';
 import type { FirestoreData } from '../src/recipients';
-import type { FcmMessage, SendBatchResponse } from '../src/sendTokens';
+import type { DeviceTokenRecord, FcmMessage, SendBatchResponse } from '../src/sendTokens';
 
 export type DepsMockOptions = {
   enrollments?: Record<string, readonly FirestoreData[]>;
   sessions?: Record<string, FirestoreData>;
+  tokensByUid?: Record<string, readonly DeviceTokenRecord[]>;
   failingListEnrollments?: boolean;
   failingGetSession?: boolean;
   responder?: (messages: readonly FcmMessage[]) => SendBatchResponse;
@@ -17,6 +18,7 @@ export function createDepsMock(options: DepsMockOptions = {}) {
   const sessionCalls: string[] = [];
   const logMessages: string[] = [];
   const errorMessages: string[] = [];
+  const removedTokenIds: string[] = [];
 
   const deps: NotificationDeps = {
     logger: {
@@ -34,9 +36,13 @@ export function createDepsMock(options: DepsMockOptions = {}) {
     tokenStore: {
       async listByUids(uids) {
         queriedUids.push(...uids);
-        return uids.map((uid) => ({ id: `d-${uid}`, uid, token: `t-${uid}` }));
+        return uids.flatMap((uid) => (
+          options.tokensByUid?.[uid] ?? [{ id: `d-${uid}`, uid, token: `t-${uid}` }]
+        ));
       },
-      async remove() {},
+      async remove(docId) {
+        removedTokenIds.push(docId);
+      },
     },
     async listEnrollments(classId) {
       enrollmentCalls.push(classId);
@@ -58,5 +64,6 @@ export function createDepsMock(options: DepsMockOptions = {}) {
     sessionCalls,
     logMessages,
     errorMessages,
+    removedTokenIds,
   };
 }

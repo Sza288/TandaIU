@@ -17,6 +17,16 @@ export type NotificationDeps = {
   getSession(sessionId: string): Promise<FirestoreData | null>;
 };
 
+export type FcmMode = 'mock' | 'real';
+
+export type AdminOverrides = {
+  firestore?: Firestore;
+  messaging?: Messaging;
+  env?: NodeJS.ProcessEnv;
+};
+
+export const MOCK_INVALID_TOKEN_PREFIX = 'mock-invalid-';
+
 export function initializeFirebaseAdmin(): App {
   const defaultApp = getApps().find((app) => app.name === '[DEFAULT]');
   return defaultApp ?? initializeApp({ credential: applicationDefault() });
@@ -43,45 +53,72 @@ export function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function shouldUseMockFcm(): boolean {
-  return process.env.TANDAIU_EMULATOR_MOCK_FCM === '1';
+export function resolveFcmMode(
+  env: NodeJS.ProcessEnv = process.env,
+  logger: NotificationLogger = createAdminLogger(),
+): FcmMode {
+  if (env.TANDAIU_EMULATOR_MOCK_FCM !== '1') return 'real';
+  if (env.FUNCTIONS_EMULATOR === 'true') return 'mock';
+  logger.log('PERINGATAN: TANDAIU_EMULATOR_MOCK_FCM=1 di luar emulator; memakai FCM asli.');
+  return 'real';
 }
 
-function createMockSender(logger: NotificationLogger): MessagingSender {
+export function createAdminMessagingSender(messaging: Messaging): MessagingSender {
   return {
-    async sendEach(messages) {
-      for (const message of messages) {
-        logger.log(`FCM_MOCK ${JSON.stringify({
-          token: message.token,
-          notification: message.notification,
-          android: message.android.notification,
-          data: message.data,
-        })}`);
-      }
-      return { responses: messages.map(() => ({ success: true })) };
+    async sendEach(messages, dryRun) {
+      const response = await messaging.sendEach([...messages] as Message[], dryRun);
+      return {
+        responses: response.responses.map((item) => ({
+          success: item.success,
+          error: item.error,
+        })),
+      };
     },
   };
 }
 
-export function createAdminDeps(logger: NotificationLogger = createAdminLogger()): NotificationDeps {
-  const firestore = getAdminFirestore();
-  const messaging = shouldUseMockFcm() ? null : getAdminMessaging();
+export function createMockSender(logger: NotificationLogger): MessagingSender {
+  return {
+    async sendEach(messages) {
+      return {
+        responses: messages.map((message) => {
+          if (message.token.startsWith(MOCK_INVALID_TOKEN_PREFIX)) {
+            logger.log(`FCM_MOCK_ERROR ${JSON.stringify({
+              token: message.token,
+              code: 'messaging/registration-token-not-registered',
+            })}`);
+            return {
+              success: false,
+              error: { code: 'messaging/registration-token-not-registered' },
+            };
+          }
+          logger.log(`FCM_MOCK ${JSON.stringify({
+            token: message.token,
+            type: message.data.type ?? null,
+            notification: message.notification,
+            android: message.android.notification,
+            data: message.data,
+          })}`);
+          return { success: true };
+        }),
+      };
+    },
+  };
+}
+
+export function createAdminDeps(
+  logger: NotificationLogger = createAdminLogger(),
+  overrides: AdminOverrides = {},
+): NotificationDeps {
+  const firestore = overrides.firestore ?? getAdminFirestore();
+  const mode = resolveFcmMode(overrides.env ?? process.env, logger);
+  const sender: MessagingSender = mode === 'mock'
+    ? createMockSender(logger)
+    : createAdminMessagingSender(overrides.messaging ?? getAdminMessaging());
 
   return {
     logger,
-    sender: messaging
-      ? {
-          async sendEach(messages, dryRun) {
-            const response = await messaging.sendEach([...messages] as Message[], dryRun);
-            return {
-              responses: response.responses.map((item) => ({
-                success: item.success,
-                error: item.error,
-              })),
-            };
-          },
-        }
-      : createMockSender(logger),
+    sender,
     tokenStore: {
       async listByUids(uids) {
         if (uids.length === 0) return [];
