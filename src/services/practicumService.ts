@@ -4,6 +4,7 @@ import {
   deleteDoc,
   deleteField,
   doc,
+  documentId,
   getDoc,
   getDocs,
   query,
@@ -201,11 +202,24 @@ function resolveLecturer(lecturerId: LecturerId, lecturer: string): string {
   return selected.name;
 }
 
+async function getClassForSession(classId: string): Promise<ClassDoc | null> {
+  return runFirestore(async () => {
+    const snapshot = await getDocs(query(
+      collection(db, COLLECTIONS.classes),
+      where(documentId(), '==', classId),
+    ));
+    const classSnapshot = snapshot.docs[0];
+    return classSnapshot
+      ? { id: classSnapshot.id, ...(classSnapshot.data() as Omit<ClassDoc, 'id'>) }
+      : null;
+  });
+}
+
 async function resolveSessionClass(
   classId: string,
   courseId: string,
 ): Promise<ClassDoc> {
-  const selected = await getClassById(classId);
+  const selected = await getClassForSession(classId);
   if (!selected) {
     throw new Error('Kelas tidak ditemukan.');
   }
