@@ -143,8 +143,13 @@ service cloud.firestore {
           'name', 'latitude', 'longitude', 'radius', 'lantai', 'createdAt', 'updatedAt'
         ])
         && data.keys().hasOnly([
-          'name', 'latitude', 'longitude', 'radius', 'lantai', 'createdAt', 'updatedAt'
+          'name', 'latitude', 'longitude', 'radius', 'lantai', 'isActive',
+          'createdAt', 'updatedAt'
         ])
+        // isActive is optional: laboratories saved before the activation feature
+        // have no such field and must stay readable and editable. The app treats
+        // a missing value as active.
+        && ((!data.keys().hasAny(['isActive'])) || data.isActive is bool)
         && data.name is string
         && data.name.size() > 0
         && (data.latitude is float || data.latitude is int)
@@ -374,10 +379,10 @@ service cloud.firestore {
       allow update: if isAssistant()
         && validLaboratory(request.resource.data)
         && request.resource.data.createdAt == resource.data.createdAt;
-      // Assistant-only deletion. Sessions keep a denormalized laboratoryId that
-      // becomes dangling if the document disappears; the UI warns before deleting
-      // and sessions without a resolvable laboratory are treated as unassigned.
-      allow delete: if isAssistant();
+      // Permanent deletion is not offered: sessions keep a denormalized
+      // laboratoryId that would dangle, and attendance history references the
+      // laboratory location. Laboratories are deactivated instead (isActive).
+      allow delete: if false;
     }
 
     match /enrollments/{enrollmentId} {
