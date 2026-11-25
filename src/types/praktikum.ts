@@ -1,8 +1,8 @@
-import { dosen } from '../data/dosen';
-import type { PracticumSession, SessionStatus } from '../types';
+import { dosen } from "../data/dosen";
+import type { PracticumSession, SessionStatus } from "../types";
 
 export type Dosen = (typeof dosen)[number];
-export type LecturerId = Dosen['id'];
+export type LecturerId = Dosen["id"];
 
 export type DayOfWeek = 0 | 1 | 2 | 3 | 4 | 5 | 6;
 export type ClockTime = `${number}${number}:${number}${number}`;
@@ -13,7 +13,7 @@ export type ClassDoc = {
   className: string;
   createdAt: string;
   semester?: number;
-  semesterParity?: 'ganjil' | 'genap';
+  semesterParity?: "ganjil" | "genap";
   assistantUid?: string;
 };
 
@@ -27,7 +27,7 @@ export type ScheduleDoc = {
   laboratoryId?: string;
   room?: string;
   jumlahPertemuan?: number;
-  semesterParity?: 'ganjil' | 'genap';
+  semesterParity?: "ganjil" | "genap";
   assistantUid?: string;
 };
 
@@ -36,7 +36,7 @@ export type SessionDoc = PracticumSession & {
   lecturerId?: LecturerId;
   lecturer?: string;
   semester?: number;
-  semesterParity?: 'ganjil' | 'genap';
+  semesterParity?: "ganjil" | "genap";
   assistantUid?: string;
   laboratoryId?: string;
   scheduleId?: string;
@@ -55,11 +55,11 @@ export type LaboratoryDoc = {
   updatedAt: string;
 };
 
-export type ClassInput = Omit<ClassDoc, 'id'>;
+export type ClassInput = Omit<ClassDoc, "id">;
 
-export type ScheduleInput = Omit<ScheduleDoc, 'id'> & { laboratoryId: string };
+export type ScheduleInput = Omit<ScheduleDoc, "id"> & { laboratoryId: string };
 
-export type LaboratoryInput = Omit<LaboratoryDoc, 'id' | 'isActive'>;
+export type LaboratoryInput = Omit<LaboratoryDoc, "id" | "isActive">;
 
 export type SessionInput = {
   classId: string;
@@ -87,8 +87,8 @@ export const LABORATORY_LIMITS = {
 } as const;
 
 export const COLLECTIONS = {
-  classes: 'classes',
-  schedules: 'schedules',
-  sessions: 'sessions',
-  laboratories: 'laboratories',
+  classes: "classes",
+  schedules: "schedules",
+  sessions: "sessions",
+  laboratories: "laboratories",
 } as const;

@@ -111,11 +111,12 @@ Aturan singkat: kode non-rute (komponen, hook, util) disimpan **di luar** `src/a
 ## Ruang lingkup dan batasan
 
 - Autentikasi, kelas, jadwal, sesi, izin, dan ulasan memakai **Firebase**; data pendukung lain masih dummy.
-- Presensi pada branch ini masih memakai state lokal (`AttendanceContext`); sinkronisasi presensi ke Firestore termasuk pekerjaan lanjutan.
+- Presensi memakai Firestore: buka/tutup sesi, presensi GPS/QR, pembatalan, riwayat, dan rekap menggunakan collection yang sudah ada (`sessions`, `attendances`, dan `attendanceQrTokens`). Transaksi Firestore menangani perubahan status dan mencegah presensi ganda.
+- Mode Firebase Spark tidak menjalankan Cloud Functions. Pemeriksaan jarak Haversine dan kecocokan QR dilakukan oleh client; token QR dapat dibaca oleh praktikan yang terdaftar pada sesi. Firestore Rules membatasi identitas, enrollment, sesi, bentuk data, dan masa berlaku token, tetapi tidak dapat membuktikan bahwa koordinat perangkat, jarak kiriman client, atau pemindaian QR asli. Karena itu mode ini cocok untuk demo/pengujian, bukan validasi presensi yang tahan manipulasi. Validasi otoritatif memerlukan Cloud Functions yang di-deploy pada project ber-billing Blaze.
 - Analisis sentimen berjalan **on-device** (tanpa panggilan jaringan) dan hanya dipakai untuk **ulasan pasca-praktikum**. Bila model tidak mengenali teks atau gagal, sistem memakai fallback `src/lib/aiClient.ts` dan UI menampilkan “Analisis cadangan”.
 - Ulasan hanya dapat dikirim untuk sesi yang sudah **ditutup**, satu ulasan per pasangan sesi + praktikan (ID dokumen `reviews/{sessionId}_{uid}`).
 - Izin hanya dapat diajukan satu kali per pasangan sesi + praktikan (ID dokumen `permits/{sessionId}_{uid}`); pengajuan ulang untuk sesi yang sama ditolak.
-- Di luar ruang lingkup: GPS/QR, bukti foto, ekspor laporan, notifikasi, dan administrasi jadwal lanjutan.
+- Di luar ruang lingkup: bukti foto, ekspor laporan, notifikasi, dan administrasi jadwal lanjutan.
 
 ### Aturan penghapusan data
 

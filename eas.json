@@ -12,7 +12,14 @@
       "distribution": "internal"
     },
     "production": {
-      "autoIncrement": true
+      "autoIncrement": true,
+      "environment": "production",
+      "env": {
+        "EXPO_PUBLIC_USE_FIREBASE_EMULATOR": "false"
+      },
+      "android": {
+        "buildType": "apk"
+      }
     }
   },
   "submit": {

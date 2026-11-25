@@ -279,6 +279,7 @@ export async function registerWithEmailAndPassword(
 
   try {
     await setDoc(doc(db, 'users', user.uid), {
+      uid: profile.uid,
       name: profile.name,
       email: profile.email,
       role: profile.role,
@@ -328,6 +329,7 @@ export async function registerGoogleProfile(input: {
 
   const profileRef = doc(db, 'users', user.uid);
   const profileData = {
+    uid: user.uid,
     name: input.name.trim(),
     email: user.email,
     role: input.role,
