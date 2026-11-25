@@ -33,7 +33,7 @@ import {
 import type { EnrollmentRecord } from '../../services/enrollmentService';
 import { useAuthSession } from '../auth/AuthSessionContext';
 import { formatDateLong, formatTime } from '../../utils/format';
-import { getLabLabel, getMeetingNumber } from '../../utils/session';
+import { getEffectiveSessionStatus, getLabLabel, getMeetingNumber } from '../../utils/session';
 import { getCourseById } from '../../utils/academic';
 import { colors, fonts, radius, shadows, spacing } from '../../theme';
 import type { MutationResult } from '../../types';
@@ -224,6 +224,15 @@ export default function SessionDetailScreen() {
   const attendanceWindowElapsed = Boolean(
     session && currentTime >= Date.parse(session.endsAt),
   );
+  const effectiveStatus = session ? getEffectiveSessionStatus(session, currentTime) : 'terjadwal';
+  const autoClosedSessionsRef = useRef(new Set<string>());
+
+  useEffect(() => {
+    if (!isAssistant || !session || session.status !== 'dibuka' || !attendanceWindowElapsed) return;
+    if (autoClosedSessionsRef.current.has(session.id)) return;
+    autoClosedSessionsRef.current.add(session.id);
+    void closeSession(session.id);
+  }, [attendanceWindowElapsed, isAssistant, session]);
   const enrollmentLoading = isAssistant
     ? classEnrollmentResult.loading
     : praktikanEnrollmentResult.loading;
@@ -384,7 +393,7 @@ export default function SessionDetailScreen() {
   const actionDisabled = !session
     || activeRole === null
     || submittingAction
-    || (isAssistant && session.status === 'ditutup')
+    || (isAssistant && (session.status === 'ditutup' || (session.status === 'terjadwal' && attendanceWindowElapsed)))
     || (!isAssistant && (
       !activePraktikanId
       || enrollmentLoading
@@ -393,15 +402,19 @@ export default function SessionDetailScreen() {
       || !isEnrolledPraktikan
       || alreadyCheckedIn
       || !withinAttendanceWindow
-      || session.status !== 'dibuka'
+      || effectiveStatus !== 'dibuka'
     ));
   const actionHint = activeRole === null
     ? 'Sesi autentikasi belum tersedia. Silakan masuk kembali.'
     : isAssistant
       ? session?.status === 'terjadwal'
-        ? 'Buka sesi saat praktikum dimulai.'
+        ? attendanceWindowElapsed
+          ? 'Jadwal sesi ini sudah berakhir (WIB) dan tidak dapat dibuka.'
+          : 'Buka sesi saat praktikum dimulai.'
         : session?.status === 'dibuka'
-          ? 'Tutup sesi setelah praktikum selesai.'
+          ? attendanceWindowElapsed
+            ? 'Waktu sesi sudah berakhir (WIB); sesi sedang ditutup otomatis.'
+            : 'Tutup sesi setelah praktikum selesai.'
           : 'Sesi ini sudah ditutup.'
       : !activePraktikanId
         ? 'Data enrollment akun belum tersedia untuk dihubungkan ke sesi.'
@@ -511,21 +524,21 @@ export default function SessionDetailScreen() {
                 </Svg>
               ) : null}
               <Ionicons
-                name={session.status === 'dibuka' ? 'checkmark-circle' : session.status === 'ditutup' ? 'lock-closed' : 'time'}
+                name={effectiveStatus === 'dibuka' ? 'checkmark-circle' : effectiveStatus === 'ditutup' ? 'lock-closed' : 'time'}
                 size={25}
                 color={colors.primaryDark}
               />
               <View style={styles.statusCopy}>
                 <Text style={styles.statusLabel}>Status Sesi</Text>
                 <Text style={styles.statusTitle}>
-                  {session.status === 'terjadwal'
+                  {effectiveStatus === 'terjadwal'
                     ? 'Terjadwal (Mendatang)'
-                    : session.status === 'dibuka'
+                    : effectiveStatus === 'dibuka'
                       ? 'Sedang Berlangsung'
                       : 'Sesi Ditutup'}
                 </Text>
               </View>
-              <StatusBadge status={session.status} />
+              <StatusBadge status={effectiveStatus} />
             </View>
 
             <View style={styles.sessionCard}>
@@ -625,7 +638,7 @@ export default function SessionDetailScreen() {
                 </View>
 
                 <View style={styles.shareBlock}>
-                  {session.status === 'dibuka' ? (
+                  {effectiveStatus === 'dibuka' ? (
                     <>
                       <Text style={styles.shareLabel}>Link presensi aktif</Text>
                       <Text style={styles.shareLink} selectable>{attendanceLink}</Text>

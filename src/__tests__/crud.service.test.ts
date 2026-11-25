@@ -1,4 +1,4 @@
-import { addDoc, getDoc, setDoc } from 'firebase/firestore';
+import { addDoc, getDoc, getDocs, setDoc } from 'firebase/firestore';
 
 import { dosen } from '../data/dosen';
 import {
@@ -19,6 +19,7 @@ jest.mock('firebase/firestore', () => ({
   collection: jest.fn(),
   deleteDoc: jest.fn(),
   doc: jest.fn(),
+  documentId: jest.fn(() => '__name__'),
   getDoc: jest.fn(),
   getDocs: jest.fn(),
   query: jest.fn(),
@@ -133,17 +134,27 @@ describe('createSession lecturer validation', () => {
 
   it('writes once for a valid session input', async () => {
     (getDoc as jest.Mock).mockResolvedValue({
-      id: validSession.classId,
+      id: validSession.laboratoryId,
       exists: () => true,
-      data: () => ({
-        courseId: validSession.courseId,
-        className: validSession.className,
-        createdAt: '2026-10-01T00:00:00+07:00',
-        semester: 3,
-        semesterParity: 'ganjil',
-        assistantUid: 'assistant-1',
-      }),
+      data: () => ({ name: 'Lab B' }),
     });
+    (getDocs as jest.Mock)
+      .mockResolvedValueOnce({
+        docs: [
+          {
+            id: validSession.classId,
+            data: () => ({
+              courseId: validSession.courseId,
+              className: validSession.className,
+              createdAt: '2026-10-01T00:00:00+07:00',
+              semester: 3,
+              semesterParity: 'ganjil',
+              assistantUid: 'assistant-1',
+            }),
+          },
+        ],
+      })
+      .mockResolvedValue({ docs: [] });
     (addDoc as jest.Mock).mockResolvedValue({ id: 's1' });
 
     await expect(createSession(validSession)).resolves.toMatchObject({ id: 's1' });

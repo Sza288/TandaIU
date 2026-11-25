@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, type Href } from 'expo-router';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -12,10 +12,11 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import ScreenHeader from '../../../components/ScreenHeader';
 import StatusBadge from '../../../components/StatusBadge';
-import { attendanceServiceMode, subscribeToSessions } from '../../../services/attendanceService';
+import { attendanceServiceMode, closeSession, subscribeToSessions } from '../../../services/attendanceService';
 import { colors, fonts, radius, shadows, spacing } from '../../../theme';
 import type { PracticumSession } from '../../../types';
 import { formatDateLong, formatTimeRange } from '../../../utils/format';
+import { getEffectiveSessionStatus, isSessionEnded } from '../../../utils/session';
 
 const statusRank: Record<PracticumSession['status'], number> = {
   dibuka: 0,
@@ -28,6 +29,22 @@ export default function AssistantAttendanceScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
+  const [now, setNow] = useState(() => Date.now());
+  const autoClosedSessionsRef = useRef(new Set<string>());
+
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    sessions.forEach((session) => {
+      if (session.status !== 'dibuka' || !isSessionEnded(session, now)) return;
+      if (autoClosedSessionsRef.current.has(session.id)) return;
+      autoClosedSessionsRef.current.add(session.id);
+      void closeSession(session.id);
+    });
+  }, [now, sessions]);
 
   useEffect(() => {
     let active = true;
@@ -125,7 +142,9 @@ export default function AssistantAttendanceScreen() {
           </View>
         ) : (
           <View style={styles.list}>
-            {orderedSessions.map((session) => (
+            {orderedSessions.map((session) => {
+              const effectiveStatus = getEffectiveSessionStatus(session, now);
+              return (
               <Pressable
                 key={session.id}
                 accessibilityRole="button"
@@ -148,7 +167,7 @@ export default function AssistantAttendanceScreen() {
                     </Text>
                     <Text style={styles.sessionMeta}>Kelas {session.className}</Text>
                   </View>
-                  <StatusBadge status={session.status} />
+                  <StatusBadge status={effectiveStatus} />
                 </View>
 
                 <View style={styles.metaRow}>
@@ -166,9 +185,9 @@ export default function AssistantAttendanceScreen() {
 
                 <View style={styles.sessionFooter}>
                   <Text style={styles.footerHint}>
-                    {session.status === 'dibuka'
+                    {effectiveStatus === 'dibuka'
                       ? 'Sesi sedang dibuka'
-                      : session.status === 'terjadwal'
+                      : effectiveStatus === 'terjadwal'
                         ? 'Siap dibuka saat praktikum dimulai'
                         : 'Sesi sudah ditutup'}
                   </Text>
@@ -178,7 +197,8 @@ export default function AssistantAttendanceScreen() {
                   </View>
                 </View>
               </Pressable>
-            ))}
+              );
+            })}
           </View>
         )}
       </ScrollView>
