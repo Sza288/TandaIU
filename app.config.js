@@ -20,6 +20,12 @@ module.exports = ({ config }) => ({
   plugins: [
     ...(config.plugins ?? []),
     [
+      'expo-notifications',
+      {
+        defaultChannel: 'default',
+      },
+    ],
+    [
       'react-native-maps',
       {
         androidGoogleMapsApiKey: process.env.GOOGLE_MAPS_API_KEY,

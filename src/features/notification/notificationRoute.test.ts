@@ -53,30 +53,46 @@ describe('notificationRoute', () => {
     }
   });
 
-  it('mengarahkan schedule_changed ke /schedule karena praktikan tidak bisa memakai detail jadwal', () => {
+  it('memetakan schedule_changed ke detail jadwal bila scheduleId valid', () => {
     expect(resolve({ type: 'schedule_changed', scheduleId: 'sch123' })).toEqual({
       kind: 'navigate',
-      href: '/schedule',
+      href: '/schedule/schedule/sch123',
     });
-    expect(resolve({ type: 'schedule_changed', scheduleId: '../auth/login' })).toEqual({
+    expect(resolve({ type: 'schedule_changed', scheduleId: 'sch_1-2' })).toEqual({
       kind: 'navigate',
-      href: '/schedule',
-    });
-    expect(resolve({ type: 'schedule_changed' })).toEqual({
-      kind: 'navigate',
-      href: '/schedule',
+      href: '/schedule/schedule/sch_1-2',
     });
   });
 
-  it('mengarahkan permit_result ke /praktikan/permit tanpa query permitId', () => {
+  it('mengarahkan schedule_changed tanpa ID valid ke daftar jadwal', () => {
+    const invalidIds = [undefined, '', '   ', '../auth/login', 'a/b', 123, 'x'.repeat(129)];
+    for (const scheduleId of invalidIds) {
+      expect(resolve({ type: 'schedule_changed', scheduleId })).toEqual({
+        kind: 'navigate',
+        href: '/schedule',
+      });
+    }
+  });
+
+  it('memetakan permit_result ke detail izin bila permitId valid', () => {
     expect(resolve({ type: 'permit_result', permitId: 'perm123' })).toEqual({
       kind: 'navigate',
-      href: '/praktikan/permit',
+      href: '/praktikan/permit/perm123',
     });
-    expect(resolve({ type: 'permit_result' })).toEqual({
+    expect(resolve({ type: 'permit_result', permitId: 'perm_1-2' })).toEqual({
       kind: 'navigate',
-      href: '/praktikan/permit',
+      href: '/praktikan/permit/perm_1-2',
     });
+  });
+
+  it('mengarahkan permit_result tanpa ID valid ke halaman pengajuan izin', () => {
+    const invalidIds = [undefined, '', '   ', '../auth/login', 'a/b', 123, 'x'.repeat(129)];
+    for (const permitId of invalidIds) {
+      expect(resolve({ type: 'permit_result', permitId })).toEqual({
+        kind: 'navigate',
+        href: '/praktikan/permit',
+      });
+    }
   });
 
   it('mengabaikan permit_result untuk role asisten', () => {
