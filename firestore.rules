@@ -363,9 +363,6 @@ service cloud.firestore {
             && sessionRecordInAssistantScope(request.resource.data)
             && request.resource.data.startsAt is timestamp
             && request.resource.data.endsAt is timestamp;
-          // The app deletes only `terjadwal` sessions, keeps `ditutup` ones as history,
-          // and detaches them from a schedule before it is removed. Rules cannot check
-          // attendance/permit/review children, so they authorize the owning assistant.
           allow delete: if assistantOwnsSession(sessionId);
         }
 
@@ -445,7 +442,7 @@ service cloud.firestore {
         && request.resource.data.diff(resource.data)
           .affectedKeys().hasOnly(['revokedAt', 'revokedBy']);
 
-      allow delete: if false;
+      allow delete: if assistantOwnsSession(sessionId);
     }
 
     match /attendances/{attendanceId} {
@@ -473,7 +470,8 @@ service cloud.firestore {
         && request.time >= get(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId)).data.startsAt
         && request.time < get(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId)).data.endsAt
         && praktikanEnrolledInClass(get(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId)).data.classId);
-      allow update, delete: if false;
+      allow update: if false;
+      allow delete: if assistantOwnsSession(resource.data.sessionId);
     }
 
     match /permits/{permitId} {
@@ -501,7 +499,7 @@ service cloud.firestore {
         && (!request.resource.data.keys().hasAny(['reviewedBy'])
           || request.resource.data.reviewedBy == get(userPath(request.auth.uid)).data.name)
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'reviewedAt', 'reviewedBy']);
-      allow delete: if false;
+      allow delete: if assistantOwnsSession(resource.data.sessionId);
     }
 
     match /reviews/{reviewId} {
@@ -528,7 +526,8 @@ service cloud.firestore {
         && validSession(get(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId)).data)
         && get(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId)).data.status == 'ditutup'
         && praktikanEnrolledInClass(get(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId)).data.classId);
-      allow update, delete: if false;
+      allow update: if false;
+      allow delete: if assistantOwnsSession(resource.data.sessionId);
     }
 
     match /attendanceArchives/{archiveId} {

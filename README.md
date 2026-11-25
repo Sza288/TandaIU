@@ -124,7 +124,7 @@ Aturan singkat: kode non-rute (komponen, hook, util) disimpan **di luar** `src/a
 - **Kelas**: ditolak bila masih ada jadwal, sesi `terjadwal`, atau sesi `dibuka`. Bila lolos, kelas dihapus bersama sesi yang tersisa (riwayat `ditutup`) dan enrollment-nya agar tidak ada dokumen yatim.
 - Pengecekan "masih punya sesi" dan pengumpulan jadwal/sesi/enrollment untuk cascade dijalankan di service karena Firestore Rules tidak dapat menjalankan query koleksi; rules hanya memverifikasi bahwa asisten adalah pemilik kelas/sesi.
 - Asumsi: enrollment tidak lagi menghalangi penghapusan kelas, tetapi ikut dihapus bersama kelasnya.
-- Dokumen `attendances`, `permits`, dan `reviews` memakai ID `{sessionId}_{uid}` dengan aturan `delete: if false`, sehingga tidak ikut terhapus saat sesi/kelas dihapus.
+- Dokumen `attendances`, `permits`, dan `reviews` memakai ID `{sessionId}_{uid}`. Saat jadwal atau kelas dihapus, asisten pemilik sesi menghapus catatan turunannya bersama sesi; penghapusan langsung oleh praktikan tetap ditolak.
 
 ## Dokumentasi
 
