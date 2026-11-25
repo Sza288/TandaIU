@@ -50,5 +50,11 @@ if ($javaMajor -lt 21) {
 }
 
 Write-Host "Using Java $javaMajor for Firebase Emulator."
-& npx.cmd --yes firebase-tools@15.37.0 emulators:start --only auth,firestore --project demo-tandaiu-rules
+$functionsDirectory = Join-Path $PSScriptRoot '..\functions'
+& npm.cmd --prefix $functionsDirectory run build
+if ($LASTEXITCODE -ne 0) {
+  exit $LASTEXITCODE
+}
+
+& npx.cmd --yes firebase-tools@15.37.0 emulators:start --only auth,firestore,functions --project demo-tandaiu-rules
 exit $LASTEXITCODE

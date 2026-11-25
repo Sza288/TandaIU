@@ -9,6 +9,7 @@ import {
 import * as FirebaseAuth from 'firebase/auth';
 import { connectFirestoreEmulator, getFirestore } from 'firebase/firestore';
 import { Platform } from 'react-native';
+import { connectFunctionsEmulator, getFunctions } from 'firebase/functions';
 
 // Firebase's React Native runtime exports this API, but its shared types omit it.
 const getReactNativePersistence = (
@@ -27,6 +28,32 @@ const firebaseConfig = {
   appId: process.env.EXPO_PUBLIC_FIREBASE_APP_ID,
 };
 
+const emulatorFlag = process.env.EXPO_PUBLIC_USE_FIREBASE_EMULATOR;
+const productionFirebaseProjectId = 'presensi-praktikum-80d68';
+if (emulatorFlag && emulatorFlag !== 'true' && emulatorFlag !== 'false') {
+  throw new Error('EXPO_PUBLIC_USE_FIREBASE_EMULATOR harus bernilai true atau false.');
+}
+
+if (emulatorFlag === 'false' && firebaseConfig.projectId !== productionFirebaseProjectId) {
+  throw new Error(
+    `Firebase Emulator nonaktif, tetapi EXPO_PUBLIC_FIREBASE_PROJECT_ID harus ${productionFirebaseProjectId}.`,
+  );
+}
+
+if (!__DEV__) {
+  if (emulatorFlag === 'true') {
+    throw new Error('Firebase Emulator tidak boleh digunakan pada production build.');
+  }
+  if (firebaseConfig.projectId !== productionFirebaseProjectId) {
+    throw new Error('Production build harus menggunakan Firebase project kelompok TandaIU.');
+  }
+  if (!firebaseConfig.apiKey || !firebaseConfig.appId) {
+    throw new Error(
+      'Production membutuhkan EXPO_PUBLIC_FIREBASE_API_KEY, EXPO_PUBLIC_FIREBASE_APP_ID, dan EXPO_PUBLIC_FIREBASE_PROJECT_ID.',
+    );
+  }
+}
+
 const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 export const auth =
   Platform.OS === 'web'
@@ -35,11 +62,7 @@ export const auth =
         persistence: getReactNativePersistence(AsyncStorage),
       });
 export const db = getFirestore(app);
-
-const emulatorFlag = process.env.EXPO_PUBLIC_USE_FIREBASE_EMULATOR;
-if (emulatorFlag && emulatorFlag !== 'true' && emulatorFlag !== 'false') {
-  throw new Error('EXPO_PUBLIC_USE_FIREBASE_EMULATOR harus bernilai true atau false.');
-}
+export const functions = getFunctions(app, 'us-central1');
 
 if (emulatorFlag === 'true') {
   if (!__DEV__) {
@@ -53,7 +76,7 @@ if (emulatorFlag === 'true') {
     throw new Error('Isi EXPO_PUBLIC_FIREBASE_EMULATOR_HOST dengan IP LAN laptop tanpa protokol.');
   }
 
-  type EmulatorConnectionState = { authHost?: string; firestoreHost?: string };
+  type EmulatorConnectionState = { authHost?: string; firestoreHost?: string; functionsHost?: string };
   type FirebaseGlobal = typeof globalThis & {
     __tandaiuFirebaseEmulatorConnections?: Map<string, EmulatorConnectionState>;
   };
@@ -76,6 +99,13 @@ if (emulatorFlag === 'true') {
   if (!state.firestoreHost) {
     connectFirestoreEmulator(db, emulatorHost, 8080);
     state.firestoreHost = emulatorHost;
+  }
+  if (state.functionsHost && state.functionsHost !== emulatorHost) {
+    throw new Error('Functions Emulator sudah tersambung ke host lain. Restart Expo sebelum mengganti IP.');
+  }
+  if (!state.functionsHost) {
+    connectFunctionsEmulator(functions, emulatorHost, 5001);
+    state.functionsHost = emulatorHost;
   }
 
   connections.set(app.name, state);

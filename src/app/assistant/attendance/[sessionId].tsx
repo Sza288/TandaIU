@@ -10,15 +10,18 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useAuthSession } from '../../../features/auth/AuthSessionContext';
 import AttendanceSummary from '../../../components/AttendanceSummary';
 import ConfirmationModal from '../../../components/ConfirmationModal';
 import ScreenHeader from '../../../components/ScreenHeader';
 import StatusBadge from '../../../components/StatusBadge';
 import {
   attendanceServiceMode,
+  cancelAttendance,
   closeSession,
   openSession,
   subscribeToSession,
+  type AttendanceRecord,
 } from '../../../services/attendanceService';
 import { colors, fonts, radius, shadows, spacing } from '../../../theme';
 import type { PracticumSession } from '../../../types';
@@ -34,6 +37,8 @@ type Feedback = {
 export default function AssistantAttendanceDetailScreen() {
   const params = useLocalSearchParams<{ sessionId?: string | string[] }>();
   const sessionId = Array.isArray(params.sessionId) ? params.sessionId[0] : params.sessionId;
+  const authSession = useAuthSession();
+  const profile = authSession?.status === 'authenticated' ? authSession.profile : null;
 
   const [session, setSession] = useState<PracticumSession | null>(null);
   const [loading, setLoading] = useState(true);
@@ -42,6 +47,11 @@ export default function AssistantAttendanceDetailScreen() {
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [feedback, setFeedback] = useState<Feedback | null>(null);
+  const [cancelRecord, setCancelRecord] = useState<AttendanceRecord | null>(null);
+  const [cancelReason, setCancelReason] = useState('');
+  const canManageAttendance = Boolean(
+    profile?.role === 'asisten' && profile.uid && session?.assistantUid === profile.uid,
+  );
 
   useEffect(() => {
     if (!sessionId) return;
@@ -94,6 +104,22 @@ export default function AssistantAttendanceDetailScreen() {
           ? 'Sesi berhasil dibuka. Praktikan sekarang dapat melakukan presensi.'
           : 'Sesi berhasil ditutup. Presensi baru tidak dapat dilakukan.'
         : result.reason ?? 'Tindakan tidak berhasil. Silakan coba lagi.',
+    });
+  };
+
+  const handleConfirmCancel = async () => {
+    if (!session || !cancelRecord || submitting) return;
+    setSubmitting(true);
+    const record = cancelRecord;
+    setCancelRecord(null);
+    const result = await cancelAttendance(session.id, record.id, cancelReason);
+    setSubmitting(false);
+    setCancelReason('');
+    setFeedback({
+      tone: result.ok ? 'success' : 'error',
+      message: result.ok
+        ? `Presensi ${record.praktikanName} dibatalkan.`
+        : result.reason ?? 'Pembatalan presensi tidak berhasil.',
     });
   };
 
@@ -247,6 +273,12 @@ export default function AssistantAttendanceDetailScreen() {
               sessionId={session.id}
               title="Rekap Presensi Realtime"
               emptyMessage="Belum ada praktikan yang presensi. Rekap akan diperbarui otomatis saat presensi masuk."
+              onCancelAttendance={canManageAttendance
+                ? (record, reason) => {
+                  setCancelRecord(record);
+                  setCancelReason(reason);
+                }
+                : undefined}
             />
           </>
         )}
@@ -264,6 +296,22 @@ export default function AssistantAttendanceDetailScreen() {
         destructive={pendingAction === 'close'}
         onCancel={() => setPendingAction(null)}
         onConfirm={() => void handleConfirm()}
+      />
+      <ConfirmationModal
+        visible={cancelRecord !== null}
+        title="Batalkan presensi praktikan?"
+        message={
+          cancelRecord
+            ? `Presensi ${cancelRecord.praktikanName} akan diubah menjadi dibatalkan dan tidak dihitung hadir.`
+            : 'Presensi akan dibatalkan.'
+        }
+        confirmLabel="Batalkan Presensi"
+        destructive
+        onCancel={() => {
+          setCancelRecord(null);
+          setCancelReason('');
+        }}
+        onConfirm={() => void handleConfirmCancel()}
       />
     </SafeAreaView>
   );

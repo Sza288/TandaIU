@@ -1,6 +1,7 @@
+
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   ScrollView,
@@ -10,10 +11,18 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import BottomNav from '../../components/BottomNav';
+import AttendanceSummary from '../../components/AttendanceSummary';
+import ConfirmationModal from '../../components/ConfirmationModal';
 import StatusBadge from '../../components/StatusBadge';
+import { useAuthSession } from '../auth/AuthSessionContext';
 import { useSessionAttendance } from '../../hooks/useAttendanceRecords';
 import { useEnrollments } from '../../hooks/useEnrollments';
 import { useSessions } from '../../hooks/useSessions';
+import {
+  cancelAttendance,
+  type AttendanceRecord,
+} from '../../services/attendanceService';
 import { colors, fonts, radius, shadows, spacing } from '../../theme';
 import { formatDateLong, formatTimeRange } from '../../utils/format';
 import { getCourseById } from '../../utils/academic';
@@ -26,6 +35,11 @@ export default function RekapScreen() {
 
   const sessionResult = useSessions();
   const session = sessionResult.data.find((s) => s.id === sessionId);
+  const authSession = useAuthSession();
+  const profile = authSession?.status === 'authenticated' ? authSession.profile : null;
+  const canManageAttendance = Boolean(
+    profile?.role === 'asisten' && profile.uid && session?.assistantUid === profile.uid,
+  );
   const course = session ? getCourseById(session.courseId) : undefined;
   const enrollmentResult = useEnrollments(
     session?.classId ? { classId: session.classId } : undefined,
@@ -33,6 +47,13 @@ export default function RekapScreen() {
   const attendanceResult = useSessionAttendance(sessionId);
   const summaryLoading = enrollmentResult.loading || attendanceResult.loading;
   const summaryError = enrollmentResult.error ?? attendanceResult.error;
+  const [cancelRecord, setCancelRecord] = useState<AttendanceRecord | null>(null);
+  const [cancelReason, setCancelReason] = useState('');
+  const [cancelSubmitting, setCancelSubmitting] = useState(false);
+  const [cancelFeedback, setCancelFeedback] = useState<{
+    tone: 'success' | 'error';
+    message: string;
+  } | null>(null);
 
   const enrolledPraktikans = useMemo(
     () =>
@@ -48,6 +69,22 @@ export default function RekapScreen() {
   const handleBack = () => {
     if (router.canGoBack()) { router.back(); return; }
     router.replace('/assistant');
+  };
+
+  const handleConfirmCancel = async () => {
+    if (!session || !cancelRecord || cancelSubmitting) return;
+    const record = cancelRecord;
+    setCancelSubmitting(true);
+    setCancelRecord(null);
+    const result = await cancelAttendance(session.id, record.id, cancelReason);
+    setCancelSubmitting(false);
+    setCancelReason('');
+    setCancelFeedback({
+      tone: result.ok ? 'success' : 'error',
+      message: result.ok
+        ? `Presensi ${record.praktikanName} dibatalkan.`
+        : result.reason ?? 'Pembatalan presensi tidak berhasil.',
+    });
   };
 
   return (
@@ -122,6 +159,29 @@ export default function RekapScreen() {
                 enrolledPraktikans={enrolledPraktikans}
               />
             )}
+            {cancelFeedback ? (
+              <View
+                accessibilityLiveRegion="polite"
+                style={[
+                  styles.cancelFeedback,
+                  cancelFeedback.tone === 'error' && styles.cancelFeedbackError,
+                ]}
+              >
+                <Text style={styles.cancelFeedbackText}>{cancelFeedback.message}</Text>
+              </View>
+            ) : null}
+            <AttendanceSummary
+              sessionId={session.id}
+              title="Detail Presensi Tersimpan"
+              emptyMessage="Belum ada presensi yang dapat diperiksa."
+              onCancelAttendance={canManageAttendance
+                ? (record, reason) => {
+                  setCancelRecord(record);
+                  setCancelReason(reason);
+                  setCancelFeedback(null);
+                }
+                : undefined}
+            />
           </>
         ) : (
           <View style={styles.emptyCard}>
@@ -148,6 +208,23 @@ export default function RekapScreen() {
           </View>
         )}
       </ScrollView>
+      <BottomNav />
+      <ConfirmationModal
+        visible={cancelRecord !== null}
+        title="Batalkan presensi praktikan?"
+        message={
+          cancelRecord
+            ? `Presensi ${cancelRecord.praktikanName} akan dibatalkan dan tidak dihitung hadir.`
+            : 'Presensi akan dibatalkan.'
+        }
+        confirmLabel={cancelSubmitting ? 'Memproses...' : 'Batalkan Presensi'}
+        destructive
+        onCancel={() => {
+          setCancelRecord(null);
+          setCancelReason('');
+        }}
+        onConfirm={() => void handleConfirmCancel()}
+      />
     </SafeAreaView>
   );
 }
@@ -240,6 +317,20 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 19,
     textAlign: 'center',
+  },
+  cancelFeedback: {
+    padding: spacing.md,
+    borderRadius: radius.md,
+    backgroundColor: colors.successBg,
+  },
+  cancelFeedbackError: {
+    backgroundColor: colors.dangerBg,
+  },
+  cancelFeedbackText: {
+    color: colors.text,
+    fontFamily: fonts.semiBold,
+    fontSize: 12,
+    lineHeight: 18,
   },
   backBtn: {
     marginTop: spacing.sm,
