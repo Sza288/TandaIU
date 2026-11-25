@@ -49,6 +49,21 @@ describe('protected route access decisions', () => {
     ).toBe(deepLink);
   });
 
+  it('preserves an attendance deep link and its session ID through login', () => {
+    const deepLink = '/praktikan/attendance?sessionId=session-42';
+    const loginTarget = getAuthNavigationTarget(
+      { status: 'unauthenticated' },
+      '/praktikan/attendance',
+      deepLink,
+    );
+    expect(loginTarget).toBe(
+      '/auth/login?returnTo=%2Fpraktikan%2Fattendance%3FsessionId%3Dsession-42',
+    );
+    expect(
+      getAuthNavigationTarget(praktikanSession, '/auth/login', deepLink),
+    ).toBe(deepLink);
+  });
+
   it('uses the role dashboard for ordinary login and rejects unsafe continuation routes', () => {
     expect(getAuthNavigationTarget(praktikanSession, '/auth/login')).toBe('/praktikan');
     expect(

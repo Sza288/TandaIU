@@ -206,10 +206,15 @@ export default function PraktikanPermitScreen() {
       }
 
       setReason('');
+      const usedFallback = result.permit.sentimentSource === 'fallback';
       setFeedback({
-        tone: 'success',
-        title: 'Pengajuan izin terkirim',
-        message: 'Asisten akan meninjau pengajuanmu.',
+        tone: usedFallback ? 'warning' : 'success',
+        title: usedFallback
+          ? 'Pengajuan terkirim dengan analisis cadangan'
+          : 'Pengajuan izin terkirim',
+        message: usedFallback
+          ? `Sentimen alasan: ${result.permit.sentiment}. Analisis cadangan digunakan. Asisten akan meninjau pengajuanmu.`
+          : `Sentimen alasan: ${result.permit.sentiment}. Asisten akan meninjau pengajuanmu.`,
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Terjadi kesalahan yang tidak diketahui.';

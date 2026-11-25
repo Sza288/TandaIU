@@ -54,6 +54,8 @@ export default function PraktikanHomeScreen() {
   const now = useNow(1_000);
 
   const handleOpenSchedule = () => router.push('/schedule');
+  const handleOpenAttendance = () => router.push('/praktikan/attendance');
+  const handleOpenHistory = () => router.push('/praktikan/riwayat');
   const handleOpenPermit = () => router.push('/praktikan/permit');
   const handleOpenReview = () => router.push('/praktikan/review');
   const handleOpenMaps = () => router.push('/maps');
@@ -99,6 +101,50 @@ export default function PraktikanHomeScreen() {
               <Text style={styles.emptyDescription}>
                 Data profil akun belum tersedia. Coba muat ulang sesi atau masuk kembali.
               </Text>
+            </View>
+          ) : null}
+
+          {activePraktikan ? (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Pintasan</Text>
+              <View style={styles.quickGrid}>
+                <QuickCard
+                  icon="qr-code-outline"
+                  title="Presensi"
+                  caption="Buka sesi dan pilih lokasi atau Scan QR Asprak"
+                  onPress={handleOpenAttendance}
+                />
+                <QuickCard
+                  icon="calendar-outline"
+                  title="Sesi"
+                  caption="Lihat semua sesi praktikum"
+                  onPress={handleOpenSchedule}
+                />
+                <QuickCard
+                  icon="time-outline"
+                  title="Riwayat"
+                  caption="Lihat catatan kehadiranmu"
+                  onPress={handleOpenHistory}
+                />
+                <QuickCard
+                  icon="document-text-outline"
+                  title="Ajukan Izin"
+                  caption="Kirim izin dan pantau statusnya"
+                  onPress={handleOpenPermit}
+                />
+                <QuickCard
+                  icon="chatbubble-ellipses-outline"
+                  title="Ulasan"
+                  caption="Beri ulasan setelah praktikum selesai"
+                  onPress={handleOpenReview}
+                />
+                <QuickCard
+                  icon="map-outline"
+                  title="Maps"
+                  caption="Lokasi dan aktivitas laboratorium"
+                  onPress={handleOpenMaps}
+                />
+              </View>
             </View>
           ) : null}
 
@@ -213,6 +259,7 @@ export default function PraktikanHomeScreen() {
               </View>
             </View>
           ) : null}
+
         </View>
       </ScrollView>
 

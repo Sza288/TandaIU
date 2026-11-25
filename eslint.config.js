@@ -5,5 +5,12 @@ module.exports = defineConfig([
   expoConfig,
   {
     ignores: ['dist/*', 'functions/**'],
+    settings: {
+      'import/resolver': {
+        node: {
+          extensions: ['.js', '.jsx', '.ts', '.tsx', '.json'],
+        },
+      },
+    },
   },
 ]);

@@ -23,11 +23,24 @@ function requiredRoles(pathname: string): readonly UserRole[] | undefined {
 
 export default function AuthNavigationGate({ children }: AuthNavigationGateProps) {
   const pathname = usePathname();
-  const params = useGlobalSearchParams<{ returnTo?: string | string[] }>();
+  const params = useGlobalSearchParams<{
+    returnTo?: string | string[];
+    sessionId?: string | string[];
+  }>();
   const session = useAuthSession();
   const previousSessionStatus = useRef(session?.status);
   const returnTo = Array.isArray(params.returnTo) ? params.returnTo[0] : params.returnTo;
-  const navigationTarget = session ? getAuthNavigationTarget(session, pathname, returnTo) : null;
+  const linkedSessionId = Array.isArray(params.sessionId)
+    ? params.sessionId[0]
+    : params.sessionId;
+  const requestedReturnTo = returnTo ?? (
+    pathname === '/praktikan/attendance' && linkedSessionId
+      ? `/praktikan/attendance?sessionId=${encodeURIComponent(linkedSessionId)}`
+      : undefined
+  );
+  const navigationTarget = session
+    ? getAuthNavigationTarget(session, pathname, requestedReturnTo)
+    : null;
   const pendingNavigationTarget = useRef<string | null>(null);
 
   useEffect(() => {
@@ -39,7 +52,7 @@ export default function AuthNavigationGate({ children }: AuthNavigationGateProps
     const target = getAuthNavigationTarget(
       session,
       pathname,
-      returnTo,
+      requestedReturnTo,
       previousSessionStatus.current,
     );
     previousSessionStatus.current = session.status;
@@ -52,7 +65,7 @@ export default function AuthNavigationGate({ children }: AuthNavigationGateProps
       pendingNavigationTarget.current = target;
       router.replace(target as Href);
     }
-  }, [navigationTarget, pathname, returnTo, session]);
+  }, [navigationTarget, pathname, requestedReturnTo, session]);
 
   if (!session || session.status === 'loading' || navigationTarget) {
     return (
