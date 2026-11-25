@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
+import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   ScrollView,
@@ -50,6 +51,7 @@ export default function PraktikanHomeScreen() {
   const enrollmentLoading = enrollmentResult.loading || sessionResult.loading;
   const enrollmentError = enrollmentResult.error ?? sessionResult.error ?? attendanceResult.error;
   const hasEnrollment = enrollmentResult.data.length > 0;
+  const now = useNow(1_000);
 
   const handleOpenSchedule = () => router.push('/schedule');
   const handleOpenHistory = () => router.push('/praktikan/riwayat');
@@ -97,44 +99,6 @@ export default function PraktikanHomeScreen() {
               <Text style={styles.emptyDescription}>
                 Data profil akun belum tersedia. Coba muat ulang sesi atau masuk kembali.
               </Text>
-            </View>
-          ) : null}
-
-          {activePraktikan ? (
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Pintasan</Text>
-              <View style={styles.quickGrid}>
-                <QuickCard
-                  icon="calendar-outline"
-                  title="Sesi"
-                  caption="Lihat semua sesi praktikum"
-                  onPress={handleOpenSchedule}
-                />
-                <QuickCard
-                  icon="time-outline"
-                  title="Riwayat"
-                  caption="Lihat catatan kehadiranmu"
-                  onPress={handleOpenHistory}
-                />
-                <QuickCard
-                  icon="document-text-outline"
-                  title="Ajukan Izin"
-                  caption="Kirim izin dan pantau statusnya"
-                  onPress={handleOpenPermit}
-                />
-                <QuickCard
-                  icon="chatbubble-ellipses-outline"
-                  title="Ulasan"
-                  caption="Beri ulasan setelah praktikum selesai"
-                  onPress={handleOpenReview}
-                />
-                <QuickCard
-                  icon="map-outline"
-                  title="Maps"
-                  caption="Lokasi dan aktivitas laboratorium"
-                  onPress={handleOpenMaps}
-                />
-              </View>
             </View>
           ) : null}
 
@@ -209,11 +173,50 @@ export default function PraktikanHomeScreen() {
                     <OpenSessionCard
                       key={session.id}
                       session={session}
+                      now={now}
                       onPress={() => handleOpenSession(session.id)}
                     />
                   ))}
                 </View>
               )}
+            </View>
+          ) : null}
+
+          {activePraktikan ? (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Pintasan</Text>
+              <View style={styles.quickGrid}>
+                <QuickCard
+                  icon="calendar-outline"
+                  title="Sesi"
+                  caption="Lihat semua sesi praktikum"
+                  onPress={handleOpenSchedule}
+                />
+                <QuickCard
+                  icon="time-outline"
+                  title="Riwayat"
+                  caption="Lihat catatan kehadiranmu"
+                  onPress={handleOpenHistory}
+                />
+                <QuickCard
+                  icon="document-text-outline"
+                  title="Ajukan Izin"
+                  caption="Kirim izin dan pantau statusnya"
+                  onPress={handleOpenPermit}
+                />
+                <QuickCard
+                  icon="chatbubble-ellipses-outline"
+                  title="Ulasan"
+                  caption="Beri ulasan setelah praktikum selesai"
+                  onPress={handleOpenReview}
+                />
+                <QuickCard
+                  icon="map-outline"
+                  title="Maps"
+                  caption="Lokasi dan aktivitas laboratorium"
+                  onPress={handleOpenMaps}
+                />
+              </View>
             </View>
           ) : null}
 
@@ -258,20 +261,54 @@ export default function PraktikanHomeScreen() {
   );
 }
 
+function useNow(intervalMs: number) {
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), intervalMs);
+    return () => clearInterval(timer);
+  }, [intervalMs]);
+
+  return now;
+}
+
+function getRemainingSessionMs(endsAt: string, now: number) {
+  return new Date(endsAt).getTime() - now;
+}
+
+function formatSessionCountdown(remainingMs: number) {
+  if (Number.isNaN(remainingMs)) return 'Batas waktu tidak tersedia';
+  if (remainingMs <= 0) return 'Batas presensi terlewat';
+
+  const totalSeconds = Math.floor(remainingMs / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  if (hours > 0) return `Sisa ${hours}j ${minutes}m ${seconds}d`;
+  if (minutes > 0) return `Sisa ${minutes}m ${seconds}d`;
+  return `Sisa ${seconds}d`;
+}
+
 function OpenSessionCard({
   session,
+  now,
   onPress,
 }: {
   session: PracticumSession;
+  now: number;
   onPress: () => void;
 }) {
+  const remainingMs = getRemainingSessionMs(session.endsAt, now);
+  const countdown = formatSessionCountdown(remainingMs);
+  const isUrgent = remainingMs <= 10 * 60 * 1000;
   return (
     <TouchableOpacity
       style={styles.sessionCard}
       onPress={onPress}
       activeOpacity={0.85}
       accessibilityRole="button"
-      accessibilityLabel={`Lihat sesi ${session.practicumName}, kelas ${session.className}`}
+      accessibilityLabel={`Lihat sesi ${session.practicumName}, kelas ${session.className}, ${countdown}`}
     >
       <View style={styles.sessionTop}>
         <View style={styles.sessionIcon}>
@@ -300,7 +337,12 @@ function OpenSessionCard({
       </View>
 
       <View style={styles.sessionFooter}>
-        <Text style={styles.pendingText}>Belum presensi</Text>
+        <View style={styles.sessionStatus}>
+          <Text style={styles.pendingText}>Belum presensi</Text>
+          <Text style={[styles.countdownText, isUrgent ? styles.countdownUrgent : null]}>
+            {countdown}
+          </Text>
+        </View>
         <View style={styles.sessionAction}>
           <Text style={styles.sessionActionText}>Lihat Sesi</Text>
           <Ionicons name="chevron-forward" size={15} color={colors.primary} />
@@ -548,10 +590,23 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: spacing.sm,
   },
+  sessionStatus: {
+    flexShrink: 1,
+    gap: 2,
+  },
   pendingText: {
     color: colors.warning,
     fontFamily: fonts.bold,
     fontSize: 11,
+  },
+  countdownText: {
+    color: colors.textSecondary,
+    fontFamily: fonts.regular,
+    fontSize: 11,
+  },
+  countdownUrgent: {
+    color: colors.danger,
+    fontFamily: fonts.bold,
   },
   sessionAction: {
     flexDirection: 'row',
