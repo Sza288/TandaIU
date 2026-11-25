@@ -43,7 +43,6 @@ const SESSION_CHILD_COLLECTIONS = [
   'attendances',
   'permits',
   'reviews',
-  'attendanceQrTokens',
 ] as const;
 
 async function deleteSessionChildren(sessionIds: string[]): Promise<void> {
@@ -61,6 +60,9 @@ async function deleteSessionChildren(sessionIds: string[]): Promise<void> {
   for (const reference of snapshots.flatMap((snapshot) =>
     snapshot.docs.map((document) => document.ref))) {
     await deleteDoc(reference);
+  }
+  for (const sessionId of sessionIds) {
+    await deleteDoc(doc(db, 'attendanceQrTokens', sessionId));
   }
 }
 
