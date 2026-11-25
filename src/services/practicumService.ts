@@ -274,6 +274,24 @@ function mapFirestoreError(error: unknown): Error {
   return new Error('Terjadi kesalahan saat menghubungi server. Silakan coba lagi.');
 }
 
+async function withStage<T>(stage: string, operation: () => Promise<T>): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    const detail = error instanceof Error && error.message.trim()
+      ? error.message
+      : 'akses ditolak';
+    throw new Error(`${stage}: ${detail}`);
+  }
+}
+
+function isPermissionDenied(error: unknown): boolean {
+  return typeof error === 'object'
+    && error !== null
+    && 'code' in error
+    && String((error as FirestoreErrorLike).code).includes('permission-denied');
+}
+
 async function runFirestore<T>(operation: () => Promise<T>): Promise<T> {
   try {
     return await operation();
@@ -530,22 +548,26 @@ export async function generateSessionsFromSchedule(
   }
   requireNonEmpty(input.laboratoryId, 'Laboratorium');
 
-  const schedule = await getScheduleById(input.scheduleId);
+  const schedule = await withStage('Gagal memuat jadwal', () => getScheduleById(input.scheduleId));
   if (!schedule) {
     throw new Error('Jadwal tidak ditemukan.');
   }
-  const classDoc = await resolveSessionClass(schedule.classId, schedule.courseId);
-  if (classDoc.semesterParity !== 'ganjil' && classDoc.semesterParity !== 'genap') {
+  const classDoc = await withStage('Gagal memuat kelas', () =>
+    resolveSessionClass(schedule.classId, schedule.courseId));
+  const semesterParity = classDoc.semesterParity;
+  if (semesterParity !== 'ganjil' && semesterParity !== 'genap') {
     throw new Error('Semester kelas belum dikonfigurasi.');
   }
 
   const lecturer = resolveLecturer(input.lecturerId, input.lecturer);
-  const laboratoryId = await resolveLaboratory(input.laboratoryId);
+  const laboratoryId = await withStage('Gagal memuat laboratorium', () =>
+    resolveLaboratory(input.laboratoryId));
   if (!laboratoryId) {
     throw new Error('Laboratorium tidak ditemukan.');
   }
 
-  const existing = await getSessionsForClass(schedule.classId, classDoc.semesterParity);
+  const existing = await withStage('Gagal memuat sesi', () =>
+    getSessionsForClass(schedule.classId, semesterParity));
   const taken = new Set(
     existing.map((session) => session.startsAt.slice(0, 10)),
   );
@@ -590,7 +612,12 @@ export async function generateSessionsFromSchedule(
         endsAt: isoToFirestoreDate(payload.endsAt),
       });
       created.push(reference.id);
-    } catch {
+    } catch (error) {
+      if (isPermissionDenied(error)) {
+        throw new Error(
+          'Gagal menyimpan sesi: Anda tidak memiliki izin untuk melakukan aksi ini',
+        );
+      }
       failed.push(date);
     }
   }
