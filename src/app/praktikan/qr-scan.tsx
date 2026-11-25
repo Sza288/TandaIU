@@ -21,6 +21,7 @@ import { colors, fonts, radius, spacing } from '../../theme';
 import type { MutationResult } from '../../types';
 import { acquireDeviceLocation } from '../../utils/location';
 import { parseAttendanceQrPayload } from '../../utils/attendanceQr';
+import { parseAttendanceLink } from '../../utils/attendanceLink';
 
 type Feedback = {
   tone: 'info' | 'success' | 'error';
@@ -135,6 +136,15 @@ export default function PractikanQrScanScreen() {
   const handleBarcodeScanned = useCallback(async ({ data }: BarcodeScanningResult) => {
     if (scanLocked.current || busy || !sessionId) return;
     scanLocked.current = true;
+
+    const linkedSessionId = parseAttendanceLink(data);
+    if (linkedSessionId) {
+      router.replace({
+        pathname: '/praktikan/attendance',
+        params: { sessionId: linkedSessionId },
+      });
+      return;
+    }
 
     if (!parseAttendanceQrPayload(data)) {
       setRetryMode('scan');
