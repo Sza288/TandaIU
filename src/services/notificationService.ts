@@ -24,6 +24,7 @@ import type {
   NotificationRegistrationResult,
 } from '../features/notification/notification.types';
 import { auth, db } from '../lib/firebase';
+import { getErrorKind, getErrorMessage } from '../utils/errorMessage';
 
 const DEFAULT_ANDROID_CHANNEL_ID = 'default';
 const DEVICE_TOKEN_REMOVAL_TIMEOUT_MS = 3000;
@@ -38,8 +39,7 @@ function isCurrentUser(uid: string): boolean {
 }
 
 function getFailureReason(error: unknown): string {
-  if (error instanceof Error && error.message.trim()) return error.message.trim();
-  return 'Registrasi notifikasi gagal.';
+  return getErrorMessage(getErrorKind(error)).message;
 }
 
 function cancelledRegistration(): NotificationRegistrationResult {
