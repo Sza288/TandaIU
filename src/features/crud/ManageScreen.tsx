@@ -119,7 +119,7 @@ export default function ManageScreen() {
     confirmAction({
       title: 'Hapus jadwal ini?',
       message:
-        'Sesi terjadwal dari jadwal ini ikut terhapus. Sesi yang sudah ditutup tetap disimpan sebagai riwayat. Jadwal yang masih memiliki sesi dibuka tidak dapat dihapus.',
+        'Semua sesi dari jadwal ini ikut terhapus, beserta catatan kehadiran, izin, ulasan, dan token presensinya.',
       onConfirm: () => {
         void runDeleteSchedule(id);
       },

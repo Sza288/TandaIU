@@ -38,6 +38,31 @@ const CLOCK_TIME_PATTERN = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
 
 const SESSION_STATUSES: SessionStatus[] = ['terjadwal', 'dibuka', 'ditutup'];
 
+const SESSION_CHILD_COLLECTIONS = [
+  'attendances',
+  'permits',
+  'reviews',
+  'attendanceQrTokens',
+] as const;
+
+async function deleteSessionChildren(sessionIds: string[]): Promise<void> {
+  if (sessionIds.length === 0) return;
+
+  const snapshots = await Promise.all(
+    sessionIds.flatMap((sessionId) =>
+      SESSION_CHILD_COLLECTIONS.map((collectionName) =>
+        getDocs(query(
+          collection(db, collectionName),
+          where('sessionId', '==', sessionId),
+        )))),
+  );
+
+  for (const reference of snapshots.flatMap((snapshot) =>
+    snapshot.docs.map((document) => document.ref))) {
+    await deleteDoc(reference);
+  }
+}
+
 function requireNonEmpty(value: string, label: string): void {
   if (typeof value !== 'string' || value.trim() === '') {
     throw new Error(`${label} wajib diisi.`);
@@ -321,11 +346,6 @@ export async function deleteSession(id: string): Promise<void> {
   });
 }
 
-/**
- * Menghapus jadwal sekaligus sesi turunannya: sesi `terjadwal` dihapus, sesi
- * `ditutup` dipertahankan sebagai riwayat dengan melepas referensi scheduleId.
- * Penghapusan ditolak bila masih ada sesi yang sedang dibuka.
- */
 export async function deleteSchedule(id: string): Promise<void> {
   const schedule = await getScheduleById(id);
   if (!schedule) {
@@ -336,37 +356,20 @@ export async function deleteSchedule(id: string): Promise<void> {
   }
   const { assistantUid, semesterParity } = schedule;
 
-  const sessions = await runFirestore(async () => {
+  const sessionIds = await runFirestore(async () => {
     const snapshot = await getDocs(query(
       collection(db, COLLECTIONS.sessions),
       where('assistantUid', '==', assistantUid),
       where('semesterParity', '==', semesterParity),
       where('scheduleId', '==', id),
     ));
-    return snapshot.docs.map((document) => ({
-      id: document.id,
-      status: (document.data() as SessionDoc).status,
-    }));
+    return snapshot.docs.map((document) => document.id);
   });
 
-  if (sessions.some((session) => session.status === 'dibuka')) {
-    throw new Error(
-      'Masih ada sesi yang sedang dibuka pada jadwal ini. Tutup sesi tersebut terlebih dahulu.',
-    );
-  }
-
   return runFirestore(async () => {
-    for (const session of sessions) {
-      if (session.status === 'terjadwal') {
-        await deleteDoc(doc(db, COLLECTIONS.sessions, session.id));
-        continue;
-      }
-      // Sesi yang sudah ditutup tetap tersimpan sebagai riwayat. Detail sesi
-      // mensyaratkan scheduleId yang valid, jadi referensi dilepas sebelum
-      // dokumen jadwalnya dihapus.
-      await updateDoc(doc(db, COLLECTIONS.sessions, session.id), {
-        scheduleId: deleteField(),
-      });
+    await deleteSessionChildren(sessionIds);
+    for (const sessionId of sessionIds) {
+      await deleteDoc(doc(db, COLLECTIONS.sessions, sessionId));
     }
     await deleteDoc(doc(db, COLLECTIONS.schedules, id));
   });
@@ -435,6 +438,7 @@ export async function deleteClass(id: string): Promise<void> {
   }
 
   return runFirestore(async () => {
+    await deleteSessionChildren(sessions.map((session) => session.id));
     for (const session of sessions) {
       await deleteDoc(doc(db, COLLECTIONS.sessions, session.id));
     }
