@@ -8,7 +8,20 @@ import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { AuthProvider } from '../features/auth/AuthSessionContext';
 import AuthNavigationGate from '../features/auth/AuthNavigationGate';
+import { useNotificationNavigation } from '../hooks/useNotificationNavigation';
+import { useNotificationRegistration } from '../hooks/useNotificationRegistration';
+import NotificationRegistrationBanner from '../features/notification/NotificationRegistrationBanner';
 import { colors, fonts } from '../theme';
+
+function NotificationRegistration() {
+  const { status, reason, retry } = useNotificationRegistration();
+  return <NotificationRegistrationBanner status={status} reason={reason} onRetry={retry} />;
+}
+
+function NotificationNavigation(): null {
+  useNotificationNavigation();
+  return null;
+}
 
 export default function RootLayout() {
   const [fontsLoaded, fontError] = useFonts({
@@ -25,6 +38,8 @@ export default function RootLayout() {
 
   return (
     <AuthProvider>
+      <NotificationRegistration />
+      <NotificationNavigation />
       <StatusBar style="dark" />
       <AuthNavigationGate>
           <Stack
@@ -86,6 +101,10 @@ export default function RootLayout() {
             <Stack.Screen
               name="praktikan/permit"
               options={{ title: 'Ajukan Izin', headerShown: false }}
+            />
+            <Stack.Screen
+              name="praktikan/permit/[permitId]"
+              options={{ title: 'Detail Izin', headerShown: false }}
             />
             <Stack.Screen
               name="assistant/reviews"

@@ -20,6 +20,7 @@ import {
   type AuthProfile,
   type RegistrationRole,
 } from '../features/auth/authTypes';
+import { removeCurrentDeviceToken } from './notificationService';
 
 export type RegistrationInput = {
   name: string;
@@ -474,6 +475,20 @@ export async function signOut(): Promise<void> {
       (provider) => provider.providerId === 'google.com',
     ) ?? false;
 
+    try {
+      const tokenRemoval = await removeCurrentDeviceToken();
+      if (!tokenRemoval.ok && __DEV__) {
+        console.warn('[auth] Device token removal failed during logout; continuing.');
+      }
+    } catch (error) {
+      if (__DEV__) {
+        console.warn(
+          '[auth] Device token removal threw during logout:',
+          firebaseErrorCode(error) ?? 'unknown-error',
+        );
+      }
+    }
+
     if (hasGoogleProvider && Platform.OS !== 'web' && Constants.appOwnership !== 'expo') {
       try {
         // Expo Go does not include this native module; load it only in a development build.
@@ -493,7 +508,6 @@ export async function signOut(): Promise<void> {
     }
 
     try {
-      // AuthNavigationGate observes this state change and performs the single route transition.
       await firebaseSignOut(auth);
     } catch (error) {
       throw new AuthServiceError('logout-failed', getAuthErrorMessage(error));

@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict');
 const { test } = require('node:test');
-const { getSessionTimeFailure } = require('../lib/sessionWindow.js');
+const { getSessionTimeFailure } = require('../lib/src/sessionWindow.js');
 
 const startsAt = Date.parse('2026-10-28T08:00:00.000Z');
 const endsAt = Date.parse('2026-10-28T09:00:00.000Z');

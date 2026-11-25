@@ -1,11 +1,13 @@
 import { createHash, randomBytes } from 'node:crypto';
-import { initializeApp } from 'firebase-admin/app';
+import { getApps, initializeApp } from 'firebase-admin/app';
 import { getFirestore, FieldValue, Timestamp, type DocumentData, type Transaction } from 'firebase-admin/firestore';
 import { setGlobalOptions } from 'firebase-functions/v2';
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
 import { getSessionTimeFailure } from './sessionWindow.js';
 
-initializeApp();
+if (getApps().length === 0) {
+  initializeApp();
+}
 setGlobalOptions({ region: 'us-central1' });
 const db = getFirestore();
 
@@ -688,3 +690,7 @@ export const cancelAttendance = onCall(async (request) => {
   });
   return { ok: true };
 });
+export { permitResult } from './permitResult';
+export { scheduleChanged } from './scheduleChanged';
+export { sessionOpened } from './sessionOpened';
+

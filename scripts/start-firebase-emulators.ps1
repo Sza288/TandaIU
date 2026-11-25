@@ -50,11 +50,13 @@ if ($javaMajor -lt 21) {
 }
 
 Write-Host "Using Java $javaMajor for Firebase Emulator."
-$functionsDirectory = Join-Path $PSScriptRoot '..\functions'
-& npm.cmd --prefix $functionsDirectory run build
-if ($LASTEXITCODE -ne 0) {
-  exit $LASTEXITCODE
-}
-
-& npx.cmd --yes firebase-tools@15.37.0 emulators:start --only auth,firestore,functions --project demo-tandaiu-rules
-exit $LASTEXITCODE
+Write-Host "Building Cloud Functions..."
+$previousErrorAction = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
+npm --prefix functions run build
+$buildExitCode = $LASTEXITCODE
+$ErrorActionPreference = $previousErrorAction
+if ($buildExitCode -ne 0) { exit $buildExitCode }
+$rootDir = Split-Path -Parent $PSScriptRoot
+$emulator = Start-Process -FilePath 'npx.cmd' -ArgumentList @('--yes', 'firebase-tools@15.37.0', 'emulators:start', '--only', 'auth,firestore,functions', '--project', 'demo-tandaiu-rules') -WorkingDirectory $rootDir -NoNewWindow -Wait -PassThru
+exit $emulator.ExitCode

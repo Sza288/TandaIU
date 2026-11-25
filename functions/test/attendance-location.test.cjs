@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict');
 const { test } = require('node:test');
-const { haversineMeters } = require('../lib/index.js');
+const { haversineMeters } = require('../lib/src/index.js');
 
 test('distance is zero for identical coordinates', () => {
   assert.equal(haversineMeters(-7.05, 110.44, -7.05, 110.44), 0);

@@ -33,8 +33,7 @@ service cloud.firestore {
         && data.email is string;
     }
 
-    // The role comes from the trusted profile; semester ownership comes only
-    // from an Admin SDK custom claim.
+    // Role comes from the trusted profile; semester ownership comes from an Admin SDK custom claim.
     function isAssistant() {
       return isSignedIn()
         && validAssistantProfile(get(userPath(request.auth.uid)).data)
@@ -178,6 +177,8 @@ service cloud.firestore {
           'name', 'latitude', 'longitude', 'radius', 'lantai', 'isActive',
           'createdAt', 'updatedAt'
         ])
+        // isActive optional: dokumen lama belum punya field ini dan harus tetap
+        // bisa dibaca/diedit. Aplikasi menganggap nilai kosong sebagai aktif.
         && ((!data.keys().hasAny(['isActive'])) || data.isActive is bool)
         && data.name is string
         && data.name.size() > 0
@@ -628,6 +629,42 @@ service cloud.firestore {
         && validEnrollment(resource.data, enrollmentId)
         && assistantOwnsClass(resource.data.classId);
       allow update: if false;
+    }
+
+    // QR attendance token rules
+    match /attendanceQrTokens/{sessionId} {
+      allow get: if assistantOwnsSession(sessionId);
+      allow list: if false;
+
+      allow create: if assistantOwnsSession(sessionId)
+        && get(/databases/$(database)/documents/sessions/$(sessionId)).data.status == 'dibuka'
+        && request.resource.data.keys().hasAll([
+          'sessionId', 'tokenHash', 'issuedBy',
+          'issuedAt', 'expiresAt', 'revokedAt', 'revokedBy'
+        ])
+        && request.resource.data.keys().hasOnly([
+          'sessionId', 'tokenHash', 'issuedBy',
+          'issuedAt', 'expiresAt', 'revokedAt', 'revokedBy'
+        ])
+        && request.resource.data.sessionId == sessionId
+        && request.resource.data.tokenHash is string
+        && request.resource.data.tokenHash.size() == 64
+        && request.resource.data.issuedBy == request.auth.uid
+        && request.resource.data.issuedAt is timestamp
+        && request.resource.data.expiresAt is timestamp
+        && request.resource.data.expiresAt > request.resource.data.issuedAt
+        && request.resource.data.revokedAt == null
+        && request.resource.data.revokedBy == null;
+
+      allow update: if assistantOwnsSession(sessionId)
+        && resource.data.issuedBy == request.auth.uid
+        && resource.data.revokedAt == null
+        && request.resource.data.revokedAt is timestamp
+        && request.resource.data.revokedBy == request.auth.uid
+        && request.resource.data.diff(resource.data)
+          .affectedKeys().hasOnly(['revokedAt', 'revokedBy']);
+
+      allow delete: if false;
     }
 
     match /attendances/{attendanceId} {
