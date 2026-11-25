@@ -3,7 +3,6 @@ import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useState } from 'react';
 
-import BottomNav from '../../components/BottomNav';
 import ScreenHeader from '../../components/ScreenHeader';
 import { useAuthSession } from '../auth/AuthSessionContext';
 import type { AuthProfile } from '../auth/authTypes';
@@ -78,7 +77,6 @@ function MapsScreenContent({ profile }: { profile: AuthProfile }) {
           </>
         )}
       </ScrollView>
-      <BottomNav />
     </SafeAreaView>
   );
 }
@@ -119,7 +117,6 @@ export default function MapsScreen() {
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
       <ScreenHeader title="Maps Laboratorium" eyebrow="LOKASI & AKTIVITAS" />
       <ActivityIndicator color={colors.primary} />
-      <BottomNav />
     </SafeAreaView>
   );
 }
