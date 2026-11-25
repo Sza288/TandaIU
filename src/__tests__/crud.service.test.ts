@@ -20,6 +20,7 @@ jest.mock('firebase/firestore', () => ({
   collection: jest.fn(),
   deleteDoc: jest.fn(),
   doc: jest.fn(),
+  documentId: jest.fn(() => '__name__'),
   getDoc: jest.fn(),
   getDocs: jest.fn(),
   query: jest.fn(),
@@ -57,7 +58,7 @@ const validSchedule: ScheduleInput = {
   dayOfWeek: 1,
   startTime: '08:00',
   endTime: '10:00',
-  room: 'Lab A',
+  laboratoryId: 'lab-b',
 };
 
 const validClass: ClassInput = {
@@ -135,17 +136,27 @@ describe('createSession lecturer validation', () => {
   it('writes once for a valid session input', async () => {
     const sessionInput = { ...validSession, laboratoryId: 'lab-1' };
     (getDoc as jest.Mock).mockResolvedValue({
-      id: validSession.classId,
+      id: validSession.laboratoryId,
       exists: () => true,
-      data: () => ({
-        courseId: validSession.courseId,
-        className: validSession.className,
-        createdAt: '2026-10-01T00:00:00+07:00',
-        semester: 3,
-        semesterParity: 'ganjil',
-        assistantUid: 'assistant-1',
-      }),
+      data: () => ({ name: 'Lab B' }),
     });
+    (getDocs as jest.Mock)
+      .mockResolvedValueOnce({
+        docs: [
+          {
+            id: validSession.classId,
+            data: () => ({
+              courseId: validSession.courseId,
+              className: validSession.className,
+              createdAt: '2026-10-01T00:00:00+07:00',
+              semester: 3,
+              semesterParity: 'ganjil',
+              assistantUid: 'assistant-1',
+            }),
+          },
+        ],
+      })
+      .mockResolvedValue({ docs: [] });
     (addDoc as jest.Mock).mockResolvedValue({ id: 's1' });
 
     await expect(createSession(sessionInput)).resolves.toMatchObject({ id: 's1' });
@@ -262,7 +273,7 @@ describe('validateScheduleInput', () => {
   });
 
   it('rejects empty fields and times that do not advance', () => {
-    expect(() => validateScheduleInput({ ...validSchedule, room: '   ' })).toThrow();
+    expect(() => validateScheduleInput({ ...validSchedule, laboratoryId: '   ' })).toThrow();
     expect(() =>
       validateScheduleInput({ ...validSchedule, endTime: validSchedule.startTime }),
     ).toThrow(/setelah waktu mulai/i);

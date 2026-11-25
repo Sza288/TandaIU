@@ -24,7 +24,8 @@ export type ScheduleDoc = {
   dayOfWeek: DayOfWeek;
   startTime: ClockTime;
   endTime: ClockTime;
-  room: string;
+  laboratoryId?: string;
+  room?: string;
   jumlahPertemuan?: number;
   semesterParity?: "ganjil" | "genap";
   assistantUid?: string;
@@ -56,7 +57,7 @@ export type LaboratoryDoc = {
 
 export type ClassInput = Omit<ClassDoc, "id">;
 
-export type ScheduleInput = Omit<ScheduleDoc, "id">;
+export type ScheduleInput = Omit<ScheduleDoc, "id"> & { laboratoryId: string };
 
 export type LaboratoryInput = Omit<LaboratoryDoc, "id" | "isActive">;
 

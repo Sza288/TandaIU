@@ -174,6 +174,11 @@ export async function updateLaboratory(
   });
 }
 
+/**
+ * Dokumen laboratorium yang dibuat sebelum ada konsep status tidak memiliki
+ * `isActive`. Dokumen seperti itu diperlakukan sebagai aktif agar tidak hilang
+ * dari daftar dan tetap dapat dipilih untuk sesi.
+ */
 function toLaboratoryDoc(
   id: string,
   data: Omit<LaboratoryDoc, 'id'>,
@@ -211,11 +216,24 @@ export async function getAllLaboratories(): Promise<LaboratoryDoc[]> {
   return runFirestore(async () => getAllLaboratoriesUnsafe());
 }
 
-export async function deleteLaboratory(id: string): Promise<void> {
+export async function setLaboratoryActive(
+  id: string,
+  isActive: boolean,
+): Promise<LaboratoryDoc> {
+  const current = await getLaboratoryById(id);
+  if (!current) {
+    throw new Error('Laboratorium tidak ditemukan.');
+  }
+
   return runFirestore(async () => {
     await updateDoc(doc(db, COLLECTIONS.laboratories, id), {
-      isActive: false,
+      isActive,
       updatedAt: new Date().toISOString(),
     });
+    return { ...current, isActive };
   });
+}
+
+export async function deleteLaboratory(id: string): Promise<void> {
+  await setLaboratoryActive(id, false);
 }
