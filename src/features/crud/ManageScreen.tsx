@@ -325,11 +325,6 @@ export default function ManageScreen() {
                     {dayLabel} · {item.startTime}-{item.endTime}
                   </Text>
                   <Text style={styles.meta}>Laboratorium {laboratoryName}</Text>
-                  <Text style={styles.meta}>
-                    {item.jumlahPertemuan
-                      ? `${item.jumlahPertemuan} pertemuan`
-                      : 'Jumlah pertemuan belum diisi'}
-                  </Text>
                   <Pressable
                     accessibilityRole="button"
                     accessibilityLabel={`Buat sesi dari jadwal ${laboratoryName}`}

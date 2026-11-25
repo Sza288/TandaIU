@@ -24,6 +24,7 @@ import {
   type ClassDoc,
   type ClassInput,
   type ClockTime,
+  type DayOfWeek,
   type LecturerId,
   type ScheduleDoc,
   type ScheduleInput,
@@ -152,6 +153,38 @@ async function resolveLaboratory(laboratoryId?: string): Promise<string | null> 
     throw new Error('Laboratorium tidak ditemukan.');
   }
   return laboratoryId;
+}
+
+function scheduleMatchFromStart(startsAt: string): {
+  dayOfWeek: DayOfWeek;
+  startTime: ClockTime;
+} | null {
+  const date = new Date(startsAt);
+  if (Number.isNaN(date.getTime())) return null;
+
+  const wib = new Date(date.getTime() + 7 * 60 * 60 * 1000);
+  const pad = (value: number) => String(value).padStart(2, '0');
+  return {
+    dayOfWeek: wib.getUTCDay() as DayOfWeek,
+    startTime: `${pad(wib.getUTCHours())}:${pad(wib.getUTCMinutes())}` as ClockTime,
+  };
+}
+
+async function resolveScheduleIdForSession(
+  input: SessionInput,
+  classDoc: ClassDoc,
+): Promise<string | undefined> {
+  if (input.scheduleId) return input.scheduleId;
+
+  const match = scheduleMatchFromStart(input.startsAt);
+  if (!match) return undefined;
+
+  const schedules = await getAllSchedules();
+  return schedules.find((schedule) =>
+    schedule.classId === classDoc.id
+    && schedule.semesterParity === classDoc.semesterParity
+    && schedule.dayOfWeek === match.dayOfWeek
+    && schedule.startTime === match.startTime)?.id;
 }
 
 function resolveLecturer(lecturerId: LecturerId, lecturer: string): string {
@@ -595,6 +628,7 @@ export async function createSession(input: SessionInput): Promise<SessionDoc> {
     throw new Error('Laboratorium wajib dipilih.');
   }
   const laboratoryId = await resolveLaboratory(input.laboratoryId);
+  const scheduleId = await resolveScheduleIdForSession(input, classDoc);
   const payload: Omit<SessionDoc, 'id'> = {
     classId: classDoc.id,
     courseId: classDoc.courseId,
@@ -609,7 +643,7 @@ export async function createSession(input: SessionInput): Promise<SessionDoc> {
     semesterParity: classDoc.semesterParity,
     assistantUid: classDoc.assistantUid,
     ...(laboratoryId ? { laboratoryId } : {}),
-    ...(input.scheduleId ? { scheduleId: input.scheduleId } : {}),
+    ...(scheduleId ? { scheduleId } : {}),
   };
 
   return runFirestore(async () => {
@@ -668,7 +702,7 @@ export async function updateSession(
     : false;
   const keptLaboratoryId = laboratoryId
     ?? (currentLaboratoryExists ? current.laboratoryId : undefined);
-  const keptScheduleId = input.scheduleId
+  const keptScheduleId = await resolveScheduleIdForSession(input, classDoc)
     ?? ((await sessionScheduleStillExists(current.scheduleId))
       ? current.scheduleId
       : undefined);

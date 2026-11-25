@@ -191,7 +191,24 @@ export default function ScheduleDetailScreen() {
 
             <View style={styles.sectionHeader}>
               <Text style={styles.sectionTitle}>Sesi Pertemuan</Text>
-              <Text style={styles.sectionCount}>{sessions.length} sesi</Text>
+              <View style={styles.sectionActions}>
+                {role === 'asisten' ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Tambah sesi"
+                    onPress={() =>
+                      router.push({
+                        pathname: '/assistant/manage/schedule-generate',
+                        params: { id: visibleSchedule.id },
+                      })}
+                    style={({ pressed }) => [styles.addButton, pressed && styles.pressed]}
+                  >
+                    <Ionicons name="add-circle-outline" size={15} color={colors.primaryDark} />
+                    <Text style={styles.addButtonText}>Tambah Sesi</Text>
+                  </Pressable>
+                ) : null}
+                <Text style={styles.sectionCount}>{sessions.length} sesi</Text>
+              </View>
             </View>
 
             {sessions.length === 0 ? (
@@ -290,11 +307,36 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     marginTop: spacing.xs,
+    gap: spacing.sm,
   },
   sectionTitle: {
     color: colors.text,
     fontFamily: fonts.heading,
     fontSize: 16,
+  },
+  sectionActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  addButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 6,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    backgroundColor: colors.primarySofter,
+  },
+  addButtonText: {
+    color: colors.primaryDark,
+    fontFamily: fonts.bold,
+    fontSize: 11,
+  },
+  pressed: {
+    opacity: 0.7,
   },
   sectionCount: {
     color: colors.textMuted,

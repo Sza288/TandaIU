@@ -114,7 +114,7 @@ export default function ScheduleBoardScreen() {
         </View>
 
         <Text style={styles.subtitle}>
-          Pola jadwal praktikum per hari. Ketuk jadwal untuk melihat sesi pertemuannya.
+          Pola jadwal praktikum per hari. Ketuk jadwal untuk melihat detailnya.
         </Text>
 
         {loading ? (
@@ -188,14 +188,6 @@ export default function ScheduleBoardScreen() {
                       <View style={styles.metaRow}>
                         <Ionicons name="location-outline" size={12} color={colors.textMuted} />
                         <Text style={styles.metaText} numberOfLines={1}>{laboratoryName}</Text>
-                      </View>
-                      <View style={styles.metaRow}>
-                        <Ionicons name="repeat-outline" size={12} color={colors.textMuted} />
-                        <Text style={styles.metaText}>
-                          {schedule.jumlahPertemuan
-                            ? `${schedule.jumlahPertemuan} pertemuan`
-                            : 'Jumlah pertemuan belum diisi'}
-                        </Text>
                       </View>
                     </View>
 
