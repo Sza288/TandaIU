@@ -87,6 +87,11 @@ export default function ScheduleGenerateScreen() {
   const selectedLecturer = dosen.find((item) => item.id === lecturerId);
   const selectedLaboratory = laboratories.data.find((item) => item.id === laboratoryId);
   const activeLaboratories = laboratories.data.filter((item) => item.isActive !== false);
+  const scheduleLaboratory = schedule
+    ? laboratories.data.find((item) => item.id === schedule.laboratoryId)?.name
+      ?? schedule.room
+      ?? 'Laboratorium tidak diketahui'
+    : '';
 
   const toggleDate = (date: string) => {
     setExcluded((current) => {
@@ -175,7 +180,7 @@ export default function ScheduleGenerateScreen() {
       <FormReadOnlyField
         label="Jadwal"
         value={`${getCourseName(schedule.courseId)} · ${DAY_LABELS[schedule.dayOfWeek] ?? '-'} ${schedule.startTime}-${schedule.endTime}`}
-        hint={`Ruang ${schedule.room}`}
+        hint={`Laboratorium ${scheduleLaboratory}`}
       />
 
       {jumlahPertemuan === 0 ? (

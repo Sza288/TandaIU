@@ -13,6 +13,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import BottomNav from '../../components/BottomNav';
 import { useClasses } from '../../hooks/useClasses';
 import { useEnrollments } from '../../hooks/useEnrollments';
+import { useLaboratories } from '../../hooks/useLaboratories';
 import { useSchedules } from '../../hooks/useSchedules';
 import { useAuthSession } from '../auth/AuthSessionContext';
 import { goBackOr } from '../crud/crud.utils';
@@ -51,10 +52,15 @@ export default function ScheduleBoardScreen() {
     role === 'praktikan' ? { classIds: enrolledClassIds } : undefined,
   );
   const classResult = useClasses({ classIds: enrolledClassIds });
+  const laboratoryResult = useLaboratories();
 
   const classById = useMemo(
     () => new Map(classResult.data.map((item) => [item.id, item])),
     [classResult.data],
+  );
+  const laboratoryById = useMemo(
+    () => new Map(laboratoryResult.data.map((item) => [item.id, item])),
+    [laboratoryResult.data],
   );
 
   const groups = useMemo(() => {
@@ -141,6 +147,11 @@ export default function ScheduleBoardScreen() {
 
               {schedules.map((schedule) => {
                 const classDoc = classById.get(schedule.classId);
+                const laboratoryName = (schedule.laboratoryId
+                  ? laboratoryById.get(schedule.laboratoryId)?.name
+                  : undefined)
+                  ?? schedule.room
+                  ?? 'Laboratorium tidak diketahui';
                 const courseName = getCourseById(schedule.courseId)?.name
                   ?? classDoc?.className
                   ?? 'Praktikum';
@@ -176,7 +187,7 @@ export default function ScheduleBoardScreen() {
                       </View>
                       <View style={styles.metaRow}>
                         <Ionicons name="location-outline" size={12} color={colors.textMuted} />
-                        <Text style={styles.metaText} numberOfLines={1}>{schedule.room}</Text>
+                        <Text style={styles.metaText} numberOfLines={1}>{laboratoryName}</Text>
                       </View>
                       <View style={styles.metaRow}>
                         <Ionicons name="repeat-outline" size={12} color={colors.textMuted} />

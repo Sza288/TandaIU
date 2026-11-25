@@ -1,4 +1,4 @@
-import { collection, onSnapshot, query, where } from 'firebase/firestore';
+import { collection, documentId, onSnapshot, query, where } from 'firebase/firestore';
 import { useEffect, useMemo, useState } from 'react';
 
 import { db } from '../lib/firebase';
@@ -81,17 +81,17 @@ export function useClasses(filter?: ClassesFilter): UseClassesResult {
     if (assistantUid) {
       constraints.push(where('assistantUid', '==', assistantUid));
       constraints.push(where('semesterParity', '==', assistantSemesterParity));
-      if (classId) constraints.push(where('classId', '==', classId));
+      if (classId) constraints.push(where(documentId(), '==', classId));
       else if (allowedClassIds.length > 0) {
-        constraints.push(where('classId', 'in', allowedClassIds));
+        constraints.push(where(documentId(), 'in', allowedClassIds));
       }
     } else if (praktikanUid) {
-      if (classId) constraints.push(where('classId', '==', classId));
-      else constraints.push(where('classId', 'in', allowedClassIds));
+      if (classId) constraints.push(where(documentId(), '==', classId));
+      else constraints.push(where(documentId(), 'in', allowedClassIds));
     } else if (classId) {
-      constraints.push(where('classId', '==', classId));
+      constraints.push(where(documentId(), '==', classId));
     } else if (allowedClassIds.length > 0) {
-      constraints.push(where('classId', 'in', allowedClassIds));
+      constraints.push(where(documentId(), 'in', allowedClassIds));
     }
 
     const unsubscribe = onSnapshot(

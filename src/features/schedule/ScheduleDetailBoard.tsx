@@ -13,6 +13,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import SessionCard from '../../components/SessionCard';
 import { useClasses } from '../../hooks/useClasses';
+import { useLaboratories } from '../../hooks/useLaboratories';
 import { useSessions } from '../../hooks/useSessions';
 import { db } from '../../lib/firebase';
 import { useAuthSession } from '../auth/AuthSessionContext';
@@ -56,6 +57,7 @@ export default function ScheduleDetailScreen() {
   const authStatus = authSession?.status ?? 'loading';
 
   const sessionResult = useSessions();
+  const laboratoryResult = useLaboratories();
   const [scheduleData, setScheduleData] = useState<ScheduleDoc | null>(null);
   const [scheduleErrorState, setScheduleErrorState] = useState<string | null>(null);
   const [resolvedKey, setResolvedKey] = useState<string | null>(null);
@@ -89,6 +91,11 @@ export default function ScheduleDetailScreen() {
     ? classResult.data.find((item) => item.id === schedule.classId)
     : undefined;
   const visibleSchedule = schedule && classDoc ? schedule : null;
+  const laboratoryName = visibleSchedule
+    ? laboratoryResult.data.find((item) => item.id === visibleSchedule.laboratoryId)?.name
+      ?? visibleSchedule.room
+      ?? 'Laboratorium tidak diketahui'
+    : '';
 
   const sessions = useMemo(
     () =>
@@ -172,7 +179,7 @@ export default function ScheduleDetailScreen() {
               </View>
               <View style={styles.infoRow}>
                 <Ionicons name="location-outline" size={16} color={colors.primary} />
-                <Text style={styles.infoText}>{visibleSchedule.room}</Text>
+                <Text style={styles.infoText}>{laboratoryName}</Text>
               </View>
               <View style={styles.infoRow}>
                 <Ionicons name="school-outline" size={16} color={colors.primary} />
