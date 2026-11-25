@@ -203,9 +203,19 @@ function resolveLecturer(lecturerId: LecturerId, lecturer: string): string {
 }
 
 async function getClassForSession(classId: string): Promise<ClassDoc | null> {
+  const user = auth.currentUser;
+  if (!user) throw new Error('Akun Asprak tidak valid.');
+  const token = await user.getIdTokenResult();
+  const parity = token.claims.assistantSemesterParity;
+  if (parity !== 'ganjil' && parity !== 'genap') {
+    throw new Error('Penugasan semester akun Asprak belum dikonfigurasi.');
+  }
+
   return runFirestore(async () => {
     const snapshot = await getDocs(query(
       collection(db, COLLECTIONS.classes),
+      where('assistantUid', '==', user.uid),
+      where('semesterParity', '==', parity),
       where(documentId(), '==', classId),
     ));
     const classSnapshot = snapshot.docs[0];

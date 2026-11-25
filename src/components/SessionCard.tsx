@@ -7,7 +7,7 @@ import { PracticumSession, Role } from '../types';
 import { colors, fonts, radius, shadows, spacing } from '../theme';
 import { formatDateShort, formatTime, formatTimeRange } from '../utils/format';
 import { getCourseById } from '../utils/academic';
-import { getLabLabel, getMeetingNumber } from '../utils/session';
+import { getEffectiveSessionStatus, getLabLabel, getMeetingNumber } from '../utils/session';
 
 function detailLabelFor(role: Role | null) {
   if (role === 'asisten') return 'Lihat Detail';
@@ -22,7 +22,8 @@ type Props = {
 };
 
 export default function SessionCard({ session, role, sessions }: Props) {
-  const isClosed = session.status === 'ditutup';
+  const effectiveStatus = getEffectiveSessionStatus(session);
+  const isClosed = effectiveStatus === 'ditutup';
   const course = getCourseById(session.courseId);
 
   return (
@@ -41,7 +42,7 @@ export default function SessionCard({ session, role, sessions }: Props) {
           <Text style={styles.lab}>{getLabLabel(session)}</Text>
           <Text style={styles.title}>{session.practicumName}</Text>
         </View>
-        <StatusBadge status={session.status} />
+        <StatusBadge status={effectiveStatus} />
       </View>
 
       <Text style={styles.meeting}>

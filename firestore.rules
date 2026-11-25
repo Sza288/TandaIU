@@ -1,4 +1,3 @@
-
 rules_version = '2';
 
 service cloud.firestore {
@@ -24,20 +23,27 @@ service cloud.firestore {
 
     function isPraktikan() {
       return isSignedIn()
-        && exists(userPath(request.auth.uid))
-        && get(userPath(request.auth.uid)).data.role == 'praktikan'
-        && get(userPath(request.auth.uid)).data.name is string
-        && get(userPath(request.auth.uid)).data.email is string;
+        && validPraktikanProfile(get(userPath(request.auth.uid)).data);
     }
 
-    // Role comes from the trusted profile; semester ownership comes from an Admin SDK custom claim.
+    function validPraktikanProfile(data) {
+      return data.role == 'praktikan'
+        && data.name is string
+        && data.email is string;
+    }
+
+    // The role comes from the trusted profile; semester ownership comes only
+    // from an Admin SDK custom claim.
     function isAssistant() {
       return isSignedIn()
-        && exists(userPath(request.auth.uid))
-        && get(userPath(request.auth.uid)).data.role in ['asisten', 'assistant']
-        && get(userPath(request.auth.uid)).data.name is string
-        && get(userPath(request.auth.uid)).data.email is string
+        && validAssistantProfile(get(userPath(request.auth.uid)).data)
         && request.auth.token.assistantSemesterParity in ['ganjil', 'genap'];
+    }
+
+    function validAssistantProfile(data) {
+      return data.role in ['asisten', 'assistant']
+        && data.name is string
+        && data.email is string;
     }
 
     function semesterMatchesAssignment(semester) {
@@ -52,9 +58,17 @@ service cloud.firestore {
         && semester is int
         && semester > 0
         && parity in ['ganjil', 'genap']
-        && exists(/databases/$(database)/documents/courseCatalog/$(courseId))
-        && get(/databases/$(database)/documents/courseCatalog/$(courseId)).data.semester == semester
-        && get(/databases/$(database)/documents/courseCatalog/$(courseId)).data.semesterParity == parity
+        && courseCatalogEntryMatches(courseId, semester, parity);
+    }
+
+    function courseCatalogEntryMatches(courseId, semester, parity) {
+      let coursePath = /databases/$(database)/documents/courseCatalog/$(courseId);
+      return courseCatalogEntryMatchesData(get(coursePath).data, semester, parity);
+    }
+
+    function courseCatalogEntryMatchesData(course, semester, parity) {
+      return course.semester == semester
+        && course.semesterParity == parity
         && parity == (semester % 2 == 1 ? 'ganjil' : 'genap');
     }
 
@@ -74,15 +88,16 @@ service cloud.firestore {
 
     function assistantOwnsClass(classId) {
       return isAssistant()
-        && exists(/databases/$(database)/documents/classes/$(classId))
-        && get(/databases/$(database)/documents/classes/$(classId)).data.assistantUid == request.auth.uid
-        && get(/databases/$(database)/documents/classes/$(classId)).data.semesterParity == request.auth.token.assistantSemesterParity
-        && semesterMatchesAssignment(get(/databases/$(database)/documents/classes/$(classId)).data.semester)
-        && courseMatchesSemester(
-          get(/databases/$(database)/documents/classes/$(classId)).data.courseId,
-          get(/databases/$(database)/documents/classes/$(classId)).data.semester,
-          get(/databases/$(database)/documents/classes/$(classId)).data.semesterParity
+        && assistantOwnsClassData(
+          get(/databases/$(database)/documents/classes/$(classId)).data
         );
+    }
+
+    function assistantOwnsClassData(data) {
+      return data.assistantUid == request.auth.uid
+        && data.semesterParity == request.auth.token.assistantSemesterParity
+        && semesterMatchesAssignment(data.semester)
+        && courseMatchesSemester(data.courseId, data.semester, data.semesterParity);
     }
 
     function praktikanEnrolledInClass(classId) {
@@ -94,17 +109,21 @@ service cloud.firestore {
 
     function sessionMatchesClass(data) {
       return data.classId is string
-        && exists(/databases/$(database)/documents/classes/$(data.classId))
-        && courseMatchesSemester(
-          get(/databases/$(database)/documents/classes/$(data.classId)).data.courseId,
-          get(/databases/$(database)/documents/classes/$(data.classId)).data.semester,
-          get(/databases/$(database)/documents/classes/$(data.classId)).data.semesterParity
-        )
-        && data.courseId == get(/databases/$(database)/documents/classes/$(data.classId)).data.courseId
-        && data.className == get(/databases/$(database)/documents/classes/$(data.classId)).data.className
-        && data.semester == get(/databases/$(database)/documents/classes/$(data.classId)).data.semester
-        && data.semesterParity == get(/databases/$(database)/documents/classes/$(data.classId)).data.semesterParity
-        && data.assistantUid == get(/databases/$(database)/documents/classes/$(data.classId)).data.assistantUid;
+        && sessionMatchesClassById(data, data.classId);
+    }
+
+    function sessionMatchesClassById(data, classId) {
+      let classPath = /databases/$(database)/documents/classes/$(classId);
+      return sessionMatchesClassData(data, get(classPath).data);
+    }
+
+    function sessionMatchesClassData(data, classData) {
+      return validClass(classData)
+        && data.courseId == classData.courseId
+        && data.className == classData.className
+        && data.semester == classData.semester
+        && data.semesterParity == classData.semesterParity
+        && data.assistantUid == classData.assistantUid;
     }
 
     function validSessionTimePair(data) {
@@ -114,7 +133,18 @@ service cloud.firestore {
         || (data.startsAt is string && data.endsAt is string);
     }
 
-    function validSession(data) {
+    function validSessionOptionalRefs(data) {
+      return ((!data.keys().hasAny(['lecturerId', 'lecturer']))
+          || (data.lecturerId is string && data.lecturer is string))
+        && ((!data.keys().hasAny(['laboratoryId']))
+          || (data.laboratoryId is string
+            && exists(/databases/$(database)/documents/laboratories/$(data.laboratoryId))))
+        && ((!data.keys().hasAny(['scheduleId']))
+          || (data.scheduleId is string
+            && exists(/databases/$(database)/documents/schedules/$(data.scheduleId))));
+    }
+
+    function validSessionForReference(data) {
       return data.keys().hasAll([
           'classId', 'courseId', 'practicumName', 'className', 'startsAt', 'endsAt',
           'status', 'semester', 'semesterParity', 'assistantUid'
@@ -129,13 +159,14 @@ service cloud.firestore {
         && data.status in ['terjadwal', 'dibuka', 'ditutup']
         && ((!data.keys().hasAny(['lecturerId', 'lecturer']))
           || (data.lecturerId is string && data.lecturer is string))
-        && ((!data.keys().hasAny(['laboratoryId']))
-          || (data.laboratoryId is string
-            && exists(/databases/$(database)/documents/laboratories/$(data.laboratoryId))))
-        && ((!data.keys().hasAny(['scheduleId']))
-          || (data.scheduleId is string
-            && exists(/databases/$(database)/documents/schedules/$(data.scheduleId))))
+        && ((!data.keys().hasAny(['laboratoryId'])) || data.laboratoryId is string)
+        && ((!data.keys().hasAny(['scheduleId'])) || data.scheduleId is string)
         && sessionMatchesClass(data);
+    }
+
+    function validSession(data) {
+      return validSessionForReference(data)
+        && validSessionOptionalRefs(data);
     }
 
     function validLaboratory(data) {
@@ -143,12 +174,8 @@ service cloud.firestore {
           'name', 'latitude', 'longitude', 'radius', 'lantai', 'createdAt', 'updatedAt'
         ])
         && data.keys().hasOnly([
-          'name', 'latitude', 'longitude', 'radius', 'lantai', 'isActive',
-          'createdAt', 'updatedAt'
+          'name', 'latitude', 'longitude', 'radius', 'lantai', 'createdAt', 'updatedAt'
         ])
-        // isActive optional: dokumen lama belum punya field ini dan harus tetap
-        // bisa dibaca/diedit. Aplikasi menganggap nilai kosong sebagai aktif.
-        && ((!data.keys().hasAny(['isActive'])) || data.isActive is bool)
         && data.name is string
         && data.name.size() > 0
         && (data.latitude is float || data.latitude is int)
@@ -168,12 +195,16 @@ service cloud.firestore {
     }
 
     function assistantOwnsSession(sessionId) {
+      let sessionPath = /databases/$(database)/documents/sessions/$(sessionId);
       return isAssistant()
-        && exists(/databases/$(database)/documents/sessions/$(sessionId))
-        && sessionMatchesClass(get(/databases/$(database)/documents/sessions/$(sessionId)).data)
-        && get(/databases/$(database)/documents/sessions/$(sessionId)).data.assistantUid == request.auth.uid
-        && get(/databases/$(database)/documents/sessions/$(sessionId)).data.semesterParity == request.auth.token.assistantSemesterParity
-        && assistantOwnsClass(get(/databases/$(database)/documents/sessions/$(sessionId)).data.classId);
+        && assistantOwnsSessionData(get(sessionPath).data);
+    }
+
+    function assistantOwnsSessionData(session) {
+      return validSession(session)
+        && session.assistantUid == request.auth.uid
+        && session.semesterParity == request.auth.token.assistantSemesterParity
+        && assistantOwnsClass(session.classId);
     }
 
     function sessionRecordInAssistantScope(data) {
@@ -184,6 +215,200 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/classes/$(data.classId)).data.assistantUid == request.auth.uid
         && get(/databases/$(database)/documents/classes/$(data.classId)).data.semesterParity == request.auth.token.assistantSemesterParity
         && semesterMatchesAssignment(data.semester);
+    }
+
+    function validScheduledSessionClientUpdate(existing, incoming) {
+      return existing.status == 'terjadwal'
+        && incoming.status == 'terjadwal'
+        && incoming.startsAt is timestamp
+        && incoming.endsAt is timestamp
+        && incoming.endsAt > incoming.startsAt
+        && validSessionOptionalRefs(incoming)
+        && incoming.classId == existing.classId
+        && incoming.courseId == existing.courseId
+        && incoming.practicumName == existing.practicumName
+        && incoming.className == existing.className
+        && incoming.semester == existing.semester
+        && incoming.semesterParity == existing.semesterParity
+        && incoming.assistantUid == existing.assistantUid
+        && (!existing.keys().hasAny(['lecturerId'])
+          || incoming.lecturerId == existing.lecturerId)
+        && (!existing.keys().hasAny(['lecturer'])
+          || incoming.lecturer == existing.lecturer)
+        && (!existing.keys().hasAny(['scheduleId'])
+          || incoming.scheduleId == existing.scheduleId)
+        && incoming.diff(existing).affectedKeys().hasOnly([
+          'startsAt', 'endsAt', 'laboratoryId', 'lecturerId', 'lecturer', 'scheduleId'
+        ]);
+    }
+
+    function validSessionStatusTransition(existing, incoming) {
+      return incoming.diff(existing).affectedKeys().hasOnly(['status'])
+        && ((existing.status == 'terjadwal'
+            && incoming.status == 'dibuka'
+            && existing.startsAt is timestamp
+            && existing.endsAt is timestamp
+            && existing.endsAt > existing.startsAt
+            && existing.endsAt > request.time)
+          || (existing.status == 'dibuka' && incoming.status == 'ditutup'));
+    }
+
+    function attendanceEnrollmentExists(classId, courseId, semester) {
+      let enrollmentId = classId + '_' + request.auth.uid;
+      let enrollmentPath = /databases/$(database)/documents/enrollments/$(enrollmentId);
+      return attendanceEnrollmentMatches(get(enrollmentPath).data, classId, courseId, semester);
+    }
+
+    function attendanceEnrollmentMatches(data, classId, courseId, semester) {
+      return data.praktikanId == request.auth.uid
+        && data.classId == classId
+        && data.courseId == courseId
+        && data.semester == semester;
+    }
+
+    function attendanceQrMatches(sessionId, token) {
+      let tokenPath = /databases/$(database)/documents/attendanceQrTokens/$(sessionId);
+      return token is string
+        && attendanceQrTokenMatches(get(tokenPath).data, sessionId, token);
+    }
+
+    function attendanceQrTokenMatches(data, sessionId, token) {
+      return data.sessionId == sessionId
+        && data.token == token
+        && data.revokedAt == null
+        && data.expiresAt is timestamp
+        && data.expiresAt > request.time;
+    }
+
+    function validAttendanceCreate(data, attendanceId) {
+      let laboratoryPath = /databases/$(database)/documents/laboratories/$(data.laboratoryId);
+      let sessionPath = /databases/$(database)/documents/sessions/$(data.sessionId);
+      return data.keys().hasAll([
+          'sessionId', 'praktikanId', 'praktikanName', 'attendedAt', 'status',
+          'attendanceMethod', 'latitude', 'longitude', 'accuracyMeters', 'distanceMeters',
+          'laboratoryId', 'laboratoryName', 'radiusMeters'
+        ])
+        && data.keys().hasOnly([
+          'sessionId', 'praktikanId', 'praktikanName', 'attendedAt', 'status',
+          'attendanceMethod', 'latitude', 'longitude', 'accuracyMeters', 'distanceMeters',
+          'laboratoryId', 'laboratoryName', 'radiusMeters', 'qrToken'
+        ])
+        && data.sessionId is string
+        && attendanceId == data.sessionId + '_' + request.auth.uid
+        && attendanceProfileMatches(data)
+        && data.attendedAt == request.time
+        && data.status == 'hadir'
+        && data.attendanceMethod in ['location', 'qr']
+        && (data.latitude is float || data.latitude is int)
+        && data.latitude >= -90
+        && data.latitude <= 90
+        && (data.longitude is float || data.longitude is int)
+        && data.longitude >= -180
+        && data.longitude <= 180
+        && (data.accuracyMeters is float || data.accuracyMeters is int)
+        && data.accuracyMeters >= 0
+        && data.accuracyMeters <= 50
+        && (data.distanceMeters is float || data.distanceMeters is int)
+        && data.distanceMeters >= 0
+        && data.radiusMeters is int
+        && data.radiusMeters >= 1
+        && data.radiusMeters <= 500
+        && data.laboratoryId is string
+        && validAttendanceReferences(data, get(laboratoryPath).data, get(sessionPath).data)
+    }
+
+    function attendanceProfileMatches(data) {
+      return isSignedIn()
+        && attendanceProfileDataMatches(
+          get(userPath(request.auth.uid)).data,
+          data,
+          request.auth.uid
+        );
+    }
+
+    function attendanceProfileDataMatches(profile, data, uid) {
+      return profile.role == 'praktikan'
+        && profile.name is string
+        && profile.email is string
+        && data.praktikanId == uid
+        && data.praktikanName == profile.name;
+    }
+
+    function validAttendanceReferences(data, laboratory, session) {
+      return validLaboratory(laboratory)
+        && data.laboratoryName == laboratory.name
+        && data.radiusMeters == laboratory.radius
+        && validSessionForReference(session)
+        && session.status == 'dibuka'
+        && session.startsAt is timestamp
+        && session.endsAt is timestamp
+        && session.startsAt <= request.time
+        && session.endsAt > request.time
+        && attendanceEnrollmentExists(session.classId, session.courseId, session.semester)
+        && session.laboratoryId == data.laboratoryId
+        && ((data.attendanceMethod == 'location' && !data.keys().hasAny(['qrToken']))
+          || (data.attendanceMethod == 'qr'
+            && data.keys().hasAny(['qrToken'])
+            && attendanceQrMatches(data.sessionId, data.qrToken)));
+    }
+
+    function validAttendanceCancellation(existing, incoming) {
+      return assistantOwnsSession(existing.sessionId)
+        && existing.status == 'hadir'
+        && incoming.status == 'dibatalkan'
+        && incoming.sessionId == existing.sessionId
+        && incoming.praktikanId == existing.praktikanId
+        && incoming.praktikanName == existing.praktikanName
+        && incoming.attendedAt == existing.attendedAt
+        && incoming.cancelledAt == request.time
+        && incoming.cancelledBy == request.auth.uid
+        && (incoming.cancelReason == null
+          || (incoming.cancelReason is string && incoming.cancelReason.size() <= 300))
+        && incoming.diff(existing).affectedKeys().hasOnly([
+          'status', 'cancelledAt', 'cancelledBy', 'cancelReason'
+        ]);
+    }
+
+    function validAttendanceQr(data, sessionId) {
+      return data.keys().hasAll([
+          'sessionId', 'token', 'issuedBy', 'issuedAt', 'expiresAt', 'revokedAt', 'revokedBy'
+        ])
+        && data.keys().hasOnly([
+          'sessionId', 'token', 'issuedBy', 'issuedAt', 'expiresAt', 'revokedAt', 'revokedBy'
+        ])
+        && data.sessionId == sessionId
+        && data.token is string
+        && data.token.matches('^[A-Za-z0-9_-]{43}$')
+        && data.issuedBy == request.auth.uid
+        && data.issuedAt == request.time
+        && data.expiresAt is timestamp
+        && data.expiresAt > request.time
+        && data.expiresAt <= request.time + duration.value(2, 'm')
+        && data.revokedAt == null
+        && data.revokedBy == null;
+    }
+
+    function validAttendanceQrRevocation(existing, incoming, sessionId) {
+      return assistantOwnsSession(sessionId)
+        && existing.sessionId == sessionId
+        && existing.revokedAt == null
+        && incoming.sessionId == existing.sessionId
+        && incoming.token == existing.token
+        && incoming.issuedBy == existing.issuedBy
+        && incoming.issuedAt == existing.issuedAt
+        && incoming.expiresAt == existing.expiresAt
+        && incoming.revokedAt == request.time
+        && incoming.revokedBy == request.auth.uid
+        && incoming.diff(existing).affectedKeys().hasOnly(['revokedAt', 'revokedBy']);
+    }
+
+    function validAttendanceQrIssue(sessionId, data) {
+      let sessionPath = /databases/$(database)/documents/sessions/$(sessionId);
+      let session = get(sessionPath).data;
+      return isAssistant()
+        && session.status == 'dibuka'
+        && assistantOwnsSessionData(session)
+        && validAttendanceQr(data, sessionId);
     }
 
     function scheduleRecordInAssistantScope(data) {
@@ -258,12 +483,13 @@ service cloud.firestore {
       allow list: if false;
       allow create: if isSignedIn()
         && request.auth.uid == userId
+        && request.resource.data.uid == request.auth.uid
         && request.resource.data.role == 'praktikan'
         && request.resource.data.authProvider in ['google', 'password']
         && request.resource.data.email is string
         && request.resource.data.name is string
-        && request.resource.data.keys().hasAll(['role', 'authProvider', 'email', 'name'])
-        && request.resource.data.keys().hasOnly(['role', 'authProvider', 'email', 'name', 'studentCode'])
+        && request.resource.data.keys().hasAll(['uid', 'role', 'authProvider', 'email', 'name'])
+        && request.resource.data.keys().hasOnly(['uid', 'role', 'authProvider', 'email', 'name', 'studentCode'])
         && (!request.resource.data.keys().hasAny(['studentCode']) || request.resource.data.studentCode is string);
       allow update, delete: if false;
     }
@@ -285,89 +511,72 @@ service cloud.firestore {
       allow create, update, delete: if false;
     }
 
-      match /classes/{classId} {
-          allow get: if (isAssistant()
-              && validClass(resource.data)
-              && resource.data.assistantUid == request.auth.uid
-              && resource.data.semesterParity == request.auth.token.assistantSemesterParity)
-            || (praktikanEnrolledInClass(classId) && validClass(resource.data));
-          // A list query only exposes the fields it filters on, so the rule must not
-          // touch courseId/semester/createdAt here: doing so raises "property is
-          // undefined" and denies the whole list. Writes and get still validate fully.
-          allow list: if (isAssistant()
-              && resource.data.assistantUid == request.auth.uid
-              && resource.data.semesterParity == request.auth.token.assistantSemesterParity)
-            || praktikanEnrolledInClass(classId);
-          allow create: if validClass(request.resource.data)
-            && isAssistant()
-            && request.resource.data.assistantUid == request.auth.uid
-            && semesterMatchesAssignment(request.resource.data.semester);
-          allow update: if assistantOwnsClass(classId)
-            && validClass(request.resource.data)
-            && request.resource.data.assistantUid == resource.data.assistantUid
-            && request.resource.data.semester == resource.data.semester
-            && request.resource.data.semesterParity == resource.data.semesterParity
-            && request.resource.data.courseId == resource.data.courseId
-            && request.resource.data.createdAt == resource.data.createdAt;
-          // The app only removes a class that has no schedules and no
-          // `terjadwal`/`dibuka` sessions, then deletes the remaining sessions and
-          // enrollments first. Rules cannot query child collections, so that
-          // emptiness check lives in the app.
-          allow delete: if assistantOwnsClass(classId);
-        }
+    match /classes/{classId} {
+      allow get: if (isAssistant()
+          && validClass(resource.data)
+          && resource.data.assistantUid == request.auth.uid
+          && resource.data.semesterParity == request.auth.token.assistantSemesterParity)
+        || (praktikanEnrolledInClass(classId) && validClass(resource.data));
+      allow list: if (isAssistant()
+          && resource.data.assistantUid == request.auth.uid
+          && resource.data.semesterParity == request.auth.token.assistantSemesterParity)
+        || praktikanEnrolledInClass(classId);
+      allow create: if validClass(request.resource.data)
+        && isAssistant()
+        && request.resource.data.assistantUid == request.auth.uid
+        && semesterMatchesAssignment(request.resource.data.semester);
+      allow update: if assistantOwnsClass(classId)
+        && validClass(request.resource.data)
+        && request.resource.data.assistantUid == resource.data.assistantUid
+        && request.resource.data.semester == resource.data.semester
+        && request.resource.data.semesterParity == resource.data.semesterParity
+        && request.resource.data.courseId == resource.data.courseId
+        && request.resource.data.createdAt == resource.data.createdAt;
+      allow delete: if false;
+    }
 
-      match /schedules/{scheduleId} {
-          allow get: if (isPraktikan()
-              && resource.data.classId is string
-              && praktikanEnrolledInClass(resource.data.classId))
-            || (isAssistant()
-              && scheduleRecordInAssistantScope(resource.data)
-              && resource.data.semesterParity == request.auth.token.assistantSemesterParity);
-          // Same constraint as classes: list may only rely on filtered fields.
-          allow list: if (isPraktikan()
-              && resource.data.classId is string
-              && praktikanEnrolledInClass(resource.data.classId))
-            || (isAssistant()
-              && resource.data.assistantUid == request.auth.uid
-              && resource.data.semesterParity == request.auth.token.assistantSemesterParity);
-          allow create: if scheduleRecordInAssistantScope(request.resource.data);
-          allow update: if scheduleRecordInAssistantScope(resource.data)
-            && scheduleRecordInAssistantScope(request.resource.data);
-          allow delete: if scheduleRecordInAssistantScope(resource.data);
-        }
+    match /schedules/{scheduleId} {
+      allow get: if (isPraktikan()
+          && resource.data.classId is string
+          && praktikanEnrolledInClass(resource.data.classId))
+        || (isAssistant()
+          && scheduleRecordInAssistantScope(resource.data)
+          && resource.data.semesterParity == request.auth.token.assistantSemesterParity);
+      allow list: if (isPraktikan()
+          && resource.data.classId is string
+          && praktikanEnrolledInClass(resource.data.classId))
+        || (isAssistant()
+          && resource.data.assistantUid == request.auth.uid
+          && resource.data.semesterParity == request.auth.token.assistantSemesterParity);
+      allow create: if scheduleRecordInAssistantScope(request.resource.data);
+      allow update: if scheduleRecordInAssistantScope(resource.data)
+        && scheduleRecordInAssistantScope(request.resource.data);
+      allow delete: if scheduleRecordInAssistantScope(resource.data);
+    }
 
-      match /sessions/{sessionId} {
-          allow get: if (isPraktikan()
-              && validSession(resource.data)
-              && praktikanEnrolledInClass(resource.data.classId))
-            // Asisten tetap bisa membaca sesinya sendiri walau referensi lamanya
-            // (laboratoryId/scheduleId) sudah tidak ada, supaya sesi tersebut masih
-            // dapat diperbaiki lewat form edit.
-            || (isAssistant()
-              && resource.data.assistantUid == request.auth.uid
-              && resource.data.semesterParity == request.auth.token.assistantSemesterParity);
-          // Queries expose their constrained fields to Rules. Keep list access scoped
-          // to class enrollment or assistant owner/parity; get and all writes validate
-          // the full session/class/course relationship.
-          allow list: if (isPraktikan()
-              && resource.data.classId is string
-              && praktikanEnrolledInClass(resource.data.classId))
-            || (isAssistant()
-              && resource.data.assistantUid == request.auth.uid
-              && resource.data.semesterParity == request.auth.token.assistantSemesterParity);
-          allow create: if sessionRecordInAssistantScope(request.resource.data)
-            && request.resource.data.startsAt is timestamp
-            && request.resource.data.endsAt is timestamp;
-          // Validasi penuh hanya untuk data baru; data lama cukup dipastikan milik
-          // asisten ini agar sesi dengan referensi usang masih bisa disimpan ulang.
-          allow update: if isAssistant()
-            && resource.data.assistantUid == request.auth.uid
-            && resource.data.semesterParity == request.auth.token.assistantSemesterParity
-            && sessionRecordInAssistantScope(request.resource.data)
-            && request.resource.data.startsAt is timestamp
-            && request.resource.data.endsAt is timestamp;
-          allow delete: if assistantOwnsSession(sessionId);
-        }
+    match /sessions/{sessionId} {
+      allow get: if (isPraktikan()
+          && validSession(resource.data)
+          && praktikanEnrolledInClass(resource.data.classId))
+        || (isAssistant()
+          && validSession(resource.data)
+          && resource.data.assistantUid == request.auth.uid
+          && resource.data.semesterParity == request.auth.token.assistantSemesterParity);
+      allow list: if (isPraktikan()
+          && resource.data.classId is string
+          && praktikanEnrolledInClass(resource.data.classId))
+        || (isAssistant()
+          && resource.data.assistantUid == request.auth.uid
+          && resource.data.semesterParity == request.auth.token.assistantSemesterParity);
+      allow create: if sessionRecordInAssistantScope(request.resource.data)
+        && request.resource.data.status == 'terjadwal'
+        && request.resource.data.startsAt is timestamp
+        && request.resource.data.endsAt is timestamp;
+      allow update: if sessionRecordInAssistantScope(resource.data)
+        && (validScheduledSessionClientUpdate(resource.data, request.resource.data)
+          || validSessionStatusTransition(resource.data, request.resource.data));
+      allow delete: if false;
+    }
 
     match /laboratories/{laboratoryId} {
       allow get, list: if isSignedIn();
@@ -375,12 +584,12 @@ service cloud.firestore {
       allow update: if isAssistant()
         && validLaboratory(request.resource.data)
         && request.resource.data.createdAt == resource.data.createdAt;
-      // Hapus permanen ditutup; laboratorium dinonaktifkan lewat isActive.
-      allow delete: if false;
+      allow delete: if isAssistant();
     }
 
     match /enrollments/{enrollmentId} {
-      allow get: if (isPraktikan()
+      allow get: if (isPraktikan() && resource == null)
+        || (isPraktikan()
           && resource.data.praktikanId == request.auth.uid
           && enrollmentId == resource.data.classId + '_' + request.auth.uid)
         || (isAssistant()
@@ -412,42 +621,6 @@ service cloud.firestore {
       allow update: if false;
     }
 
-    // QR attendance token rules
-    match /attendanceQrTokens/{sessionId} {
-      allow get: if assistantOwnsSession(sessionId);
-      allow list: if false;
-
-      allow create: if assistantOwnsSession(sessionId)
-        && get(/databases/$(database)/documents/sessions/$(sessionId)).data.status == 'dibuka'
-        && request.resource.data.keys().hasAll([
-          'sessionId', 'tokenHash', 'issuedBy',
-          'issuedAt', 'expiresAt', 'revokedAt', 'revokedBy'
-        ])
-        && request.resource.data.keys().hasOnly([
-          'sessionId', 'tokenHash', 'issuedBy',
-          'issuedAt', 'expiresAt', 'revokedAt', 'revokedBy'
-        ])
-        && request.resource.data.sessionId == sessionId
-        && request.resource.data.tokenHash is string
-        && request.resource.data.tokenHash.size() == 64
-        && request.resource.data.issuedBy == request.auth.uid
-        && request.resource.data.issuedAt is timestamp
-        && request.resource.data.expiresAt is timestamp
-        && request.resource.data.expiresAt > request.resource.data.issuedAt
-        && request.resource.data.revokedAt == null
-        && request.resource.data.revokedBy == null;
-
-      allow update: if assistantOwnsSession(sessionId)
-        && resource.data.issuedBy == request.auth.uid
-        && resource.data.revokedAt == null
-        && request.resource.data.revokedAt is timestamp
-        && request.resource.data.revokedBy == request.auth.uid
-        && request.resource.data.diff(resource.data)
-          .affectedKeys().hasOnly(['revokedAt', 'revokedBy']);
-
-      allow delete: if assistantOwnsSession(sessionId);
-    }
-
     match /attendances/{attendanceId} {
       allow get: if (isPraktikan() && resource == null)
         || (isPraktikan()
@@ -456,25 +629,9 @@ service cloud.firestore {
         || assistantOwnsSession(resource.data.sessionId);
       allow list: if (isPraktikan() && resource.data.praktikanId == request.auth.uid)
         || assistantOwnsSession(resource.data.sessionId);
-      allow create: if isPraktikan()
-        && request.resource.data.keys().hasAll(['sessionId', 'praktikanId', 'praktikanName', 'attendedAt', 'status'])
-        && request.resource.data.keys().hasOnly(['sessionId', 'praktikanId', 'praktikanName', 'attendedAt', 'status'])
-        && request.resource.data.praktikanId == request.auth.uid
-        && request.resource.data.praktikanName == get(userPath(request.auth.uid)).data.name
-        && request.resource.data.attendedAt is timestamp
-        && request.resource.data.attendedAt == request.time
-        && request.resource.data.status == 'hadir'
-        && attendanceId == request.resource.data.sessionId + '_' + request.auth.uid
-        && exists(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId))
-        && validSession(get(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId)).data)
-        && get(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId)).data.startsAt is timestamp
-        && get(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId)).data.endsAt is timestamp
-        && get(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId)).data.status == 'dibuka'
-        && request.time >= get(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId)).data.startsAt
-        && request.time < get(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId)).data.endsAt
-        && praktikanEnrolledInClass(get(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId)).data.classId);
-      allow update: if false;
-      allow delete: if assistantOwnsSession(resource.data.sessionId);
+      allow create: if validAttendanceCreate(request.resource.data, attendanceId);
+      allow update: if validAttendanceCancellation(resource.data, request.resource.data);
+      allow delete: if false;
     }
 
     match /permits/{permitId} {
@@ -484,8 +641,12 @@ service cloud.firestore {
       allow list: if (isPraktikan() && resource.data.studentId == request.auth.uid)
         || assistantOwnsSession(resource.data.sessionId);
       allow create: if isPraktikan()
-        && request.resource.data.keys().hasAll(['sessionId', 'studentId', 'studentName', 'reason', 'status', 'createdAt'])
-        && request.resource.data.keys().hasOnly(['sessionId', 'studentId', 'studentName', 'reason', 'status', 'createdAt'])
+        && request.resource.data.keys().hasAll([
+          'sessionId', 'studentId', 'studentName', 'reason', 'status', 'createdAt'
+        ])
+        && request.resource.data.keys().hasOnly([
+          'sessionId', 'studentId', 'studentName', 'reason', 'status', 'createdAt'
+        ])
         && request.resource.data.studentId == request.auth.uid
         && request.resource.data.studentName == get(userPath(request.auth.uid)).data.name
         && request.resource.data.reason is string
@@ -493,7 +654,10 @@ service cloud.firestore {
         && request.resource.data.status == 'pending'
         && request.resource.data.createdAt is string
         && exists(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId))
-        && validSession(get(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId)).data)
+        && get(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId)).data.classId is string
+        && get(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId)).data.status in ['terjadwal', 'dibuka']
+        && get(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId)).data.endsAt is timestamp
+        && get(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId)).data.endsAt > request.time
         && praktikanEnrolledInClass(get(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId)).data.classId);
       allow update: if assistantOwnsSession(resource.data.sessionId)
         && resource.data.status == 'pending'
@@ -502,7 +666,7 @@ service cloud.firestore {
         && (!request.resource.data.keys().hasAny(['reviewedBy'])
           || request.resource.data.reviewedBy == get(userPath(request.auth.uid)).data.name)
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'reviewedAt', 'reviewedBy']);
-      allow delete: if assistantOwnsSession(resource.data.sessionId);
+      allow delete: if false;
     }
 
     match /reviews/{reviewId} {
@@ -526,18 +690,57 @@ service cloud.firestore {
         && request.resource.data.createdAt is string
         && reviewId == request.resource.data.sessionId + '_' + request.auth.uid
         && exists(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId))
-        && validSession(get(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId)).data)
+        && validSessionForReference(get(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId)).data)
         && get(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId)).data.status == 'ditutup'
         && praktikanEnrolledInClass(get(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId)).data.classId);
-      allow update: if false;
-      allow delete: if assistantOwnsSession(resource.data.sessionId);
+      allow update, delete: if false;
     }
 
-    match /attendanceArchives/{archiveId} {
+    match /attendanceArchieve/{archiveId} {
       allow get, list: if isPraktikan()
         && resource.data.keys().hasAll(['praktikanId'])
         && resource.data.praktikanId == request.auth.uid;
       allow create, update, delete: if false;
+    }
+
+    match /attendanceQrTokens/{sessionId} {
+      allow get: if (isPraktikan()
+          && praktikanCanReadAttendanceQr(sessionId))
+        || assistantOwnsSession(sessionId);
+      allow list: if false;
+      allow create: if validAttendanceQrIssue(sessionId, request.resource.data);
+      allow update: if validAttendanceQrRevocation(resource.data, request.resource.data, sessionId)
+        || validAttendanceQrIssue(sessionId, request.resource.data);
+      allow delete: if false;
+    }
+
+    function praktikanCanReadAttendanceQr(sessionId) {
+      let sessionPath = /databases/$(database)/documents/sessions/$(sessionId);
+      return praktikanCanReadAttendanceQrData(get(sessionPath).data);
+    }
+
+    function praktikanCanReadAttendanceQrData(session) {
+      return validSession(session)
+        && session.status == 'dibuka'
+        && attendanceEnrollmentExists(session.classId, session.courseId, session.semester);
+    }
+
+    // Token perangkat untuk push notification (S3-SRS-13). Satu dokumen per
+    // instalasi; pemilik hanya boleh menulis token miliknya sendiri. Pengiriman
+    // notifikasi dilakukan backend (Admin SDK), yang tidak terkena aturan ini.
+    match /deviceTokens/{installationId} {
+      allow get: if isSignedIn() && resource.data.uid == request.auth.uid;
+      allow list: if false;
+      allow create, update: if isSignedIn()
+        && installationId.matches('^[A-Za-z0-9_-]{16,128}$')
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.platform == 'android'
+        && request.resource.data.token is string
+        && request.resource.data.token.size() > 0
+        && request.resource.data.token.size() <= 4096
+        && request.resource.data.keys().hasAll(['uid','token','platform','updatedAt'])
+        && request.resource.data.keys().hasOnly(['uid','token','platform','updatedAt']);
+      allow delete: if isSignedIn() && resource.data.uid == request.auth.uid;
     }
 
     // Deny every collection that has no explicit policy above.

@@ -1,4 +1,4 @@
-import { PracticumSession } from '../types';
+import { PracticumSession, SessionStatus } from '../types';
 
 type MeetingSession = {
   id: string;
@@ -7,6 +7,24 @@ type MeetingSession = {
   courseId?: string;
   className?: string;
 };
+
+export function isSessionEnded(
+  session: Pick<PracticumSession, 'endsAt'>,
+  now = Date.now(),
+): boolean {
+  const endsAtMs = Date.parse(session.endsAt);
+  return Number.isFinite(endsAtMs) && endsAtMs <= now;
+}
+
+export function getEffectiveSessionStatus(
+  session: Pick<PracticumSession, 'status' | 'endsAt'>,
+  now = Date.now(),
+): SessionStatus {
+  if (session.status === 'ditutup' || isSessionEnded(session, now)) {
+    return 'ditutup';
+  }
+  return session.status;
+}
 
 function meetingGroupKey(session: MeetingSession): string {
   return session.classId || `${session.courseId ?? ''}::${session.className ?? ''}`;
