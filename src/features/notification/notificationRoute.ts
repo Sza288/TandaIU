@@ -62,8 +62,12 @@ export function resolveNotificationNavigation(
       : navigate('/schedule');
   }
   if (payload.type === 'schedule_changed') {
-    return navigate('/schedule');
+    return payload.scheduleId
+      ? navigate(`/schedule/schedule/${encodeURIComponent(payload.scheduleId)}`)
+      : navigate('/schedule');
   }
   if (input.role !== 'praktikan') return { kind: 'ignore' };
-  return navigate('/praktikan/permit');
+  return payload.permitId
+    ? navigate(`/praktikan/permit/${encodeURIComponent(payload.permitId)}`)
+    : navigate('/praktikan/permit');
 }

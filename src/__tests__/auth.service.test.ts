@@ -27,6 +27,7 @@ import {
   validateGoogleProfileInput,
   type RegistrationInput,
 } from '../services/authService';
+import { removeCurrentDeviceToken } from '../services/notificationService';
 
 jest.mock('expo-constants', () => ({
   __esModule: true,
@@ -72,6 +73,10 @@ jest.mock('firebase/firestore', () => ({
     set: (...args: unknown[]) => mockTransactionSet(...args),
   })),
   setDoc: jest.fn(),
+}));
+
+jest.mock('../services/notificationService', () => ({
+  removeCurrentDeviceToken: jest.fn(),
 }));
 
 const mockTransactionGet = jest.fn();
@@ -127,6 +132,7 @@ beforeEach(() => {
   jest.mocked(deleteUser).mockResolvedValue(undefined);
   jest.mocked(firebaseSignOut).mockResolvedValue(undefined);
   jest.mocked(sendPasswordResetEmail).mockResolvedValue(undefined);
+  jest.mocked(removeCurrentDeviceToken).mockResolvedValue({ ok: true });
 });
 
 describe('registration flow', () => {
@@ -583,8 +589,12 @@ describe('logout', () => {
 
     expect(firebaseSignOut).toHaveBeenCalled();
     expect(GoogleSignin.signOut).toHaveBeenCalled();
+    expect(removeCurrentDeviceToken).toHaveBeenCalledTimes(1);
     expect(deleteUser).not.toHaveBeenCalled();
     expect(setDoc).not.toHaveBeenCalled();
+    expect(jest.mocked(removeCurrentDeviceToken).mock.invocationCallOrder[0]).toBeLessThan(
+      jest.mocked(firebaseSignOut).mock.invocationCallOrder[0],
+    );
   });
 
   it('coalesces overlapping logout requests into one sign-out flow', async () => {
@@ -620,5 +630,18 @@ describe('logout', () => {
     jest.mocked(firebaseSignOut).mockRejectedValue(new Error('offline'));
 
     await expect(signOut()).rejects.toMatchObject({ code: 'logout-failed' });
+  });
+
+  it('aborts logout when device token removal fails', async () => {
+    Object.assign(auth, { currentUser: user });
+    jest
+      .mocked(removeCurrentDeviceToken)
+      .mockResolvedValue({ ok: false, reason: 'token tidak dapat dihapus' });
+
+    await expect(signOut()).rejects.toMatchObject({
+      code: 'logout-failed',
+      message: expect.stringContaining('Gagal menghapus token notifikasi'),
+    });
+    expect(firebaseSignOut).not.toHaveBeenCalled();
   });
 });

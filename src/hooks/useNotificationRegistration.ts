@@ -29,7 +29,6 @@ export function useNotificationRegistration(): UseNotificationRegistrationResult
     if (!uid) return;
 
     let active = true;
-    let removeRefreshListener: (() => void) | null = null;
 
     const applyResult = (result: NotificationRegistrationResult) => {
       if (!active) return;
@@ -41,13 +40,10 @@ export function useNotificationRegistration(): UseNotificationRegistrationResult
       });
     };
 
-    void registerDeviceForPush(uid)
-      .then((result) => {
-        applyResult(result);
-        if (!active || !result.ok || result.status !== 'granted') return;
+    const removeRefreshListener = subscribeToTokenRefresh(uid, applyResult);
 
-        removeRefreshListener = subscribeToTokenRefresh(uid, applyResult);
-      })
+    void registerDeviceForPush(uid)
+      .then(applyResult)
       .catch((error: unknown) => {
         if (!active) return;
 
@@ -60,7 +56,7 @@ export function useNotificationRegistration(): UseNotificationRegistrationResult
 
     return () => {
       active = false;
-      removeRefreshListener?.();
+      removeRefreshListener();
     };
   }, [uid, reloadKey]);
 

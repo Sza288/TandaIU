@@ -20,6 +20,7 @@ import {
   type AuthProfile,
   type RegistrationRole,
 } from '../features/auth/authTypes';
+import { removeCurrentDeviceToken } from './notificationService';
 
 export type RegistrationInput = {
   name: string;
@@ -491,12 +492,14 @@ export async function signOut(): Promise<void> {
     }
 
     try {
-      // AuthNavigationGate observes this state change and performs the single route transition.
-      try {
-        const { removeCurrentDeviceToken } = await import('./notificationService');
-        await removeCurrentDeviceToken();
-      } catch {
-        // best-effort: kegagalan notifikasi tidak boleh menggagalkan logout
+      const tokenRemoval = await removeCurrentDeviceToken();
+      if (!tokenRemoval.ok) {
+        throw new AuthServiceError(
+          'logout-failed',
+          tokenRemoval.reason === 'timeout'
+            ? 'Penghapusan token notifikasi timed out. Logout dibatalkan; coba lagi.'
+            : `Gagal menghapus token notifikasi: ${tokenRemoval.reason}. Logout dibatalkan; coba lagi.`,
+        );
       }
       await firebaseSignOut(auth);
     } catch (error) {
