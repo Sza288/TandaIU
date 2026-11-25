@@ -1,3 +1,4 @@
+
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
@@ -56,7 +57,6 @@ export default function ScheduleDetailScreen() {
   const profile = authSession?.status === 'authenticated' ? authSession.profile : null;
   const role = profile?.role ?? null;
   const authStatus = authSession?.status ?? 'loading';
-
   const sessionResult = useSessions();
   const laboratoryResult = useLaboratories();
   const [scheduleData, setScheduleData] = useState<ScheduleDoc | null>(null);

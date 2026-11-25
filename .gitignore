@@ -1,5 +1,6 @@
 # dependencies
 node_modules/
+functions/lib/
 
 # Expo
 .expo/
@@ -23,6 +24,14 @@ expo-env.d.ts
 npm-debug.*
 yarn-debug.*
 yarn-error.*
+firebase-debug.log
+firestore-debug.log
+auth-debug.log
+functions-debug.log
+database-debug.log
+pubsub-debug.log
+ui-debug.log
+.firebase/
 
 # macOS
 .DS_Store

@@ -27,18 +27,26 @@
     "plugins": [
       "expo-router",
       [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "TandaIU menggunakan lokasi perangkat untuk memvalidasi presensi di laboratorium dan menampilkan posisi Anda di peta."
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "TandaIU menggunakan kamera untuk memindai QR presensi praktikum.",
+          "recordAudioAndroid": false,
+          "microphonePermission": false
+        }
+      ],
+      [
         "expo-splash-screen",
         {
           "backgroundColor": "#FFF6F8"
         }
       ],
       "expo-image",
-      [
-        "expo-location",
-        {
-          "locationWhenInUsePermission": "Izinkan TandaIU menampilkan posisi Anda di peta."
-        }
-      ],
       "expo-status-bar",
       "expo-web-browser",
       "@react-native-google-signin/google-signin"

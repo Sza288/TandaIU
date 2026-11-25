@@ -201,9 +201,10 @@ async function getLaboratoryByIdUnsafe(id: string): Promise<LaboratoryDoc | null
 async function getAllLaboratoriesUnsafe(): Promise<LaboratoryDoc[]> {
   const snapshot = await getDocs(collection(db, COLLECTIONS.laboratories));
   return snapshot.docs
-    .map((document) =>
-      toLaboratoryDoc(document.id, document.data() as Omit<LaboratoryDoc, 'id'>),
-    )
+    .map((document) => toLaboratoryDoc(
+      document.id,
+      document.data() as Omit<LaboratoryDoc, 'id'>,
+    ))
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
@@ -231,4 +232,8 @@ export async function setLaboratoryActive(
     });
     return { ...current, isActive };
   });
+}
+
+export async function deleteLaboratory(id: string): Promise<void> {
+  await setLaboratoryActive(id, false);
 }

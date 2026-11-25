@@ -1,3 +1,4 @@
+
 rules_version = '2';
 
 service cloud.firestore {
@@ -174,8 +175,10 @@ service cloud.firestore {
           'name', 'latitude', 'longitude', 'radius', 'lantai', 'createdAt', 'updatedAt'
         ])
         && data.keys().hasOnly([
-          'name', 'latitude', 'longitude', 'radius', 'lantai', 'createdAt', 'updatedAt'
+          'name', 'latitude', 'longitude', 'radius', 'lantai', 'isActive',
+          'createdAt', 'updatedAt'
         ])
+        && ((!data.keys().hasAny(['isActive'])) || data.isActive is bool)
         && data.name is string
         && data.name.size() > 0
         && (data.latitude is float || data.latitude is int)
@@ -197,6 +200,7 @@ service cloud.firestore {
     function assistantOwnsSession(sessionId) {
       let sessionPath = /databases/$(database)/documents/sessions/$(sessionId);
       return isAssistant()
+        && exists(sessionPath)
         && assistantOwnsSessionData(get(sessionPath).data);
     }
 
@@ -559,7 +563,6 @@ service cloud.firestore {
           && validSession(resource.data)
           && praktikanEnrolledInClass(resource.data.classId))
         || (isAssistant()
-          && validSession(resource.data)
           && resource.data.assistantUid == request.auth.uid
           && resource.data.semesterParity == request.auth.token.assistantSemesterParity);
       allow list: if (isPraktikan()
@@ -573,9 +576,15 @@ service cloud.firestore {
         && request.resource.data.startsAt is timestamp
         && request.resource.data.endsAt is timestamp;
       allow update: if sessionRecordInAssistantScope(resource.data)
+        && isAssistant()
+        && resource.data.assistantUid == request.auth.uid
+        && resource.data.semesterParity == request.auth.token.assistantSemesterParity
+        && sessionRecordInAssistantScope(request.resource.data)
+        && request.resource.data.startsAt is timestamp
+        && request.resource.data.endsAt is timestamp
         && (validScheduledSessionClientUpdate(resource.data, request.resource.data)
           || validSessionStatusTransition(resource.data, request.resource.data));
-      allow delete: if sessionRecordInAssistantScope(resource.data);
+      allow delete: if assistantOwnsSession(sessionId);
     }
 
     match /laboratories/{laboratoryId} {
@@ -584,7 +593,7 @@ service cloud.firestore {
       allow update: if isAssistant()
         && validLaboratory(request.resource.data)
         && request.resource.data.createdAt == resource.data.createdAt;
-      allow delete: if isAssistant();
+      allow delete: if false;
     }
 
     match /enrollments/{enrollmentId} {
@@ -631,7 +640,7 @@ service cloud.firestore {
         || assistantOwnsSession(resource.data.sessionId);
       allow create: if validAttendanceCreate(request.resource.data, attendanceId);
       allow update: if validAttendanceCancellation(resource.data, request.resource.data);
-      allow delete: if assistantOwnsSession(resource.data.sessionId);
+      allow delete: if false;
     }
 
     match /permits/{permitId} {
@@ -642,19 +651,23 @@ service cloud.firestore {
         || assistantOwnsSession(resource.data.sessionId);
       allow create: if isPraktikan()
         && request.resource.data.keys().hasAll([
-          'sessionId', 'studentId', 'studentName', 'reason', 'status', 'createdAt'
+          'sessionId', 'studentId', 'studentName', 'reason', 'sentiment', 'sentimentSource',
+          'status', 'createdAt'
         ])
         && request.resource.data.keys().hasOnly([
-          'sessionId', 'studentId', 'studentName', 'reason', 'status', 'createdAt'
+          'sessionId', 'studentId', 'studentName', 'reason', 'sentiment', 'sentimentSource',
+          'status', 'createdAt'
         ])
         && request.resource.data.studentId == request.auth.uid
         && request.resource.data.studentName == get(userPath(request.auth.uid)).data.name
         && request.resource.data.reason is string
+        && request.resource.data.sentiment in ['positif', 'netral', 'negatif']
+        && request.resource.data.sentimentSource in ['model', 'fallback']
         && permitId == request.resource.data.sessionId + '_' + request.auth.uid
         && request.resource.data.status == 'pending'
         && request.resource.data.createdAt is string
         && exists(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId))
-        && get(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId)).data.classId is string
+        && validSessionForReference(get(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId)).data)
         && get(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId)).data.status in ['terjadwal', 'dibuka']
         && get(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId)).data.endsAt is timestamp
         && get(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId)).data.endsAt > request.time
@@ -712,7 +725,7 @@ service cloud.firestore {
       allow create: if validAttendanceQrIssue(sessionId, request.resource.data);
       allow update: if validAttendanceQrRevocation(resource.data, request.resource.data, sessionId)
         || validAttendanceQrIssue(sessionId, request.resource.data);
-      allow delete: if assistantOwnsSession(sessionId);
+      allow delete: if false;
     }
 
     function praktikanCanReadAttendanceQr(sessionId) {

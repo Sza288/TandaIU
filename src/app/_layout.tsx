@@ -55,6 +55,10 @@ export default function RootLayout() {
             />
             <Stack.Screen name="schedule/[id]" options={{ title: 'Detail Sesi' }} />
             <Stack.Screen
+              name="praktikan/attendance"
+              options={{ headerShown: false }}
+            />
+            <Stack.Screen
               name="assistant/riwayat"
               options={{ title: 'Riwayat Presensi', headerShown: false }}
             />
@@ -71,6 +75,10 @@ export default function RootLayout() {
               options={{ title: 'Rekap Kelas', headerShown: false }}
             />
             <Stack.Screen name="praktikan/riwayat" options={{ title: 'Riwayat Presensi' }} />
+            <Stack.Screen
+              name="praktikan/qr-scan"
+              options={{ title: 'Scan QR Asprak', headerShown: false }}
+            />
             <Stack.Screen
               name="assistant/permits"
               options={{ title: 'Review Izin', headerShown: false }}
