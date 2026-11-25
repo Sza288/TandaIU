@@ -137,6 +137,7 @@ describe('registration flow', () => {
 
     expect(doc).toHaveBeenCalledWith(expect.anything(), 'users', 'uid-1');
     expect(setDoc).toHaveBeenCalledWith(documentReference, {
+      uid: validProfile.uid,
       name: validProfile.name,
       email: validProfile.email,
       role: 'praktikan',
@@ -535,6 +536,7 @@ describe('Google Sign-In', () => {
     await registerGoogleProfile({ name: 'Ayu Pratiwi', role: 'praktikan', studentCode: 'NIM-1' });
 
     expect(mockTransactionSet).toHaveBeenCalledWith(documentReference, {
+      uid: 'uid-1',
       name: 'Ayu Pratiwi',
       email: 'ayu@example.com',
       role: 'praktikan',

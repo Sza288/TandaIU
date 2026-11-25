@@ -1,6 +1,7 @@
 import { runTransaction } from 'firebase/firestore';
 
 import { Permit } from '../features/permit/permit.types';
+import { analyzeReviewSentiment } from '../features/review/sentiment';
 import { getPermitId, reviewPermit, submitPermit } from '../services/permitService';
 
 const mockAuthState: { currentUser: { uid: string } | null } = {
@@ -25,12 +26,18 @@ jest.mock('../lib/firebase', () => ({
   },
 }));
 
+jest.mock('../features/review/sentiment', () => ({
+  analyzeReviewSentiment: jest.fn(),
+}));
+
 const seedPermit: Permit = {
   id: 'perm-test',
   sessionId: 's5',
   studentId: 'praktikan-uid',
   studentName: 'Andi Pratama',
   reason: 'Demam tinggi, harus istirahat.',
+  sentiment: 'netral',
+  sentimentSource: 'fallback',
   status: 'pending',
   createdAt: '2026-10-27T06:30:00+07:00',
 };
@@ -75,10 +82,14 @@ function mockSubmitTransaction(existing: Permit | null, set = jest.fn()) {
 beforeEach(() => {
   jest.clearAllMocks();
   mockAuthState.currentUser = { uid: 'praktikan-uid' };
+  (analyzeReviewSentiment as jest.Mock).mockResolvedValue({
+    sentiment: 'netral',
+    source: 'fallback',
+  });
 });
 
 describe('submitPermit', () => {
-  it('menyimpan pengajuan izin tanpa sentimen memakai ID sesi_uid', async () => {
+  it('menyimpan sentimen alasan izin memakai ID sesi_uid', async () => {
     const set = mockSubmitTransaction(null);
 
     const result = await submitPermit({
@@ -103,12 +114,15 @@ describe('submitPermit', () => {
         sessionId: 's5',
         studentId: 'praktikan-uid',
         studentName: 'Andi Pratama',
+        sentiment: 'netral',
+        sentimentSource: 'fallback',
         status: 'pending',
       }),
     );
     const payload = set.mock.calls[0][1] as Record<string, unknown>;
-    expect(payload).not.toHaveProperty('sentiment');
-    expect(payload).not.toHaveProperty('sentimentSource');
+    expect(analyzeReviewSentiment).toHaveBeenCalledWith('Demam tinggi, harus istirahat.');
+    expect(payload.sentiment).toBe('netral');
+    expect(payload.sentimentSource).toBe('fallback');
   });
 
   it('menolak pengajuan kedua untuk sesi yang sama', async () => {
