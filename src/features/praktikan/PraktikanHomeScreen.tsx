@@ -23,6 +23,7 @@ import { PracticumSession } from '../../types';
 import { formatDateLong, formatTimeRange, getInitials } from '../../utils/format';
 import { getAuthenticatedPraktikanIdentity } from './authenticatedIdentity';
 import { deriveOpenSessions } from './praktikan.utils';
+import NotificationStatusBanner from '../notification/NotificationStatusBanner';
 
 export default function PraktikanHomeScreen() {
   const authSession = useAuthSession();
@@ -73,6 +74,7 @@ export default function PraktikanHomeScreen() {
         showsVerticalScrollIndicator={false}
       >
         <View style={styles.body}>
+          <NotificationStatusBanner />
           {activePraktikan ? (
             <View style={styles.identityCard}>
               <View style={styles.avatar}>
