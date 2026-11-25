@@ -141,7 +141,16 @@ export default function SessionFormScreen() {
     (laboratory) => laboratory.id === laboratoryId,
   );
 
-  const laboratoryOptions = laboratories.data.map((laboratory) => ({
+  /**
+   * Laboratorium nonaktif tidak boleh dipakai untuk sesi baru maupun sesi yang
+   * sedang diedit, tetapi tetap ditampilkan bila sesi ini sudah memakainya agar
+   * pilihan lama tidak hilang diam-diam.
+   */
+  const selectableLaboratories = laboratories.data.filter(
+    (laboratory) => laboratory.isActive !== false || laboratory.id === laboratoryId,
+  );
+
+  const laboratoryOptions = selectableLaboratories.map((laboratory) => ({
     value: laboratory.id,
     label: laboratory.name,
     description: `Lantai ${laboratory.lantai} · radius ${laboratory.radius} m`,
@@ -151,8 +160,8 @@ export default function SessionFormScreen() {
     ? 'Memuat daftar laboratorium...'
     : laboratories.error
       ? laboratories.error
-      : laboratories.data.length === 0
-        ? 'Belum ada laboratorium. Tambahkan laboratorium lebih dahulu agar sesi dapat dipakai untuk presensi.'
+      : selectableLaboratories.length === 0
+        ? 'Belum ada laboratorium aktif. Tambahkan atau aktifkan laboratorium lebih dahulu agar sesi dapat dipakai untuk presensi.'
         : 'Laboratorium menentukan lokasi dan radius presensi sesi ini.';
 
   const classHint = classes.loading
