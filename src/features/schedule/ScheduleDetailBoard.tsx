@@ -56,7 +56,6 @@ export default function ScheduleDetailScreen() {
   const authStatus = authSession?.status ?? 'loading';
 
   const sessionResult = useSessions();
-  const classResult = useClasses();
   const [scheduleData, setScheduleData] = useState<ScheduleDoc | null>(null);
   const [scheduleErrorState, setScheduleErrorState] = useState<string | null>(null);
   const [resolvedKey, setResolvedKey] = useState<string | null>(null);
@@ -84,6 +83,7 @@ export default function ScheduleDetailScreen() {
   }, [authStatus, scheduleId]);
 
   const schedule = resolvedKey === scheduleId ? scheduleData : null;
+  const classResult = useClasses(schedule ? { classId: schedule.classId } : undefined);
   const scheduleError = resolvedKey === scheduleId ? scheduleErrorState : null;
   const classDoc = schedule
     ? classResult.data.find((item) => item.id === schedule.classId)
