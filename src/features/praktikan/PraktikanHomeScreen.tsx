@@ -244,7 +244,12 @@ export default function PraktikanHomeScreen() {
               ) : (
                 <View style={styles.sessionList}>
                   {enrolledSessions.map((item) => (
-                    <SessionCard key={item.id} session={item} role="praktikan" />
+                    <SessionCard
+                      key={item.id}
+                      session={item}
+                      role="praktikan"
+                      sessions={enrolledSessions}
+                    />
                   ))}
                 </View>
               )}

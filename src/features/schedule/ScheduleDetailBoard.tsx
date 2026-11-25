@@ -221,7 +221,12 @@ export default function ScheduleDetailScreen() {
             ) : (
               <View style={styles.list}>
                 {sessions.map((session) => (
-                  <SessionCard key={session.id} session={session} role={role} />
+                  <SessionCard
+                    key={session.id}
+                    session={session}
+                    role={role}
+                    sessions={sessions}
+                  />
                 ))}
               </View>
             )}
