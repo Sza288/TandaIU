@@ -13,7 +13,6 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import BottomNav from '../../components/BottomNav';
 import ScreenHeader from '../../components/ScreenHeader';
 import { useEnrollments } from '../../hooks/useEnrollments';
 import { useReviews } from '../../hooks/useReview';
@@ -363,8 +362,6 @@ export default function PraktikanReviewScreen() {
           )}
         </ScrollView>
       </KeyboardAvoidingView>
-
-      <BottomNav />
     </SafeAreaView>
   );
 }
