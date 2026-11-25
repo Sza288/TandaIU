@@ -43,23 +43,45 @@ export function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function shouldUseMockFcm(): boolean {
+  return process.env.TANDAIU_EMULATOR_MOCK_FCM === '1';
+}
+
+function createMockSender(logger: NotificationLogger): MessagingSender {
+  return {
+    async sendEach(messages) {
+      for (const message of messages) {
+        logger.log(`FCM_MOCK ${JSON.stringify({
+          token: message.token,
+          notification: message.notification,
+          android: message.android.notification,
+          data: message.data,
+        })}`);
+      }
+      return { responses: messages.map(() => ({ success: true })) };
+    },
+  };
+}
+
 export function createAdminDeps(logger: NotificationLogger = createAdminLogger()): NotificationDeps {
   const firestore = getAdminFirestore();
-  const messaging = getAdminMessaging();
+  const messaging = shouldUseMockFcm() ? null : getAdminMessaging();
 
   return {
     logger,
-    sender: {
-      async sendEach(messages, dryRun) {
-        const response = await messaging.sendEach([...messages] as Message[], dryRun);
-        return {
-          responses: response.responses.map((item) => ({
-            success: item.success,
-            error: item.error,
-          })),
-        };
-      },
-    },
+    sender: messaging
+      ? {
+          async sendEach(messages, dryRun) {
+            const response = await messaging.sendEach([...messages] as Message[], dryRun);
+            return {
+              responses: response.responses.map((item) => ({
+                success: item.success,
+                error: item.error,
+              })),
+            };
+          },
+        }
+      : createMockSender(logger),
     tokenStore: {
       async listByUids(uids) {
         if (uids.length === 0) return [];
