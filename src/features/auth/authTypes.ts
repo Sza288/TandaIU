@@ -38,23 +38,27 @@ export function getAuthNavigationTarget(
 ): string | null {
   const isPublicPath =
     pathname === '/' || pathname === '/auth/login' || pathname === '/auth/register';
+  const continuationPath = normalizeDeepLinkPath(returnTo);
 
   if (state.status === 'authenticated' && (isPublicPath || pathname === '/home')) {
-    const sessionPath = normalizeScheduleDetailPath(returnTo);
-    if (pathname === '/auth/login' && sessionPath) return sessionPath;
+    if (pathname === '/auth/login' && continuationPath) return continuationPath;
     return getDashboardPath(state.profile.role);
   }
   if (state.status === 'unauthenticated' && previousStatus === 'authenticated') {
     return '/';
   }
   if (state.status === 'unauthenticated' && !isPublicPath) {
-    const sessionPath = normalizeScheduleDetailPath(pathname);
-    if (sessionPath) {
-      return `/auth/login?returnTo=${encodeURIComponent(sessionPath)}`;
+    const requestedPath = continuationPath ?? normalizeDeepLinkPath(pathname);
+    if (requestedPath) {
+      return `/auth/login?returnTo=${encodeURIComponent(requestedPath)}`;
     }
     return '/';
   }
   return null;
+}
+
+function normalizeDeepLinkPath(path: string | undefined): string | null {
+  return normalizeScheduleDetailPath(path) ?? normalizeAttendancePath(path);
 }
 
 function normalizeScheduleDetailPath(path: string | undefined): string | null {
@@ -66,6 +70,21 @@ function normalizeScheduleDetailPath(path: string | undefined): string | null {
     const sessionId = decodeURIComponent(segments[2]);
     if (!sessionId || sessionId.includes('/')) return null;
     return `/schedule/${encodeURIComponent(sessionId)}`;
+  } catch {
+    return null;
+  }
+}
+
+function normalizeAttendancePath(path: string | undefined): string | null {
+  if (!path) return null;
+  const match = /^\/praktikan\/attendance(?:\?sessionId=([^&]+))?$/.exec(path);
+  if (!match) return null;
+  if (!match[1]) return '/praktikan/attendance';
+
+  try {
+    const sessionId = decodeURIComponent(match[1]);
+    if (!sessionId || sessionId.includes('/')) return null;
+    return `/praktikan/attendance?sessionId=${encodeURIComponent(sessionId)}`;
   } catch {
     return null;
   }
