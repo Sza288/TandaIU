@@ -13,7 +13,6 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import BottomNav from '../../components/BottomNav';
 import PracticumIcon from '../../components/PracticumIcon';
 import RoleScreenHeader from '../../components/RoleScreenHeader';
-import SessionCard from '../../components/SessionCard';
 import StatusBadge from '../../components/StatusBadge';
 import { usePraktikanAttendance } from '../../hooks/useAttendanceRecords';
 import { useEnrollments } from '../../hooks/useEnrollments';
@@ -217,40 +216,6 @@ export default function PraktikanHomeScreen() {
                   onPress={handleOpenMaps}
                 />
               </View>
-            </View>
-          ) : null}
-
-          {activePraktikan && hasEnrollment ? (
-            <View style={styles.section}>
-              <View style={styles.sectionHeading}>
-                <View style={styles.sectionCopy}>
-                  <Text style={styles.sectionTitle}>Sesi Praktikum Saya</Text>
-                  <Text style={styles.sectionSubtitle}>
-                    Seluruh sesi dari kelas yang kamu ikuti.
-                  </Text>
-                </View>
-                <View style={styles.countBadge}>
-                  <Text style={styles.countText}>{enrolledSessions.length}</Text>
-                </View>
-              </View>
-
-              {enrolledSessions.length === 0 ? (
-                <View style={styles.emptySessionCard}>
-                  <View style={styles.emptySessionIcon}>
-                    <Ionicons name="calendar-clear-outline" size={24} color={colors.primary} />
-                  </View>
-                  <Text style={styles.emptySessionTitle}>Belum ada sesi untuk kelasmu</Text>
-                  <Text style={styles.emptySessionDescription}>
-                    Sesi akan muncul di sini setelah asisten membuatnya untuk kelas yang kamu ikuti.
-                  </Text>
-                </View>
-              ) : (
-                <View style={styles.sessionList}>
-                  {enrolledSessions.map((item) => (
-                    <SessionCard key={item.id} session={item} role="praktikan" />
-                  ))}
-                </View>
-              )}
             </View>
           ) : null}
         </View>
