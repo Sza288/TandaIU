@@ -1,3 +1,4 @@
+
 rules_version = '2';
 
 service cloud.firestore {
@@ -29,8 +30,7 @@ service cloud.firestore {
         && get(userPath(request.auth.uid)).data.email is string;
     }
 
-    // The role comes from the trusted profile; semester ownership comes only
-    // from an Admin SDK custom claim.
+    // Role comes from the trusted profile; semester ownership comes from an Admin SDK custom claim.
     function isAssistant() {
       return isSignedIn()
         && exists(userPath(request.auth.uid))
@@ -146,9 +146,8 @@ service cloud.firestore {
           'name', 'latitude', 'longitude', 'radius', 'lantai', 'isActive',
           'createdAt', 'updatedAt'
         ])
-        // isActive is optional: laboratories saved before the activation feature
-        // have no such field and must stay readable and editable. The app treats
-        // a missing value as active.
+        // isActive optional: dokumen lama belum punya field ini dan harus tetap
+        // bisa dibaca/diedit. Aplikasi menganggap nilai kosong sebagai aktif.
         && ((!data.keys().hasAny(['isActive'])) || data.isActive is bool)
         && data.name is string
         && data.name.size() > 0
@@ -252,8 +251,6 @@ service cloud.firestore {
     }
 
     match /users/{userId} {
-      // A missing profile can be fetched by its owner, but grants no access to
-      // any protected collection because role helpers require a valid profile.
       allow get: if isSignedIn() && request.auth.uid == userId;
       allow list: if false;
       allow create: if isSignedIn()
@@ -269,8 +266,6 @@ service cloud.firestore {
     }
 
     match /courseCatalog/{courseId} {
-      // The app uses its bundled course list. Rules read catalog documents
-      // internally for validation; clients do not need direct catalog access.
       allow read, write: if false;
     }
 
@@ -282,106 +277,105 @@ service cloud.firestore {
           && validDirectory(resource.data)
           && semesterMatchesAssignment(resource.data.semester)
           && resource.data.semesterParity == request.auth.token.assistantSemesterParity);
-      // The enrollment management UI filters by the assistant's claim parity.
-      // The directory is Admin-SDK-only, so its semester/parity pair is trusted.
       allow list: if isAssistant()
         && resource.data.semesterParity == request.auth.token.assistantSemesterParity;
       allow create, update, delete: if false;
     }
 
-    match /classes/{classId} {
-      allow get: if (isAssistant()
-          && validClass(resource.data)
-          && resource.data.assistantUid == request.auth.uid
-          && resource.data.semesterParity == request.auth.token.assistantSemesterParity)
-        || (praktikanEnrolledInClass(classId) && validClass(resource.data));
-      // A list query only exposes the fields it filters on, so the rule must not
-      // touch courseId/semester/createdAt here: doing so raises "property is
-      // undefined" and denies the whole list. Writes and get still validate fully.
-      allow list: if (isAssistant()
-          && resource.data.assistantUid == request.auth.uid
-          && resource.data.semesterParity == request.auth.token.assistantSemesterParity)
-        || praktikanEnrolledInClass(classId);
-      allow create: if validClass(request.resource.data)
-        && isAssistant()
-        && request.resource.data.assistantUid == request.auth.uid
-        && semesterMatchesAssignment(request.resource.data.semester);
-      allow update: if assistantOwnsClass(classId)
-        && validClass(request.resource.data)
-        && request.resource.data.assistantUid == resource.data.assistantUid
-        && request.resource.data.semester == resource.data.semester
-        && request.resource.data.semesterParity == resource.data.semesterParity
-        && request.resource.data.courseId == resource.data.courseId
-        && request.resource.data.createdAt == resource.data.createdAt;
-      // Client deletion could orphan sessions, enrollments, and attendance history.
-      // Delete only through a trusted administrative process after checking references.
-      allow delete: if false;
-    }
+      match /classes/{classId} {
+          allow get: if (isAssistant()
+              && validClass(resource.data)
+              && resource.data.assistantUid == request.auth.uid
+              && resource.data.semesterParity == request.auth.token.assistantSemesterParity)
+            || (praktikanEnrolledInClass(classId) && validClass(resource.data));
+          // A list query only exposes the fields it filters on, so the rule must not
+          // touch courseId/semester/createdAt here: doing so raises "property is
+          // undefined" and denies the whole list. Writes and get still validate fully.
+          allow list: if (isAssistant()
+              && resource.data.assistantUid == request.auth.uid
+              && resource.data.semesterParity == request.auth.token.assistantSemesterParity)
+            || praktikanEnrolledInClass(classId);
+          allow create: if validClass(request.resource.data)
+            && isAssistant()
+            && request.resource.data.assistantUid == request.auth.uid
+            && semesterMatchesAssignment(request.resource.data.semester);
+          allow update: if assistantOwnsClass(classId)
+            && validClass(request.resource.data)
+            && request.resource.data.assistantUid == resource.data.assistantUid
+            && request.resource.data.semester == resource.data.semester
+            && request.resource.data.semesterParity == resource.data.semesterParity
+            && request.resource.data.courseId == resource.data.courseId
+            && request.resource.data.createdAt == resource.data.createdAt;
+          // The app only removes a class that has no schedules and no
+          // `terjadwal`/`dibuka` sessions, then deletes the remaining sessions and
+          // enrollments first. Rules cannot query child collections, so that
+          // emptiness check lives in the app.
+          allow delete: if assistantOwnsClass(classId);
+        }
 
-    match /schedules/{scheduleId} {
-      allow get: if (isPraktikan()
-          && resource.data.classId is string
-          && praktikanEnrolledInClass(resource.data.classId))
-        || (isAssistant()
-          && scheduleRecordInAssistantScope(resource.data)
-          && resource.data.semesterParity == request.auth.token.assistantSemesterParity);
-      // Same constraint as classes: list may only rely on filtered fields.
-      allow list: if (isPraktikan()
-          && resource.data.classId is string
-          && praktikanEnrolledInClass(resource.data.classId))
-        || (isAssistant()
-          && resource.data.assistantUid == request.auth.uid
-          && resource.data.semesterParity == request.auth.token.assistantSemesterParity);
-      allow create: if scheduleRecordInAssistantScope(request.resource.data);
-      allow update: if scheduleRecordInAssistantScope(resource.data)
-        && scheduleRecordInAssistantScope(request.resource.data);
-      allow delete: if scheduleRecordInAssistantScope(resource.data);
-    }
+      match /schedules/{scheduleId} {
+          allow get: if (isPraktikan()
+              && resource.data.classId is string
+              && praktikanEnrolledInClass(resource.data.classId))
+            || (isAssistant()
+              && scheduleRecordInAssistantScope(resource.data)
+              && resource.data.semesterParity == request.auth.token.assistantSemesterParity);
+          // Same constraint as classes: list may only rely on filtered fields.
+          allow list: if (isPraktikan()
+              && resource.data.classId is string
+              && praktikanEnrolledInClass(resource.data.classId))
+            || (isAssistant()
+              && resource.data.assistantUid == request.auth.uid
+              && resource.data.semesterParity == request.auth.token.assistantSemesterParity);
+          allow create: if scheduleRecordInAssistantScope(request.resource.data);
+          allow update: if scheduleRecordInAssistantScope(resource.data)
+            && scheduleRecordInAssistantScope(request.resource.data);
+          allow delete: if scheduleRecordInAssistantScope(resource.data);
+        }
 
-    match /sessions/{sessionId} {
-      allow get: if (isPraktikan()
-          && validSession(resource.data)
-          && praktikanEnrolledInClass(resource.data.classId))
-        || (isAssistant()
-          && validSession(resource.data)
-          && resource.data.assistantUid == request.auth.uid
-          && resource.data.semesterParity == request.auth.token.assistantSemesterParity);
-      // Queries expose their constrained fields to Rules. Keep list access scoped
-      // to class enrollment or assistant owner/parity; get and all writes validate
-      // the full session/class/course relationship.
-      allow list: if (isPraktikan()
-          && resource.data.classId is string
-          && praktikanEnrolledInClass(resource.data.classId))
-        || (isAssistant()
-          && resource.data.assistantUid == request.auth.uid
-          && resource.data.semesterParity == request.auth.token.assistantSemesterParity);
-      allow create: if sessionRecordInAssistantScope(request.resource.data)
-        && request.resource.data.startsAt is timestamp
-        && request.resource.data.endsAt is timestamp;
-      allow update: if sessionRecordInAssistantScope(resource.data)
-        && sessionRecordInAssistantScope(request.resource.data)
-        && request.resource.data.startsAt is timestamp
-        && request.resource.data.endsAt is timestamp;
-      // Client deletion could orphan attendance, permit, review, and archive history.
-      // Delete only through a trusted administrative process after checking references.
-      allow delete: if false;
-    }
+      match /sessions/{sessionId} {
+          allow get: if (isPraktikan()
+              && validSession(resource.data)
+              && praktikanEnrolledInClass(resource.data.classId))
+            // Asisten tetap bisa membaca sesinya sendiri walau referensi lamanya
+            // (laboratoryId/scheduleId) sudah tidak ada, supaya sesi tersebut masih
+            // dapat diperbaiki lewat form edit.
+            || (isAssistant()
+              && resource.data.assistantUid == request.auth.uid
+              && resource.data.semesterParity == request.auth.token.assistantSemesterParity);
+          // Queries expose their constrained fields to Rules. Keep list access scoped
+          // to class enrollment or assistant owner/parity; get and all writes validate
+          // the full session/class/course relationship.
+          allow list: if (isPraktikan()
+              && resource.data.classId is string
+              && praktikanEnrolledInClass(resource.data.classId))
+            || (isAssistant()
+              && resource.data.assistantUid == request.auth.uid
+              && resource.data.semesterParity == request.auth.token.assistantSemesterParity);
+          allow create: if sessionRecordInAssistantScope(request.resource.data)
+            && request.resource.data.startsAt is timestamp
+            && request.resource.data.endsAt is timestamp;
+          // Validasi penuh hanya untuk data baru; data lama cukup dipastikan milik
+          // asisten ini agar sesi dengan referensi usang masih bisa disimpan ulang.
+          allow update: if isAssistant()
+            && resource.data.assistantUid == request.auth.uid
+            && resource.data.semesterParity == request.auth.token.assistantSemesterParity
+            && sessionRecordInAssistantScope(request.resource.data)
+            && request.resource.data.startsAt is timestamp
+            && request.resource.data.endsAt is timestamp;
+          // The app deletes only `terjadwal` sessions, keeps `ditutup` ones as history,
+          // and detaches them from a schedule before it is removed. Rules cannot check
+          // attendance/permit/review children, so they authorize the owning assistant.
+          allow delete: if assistantOwnsSession(sessionId);
+        }
 
     match /laboratories/{laboratoryId} {
-      // Laboratory coordinates and radius feed both attendance validation and the
-      // Maps screen, so every signed-in user needs read access. Any assistant may
-      // manage them: laboratories are shared facilities, not per-assistant records.
       allow get, list: if isSignedIn();
       allow create: if isAssistant() && validLaboratory(request.resource.data);
-      // The stored document is deliberately not re-validated: a record saved under
-      // an older, looser contract (for example lantai above the current maximum)
-      // must stay editable, otherwise it becomes permanently unreadable in the UI.
       allow update: if isAssistant()
         && validLaboratory(request.resource.data)
         && request.resource.data.createdAt == resource.data.createdAt;
-      // Permanent deletion is not offered: sessions keep a denormalized
-      // laboratoryId that would dangle, and attendance history references the
-      // laboratory location. Laboratories are deactivated instead (isActive).
+      // Hapus permanen ditutup; laboratorium dinonaktifkan lewat isActive.
       allow delete: if false;
     }
 
@@ -412,18 +406,49 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/studentDirectory/$(request.resource.data.praktikanId)).data.name == request.resource.data.praktikanName
         && exists(userPath(request.resource.data.praktikanId))
         && get(userPath(request.resource.data.praktikanId)).data.role == 'praktikan';
-      // Removing a student from a class only drops class access: attendance,
-      // permit, and review documents are keyed by {sessionId}_{uid} and keep
-      // their own history, so no reference is orphaned here.
       allow delete: if isAssistant()
         && validEnrollment(resource.data, enrollmentId)
         && assistantOwnsClass(resource.data.classId);
       allow update: if false;
     }
 
+    // QR attendance token rules
+    match /attendanceQrTokens/{sessionId} {
+      allow get: if assistantOwnsSession(sessionId);
+      allow list: if false;
+
+      allow create: if assistantOwnsSession(sessionId)
+        && get(/databases/$(database)/documents/sessions/$(sessionId)).data.status == 'dibuka'
+        && request.resource.data.keys().hasAll([
+          'sessionId', 'tokenHash', 'issuedBy',
+          'issuedAt', 'expiresAt', 'revokedAt', 'revokedBy'
+        ])
+        && request.resource.data.keys().hasOnly([
+          'sessionId', 'tokenHash', 'issuedBy',
+          'issuedAt', 'expiresAt', 'revokedAt', 'revokedBy'
+        ])
+        && request.resource.data.sessionId == sessionId
+        && request.resource.data.tokenHash is string
+        && request.resource.data.tokenHash.size() == 64
+        && request.resource.data.issuedBy == request.auth.uid
+        && request.resource.data.issuedAt is timestamp
+        && request.resource.data.expiresAt is timestamp
+        && request.resource.data.expiresAt > request.resource.data.issuedAt
+        && request.resource.data.revokedAt == null
+        && request.resource.data.revokedBy == null;
+
+      allow update: if assistantOwnsSession(sessionId)
+        && resource.data.issuedBy == request.auth.uid
+        && resource.data.revokedAt == null
+        && request.resource.data.revokedAt is timestamp
+        && request.resource.data.revokedBy == request.auth.uid
+        && request.resource.data.diff(resource.data)
+          .affectedKeys().hasOnly(['revokedAt', 'revokedBy']);
+
+      allow delete: if false;
+    }
+
     match /attendances/{attendanceId} {
-      // Transactional check-in reads its not-yet-created deterministic record.
-      // A missing-document read reveals no data; existing reads stay owner-scoped.
       allow get: if (isPraktikan() && resource == null)
         || (isPraktikan()
           && resource.data.praktikanId == request.auth.uid
@@ -452,7 +477,6 @@ service cloud.firestore {
     }
 
     match /permits/{permitId} {
-      // Permit submission checks a missing deterministic record in a transaction.
       allow get: if (isPraktikan() && resource == null)
         || (isPraktikan() && resource.data.studentId == request.auth.uid)
         || assistantOwnsSession(resource.data.sessionId);

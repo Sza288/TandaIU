@@ -2,6 +2,7 @@ import {
   addDoc,
   collection,
   deleteDoc,
+  deleteField,
   doc,
   getDoc,
   getDocs,
@@ -10,6 +11,9 @@ import {
   where,
 } from 'firebase/firestore';
 import { auth, db } from '../lib/firebase';
+
+import { ENROLLMENTS_COLLECTION } from './enrollmentService';
+import { getLaboratoryById } from './laboratoryService';
 
 import { dosen } from '../data/dosen';
 import { courses } from '../data/courses';
@@ -294,9 +298,150 @@ export async function updateSchedule(
   });
 }
 
-export async function deleteSchedule(id: string): Promise<void> {
+/**
+ * Hanya sesi `terjadwal` yang boleh dihapus. Sesi yang sudah dibuka/ditutup
+ * menyimpan riwayat presensi, izin, dan ulasan sehingga tidak ikut dihapus.
+ * Kelas dan jadwal induk sesi tidak disentuh sama sekali.
+ */
+export async function deleteSession(id: string): Promise<void> {
+  const current = await getSessionById(id);
+  if (!current) {
+    throw new Error('Sesi tidak ditemukan.');
+  }
+  if (current.status !== 'terjadwal') {
+    throw new Error(
+      current.status === 'dibuka'
+        ? 'Sesi yang sedang dibuka tidak dapat dihapus. Tutup sesi terlebih dahulu.'
+        : 'Sesi yang sudah ditutup disimpan sebagai riwayat dan tidak dapat dihapus.',
+    );
+  }
+
   return runFirestore(async () => {
+    await deleteDoc(doc(db, COLLECTIONS.sessions, id));
+  });
+}
+
+/**
+ * Menghapus jadwal sekaligus sesi turunannya: sesi `terjadwal` dihapus, sesi
+ * `ditutup` dipertahankan sebagai riwayat dengan melepas referensi scheduleId.
+ * Penghapusan ditolak bila masih ada sesi yang sedang dibuka.
+ */
+export async function deleteSchedule(id: string): Promise<void> {
+  const schedule = await getScheduleById(id);
+  if (!schedule) {
+    throw new Error('Jadwal tidak ditemukan.');
+  }
+  if (!schedule.assistantUid || !schedule.semesterParity) {
+    throw new Error('Jadwal belum memiliki penanggung jawab semester.');
+  }
+  const { assistantUid, semesterParity } = schedule;
+
+  const sessions = await runFirestore(async () => {
+    const snapshot = await getDocs(query(
+      collection(db, COLLECTIONS.sessions),
+      where('assistantUid', '==', assistantUid),
+      where('semesterParity', '==', semesterParity),
+      where('scheduleId', '==', id),
+    ));
+    return snapshot.docs.map((document) => ({
+      id: document.id,
+      status: (document.data() as SessionDoc).status,
+    }));
+  });
+
+  if (sessions.some((session) => session.status === 'dibuka')) {
+    throw new Error(
+      'Masih ada sesi yang sedang dibuka pada jadwal ini. Tutup sesi tersebut terlebih dahulu.',
+    );
+  }
+
+  return runFirestore(async () => {
+    for (const session of sessions) {
+      if (session.status === 'terjadwal') {
+        await deleteDoc(doc(db, COLLECTIONS.sessions, session.id));
+        continue;
+      }
+      // Sesi yang sudah ditutup tetap tersimpan sebagai riwayat. Detail sesi
+      // mensyaratkan scheduleId yang valid, jadi referensi dilepas sebelum
+      // dokumen jadwalnya dihapus.
+      await updateDoc(doc(db, COLLECTIONS.sessions, session.id), {
+        scheduleId: deleteField(),
+      });
+    }
     await deleteDoc(doc(db, COLLECTIONS.schedules, id));
+  });
+}
+
+/**
+ * Kelas hanya dapat dihapus bila tidak lagi memiliki jadwal, sesi `terjadwal`,
+ * maupun sesi `dibuka`. Karena kelas yang hilang membuat sesi turunannya tidak
+ * lagi valid, sesi yang tersisa (riwayat `ditutup`) dan enrollment kelas ikut
+ * dihapus bersama kelasnya.
+ */
+export async function deleteClass(id: string): Promise<void> {
+  const classDoc = await getClassById(id);
+  if (!classDoc) {
+    throw new Error('Kelas tidak ditemukan.');
+  }
+  if (!classDoc.assistantUid || !classDoc.semesterParity) {
+    throw new Error('Kelas belum memiliki penanggung jawab semester.');
+  }
+  const { assistantUid, semesterParity } = classDoc;
+
+  const [sessions, scheduleIds, enrollmentIds] = await runFirestore(async () => {
+    const [sessionSnapshot, scheduleSnapshot, enrollmentSnapshot] = await Promise.all([
+      getDocs(query(
+        collection(db, COLLECTIONS.sessions),
+        where('assistantUid', '==', assistantUid),
+        where('semesterParity', '==', semesterParity),
+        where('classId', '==', id),
+      )),
+      getDocs(query(
+        collection(db, COLLECTIONS.schedules),
+        where('assistantUid', '==', assistantUid),
+        where('semesterParity', '==', semesterParity),
+        where('classId', '==', id),
+      )),
+      getDocs(query(
+        collection(db, ENROLLMENTS_COLLECTION),
+        where('classId', '==', id),
+      )),
+    ]);
+
+    return [
+      sessionSnapshot.docs.map((document) => ({
+        id: document.id,
+        status: (document.data() as SessionDoc).status,
+      })),
+      scheduleSnapshot.docs.map((document) => document.id),
+      enrollmentSnapshot.docs.map((document) => document.id),
+    ] as const;
+  });
+
+  if (scheduleIds.length > 0) {
+    throw new Error(
+      'Kelas masih memiliki jadwal. Hapus jadwal tersebut terlebih dahulu.',
+    );
+  }
+  if (sessions.some((session) => session.status === 'dibuka')) {
+    throw new Error(
+      'Kelas masih memiliki sesi yang sedang dibuka. Tutup sesi tersebut terlebih dahulu.',
+    );
+  }
+  if (sessions.some((session) => session.status === 'terjadwal')) {
+    throw new Error(
+      'Kelas masih memiliki sesi terjadwal. Hapus sesi tersebut terlebih dahulu.',
+    );
+  }
+
+  return runFirestore(async () => {
+    for (const session of sessions) {
+      await deleteDoc(doc(db, COLLECTIONS.sessions, session.id));
+    }
+    for (const enrollmentId of enrollmentIds) {
+      await deleteDoc(doc(db, ENROLLMENTS_COLLECTION, enrollmentId));
+    }
+    await deleteDoc(doc(db, COLLECTIONS.classes, id));
   });
 }
 
@@ -463,6 +608,21 @@ export async function createSession(input: SessionInput): Promise<SessionDoc> {
   });
 }
 
+/**
+ * Jadwal yang sudah dihapus tidak bisa dibaca lagi (rules menolak `get` untuk
+ * dokumen yang tidak ada), jadi kegagalan baca diperlakukan sebagai referensi
+ * yang sudah tidak valid.
+ */
+async function sessionScheduleStillExists(scheduleId?: string): Promise<boolean> {
+  if (!scheduleId) return false;
+  try {
+    const snapshot = await getDoc(doc(db, COLLECTIONS.schedules, scheduleId));
+    return snapshot.exists();
+  } catch {
+    return false;
+  }
+}
+
 export async function updateSession(
   id: string,
   input: SessionInput,
@@ -485,6 +645,20 @@ export async function updateSession(
     throw new Error('Semester kelas belum dikonfigurasi.');
   }
   const laboratoryId = await resolveLaboratory(input.laboratoryId);
+
+  // Referensi lama bisa menunjuk laboratorium/jadwal yang sudah tidak ada
+  // (mis. dinonaktifkan lalu dihapus). Referensi seperti itu dibersihkan saat
+  // sesi disimpan ulang agar dokumen hasil update tetap lolos validasi.
+  const currentLaboratoryExists = current.laboratoryId
+    ? Boolean(await getLaboratoryById(current.laboratoryId))
+    : false;
+  const keptLaboratoryId = laboratoryId
+    ?? (currentLaboratoryExists ? current.laboratoryId : undefined);
+  const keptScheduleId = input.scheduleId
+    ?? ((await sessionScheduleStillExists(current.scheduleId))
+      ? current.scheduleId
+      : undefined);
+
   const payload: Omit<SessionDoc, 'id'> = {
     classId: classDoc.id,
     courseId: classDoc.courseId,
@@ -498,16 +672,20 @@ export async function updateSession(
     semester: classDoc.semester,
     semesterParity: classDoc.semesterParity,
     assistantUid: classDoc.assistantUid,
-    ...(laboratoryId ? { laboratoryId } : {}),
-    ...(input.scheduleId ? { scheduleId: input.scheduleId } : {}),
+    ...(keptLaboratoryId ? { laboratoryId: keptLaboratoryId } : {}),
+    ...(keptScheduleId ? { scheduleId: keptScheduleId } : {}),
   };
 
   return runFirestore(async () => {
-    await updateDoc(doc(db, COLLECTIONS.sessions, id), {
+    const updatePayload: Record<string, unknown> = {
       ...payload,
       startsAt: isoToFirestoreDate(payload.startsAt),
       endsAt: isoToFirestoreDate(payload.endsAt),
-    });
+    };
+    if (!keptLaboratoryId) updatePayload.laboratoryId = deleteField();
+    if (!keptScheduleId) updatePayload.scheduleId = deleteField();
+
+    await updateDoc(doc(db, COLLECTIONS.sessions, id), updatePayload);
     return { id, ...payload };
   });
 }
