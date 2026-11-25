@@ -189,12 +189,12 @@ service cloud.firestore {
     function scheduleRecordInAssistantScope(data) {
       return isAssistant()
         && data.keys().hasAll([
-          'classId', 'courseId', 'dayOfWeek', 'startTime', 'endTime', 'room',
+          'classId', 'courseId', 'dayOfWeek', 'startTime', 'endTime',
           'semesterParity', 'assistantUid'
         ])
         && data.keys().hasOnly([
-          'classId', 'courseId', 'dayOfWeek', 'startTime', 'endTime', 'room',
-          'semesterParity', 'assistantUid', 'jumlahPertemuan'
+          'classId', 'courseId', 'dayOfWeek', 'startTime', 'endTime',
+          'semesterParity', 'assistantUid', 'laboratoryId', 'room', 'jumlahPertemuan'
         ])
         && data.classId is string
         && data.courseId is string
@@ -203,7 +203,10 @@ service cloud.firestore {
         && data.dayOfWeek <= 6
         && data.startTime is string
         && data.endTime is string
-        && data.room is string
+        && ((data.keys().hasAny(['laboratoryId'])
+            && data.laboratoryId is string
+            && exists(/databases/$(database)/documents/laboratories/$(data.laboratoryId)))
+          || (data.keys().hasAny(['room']) && data.room is string))
         && ((!data.keys().hasAny(['jumlahPertemuan']))
           || (data.jumlahPertemuan is int
             && data.jumlahPertemuan >= 1

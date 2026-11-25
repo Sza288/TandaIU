@@ -56,7 +56,7 @@ const validSchedule: ScheduleInput = {
   dayOfWeek: 1,
   startTime: '08:00',
   endTime: '10:00',
-  room: 'Lab A',
+  laboratoryId: 'lab-b',
 };
 
 const validClass: ClassInput = {
@@ -183,7 +183,7 @@ describe('validateScheduleInput', () => {
   });
 
   it('rejects empty fields and times that do not advance', () => {
-    expect(() => validateScheduleInput({ ...validSchedule, room: '   ' })).toThrow();
+    expect(() => validateScheduleInput({ ...validSchedule, laboratoryId: '   ' })).toThrow();
     expect(() =>
       validateScheduleInput({ ...validSchedule, endTime: validSchedule.startTime }),
     ).toThrow(/setelah waktu mulai/i);

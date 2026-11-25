@@ -303,6 +303,11 @@ export default function ManageScreen() {
             {schedules.data.map((item) => {
               const classDoc = classById.get(item.classId);
               const dayLabel = DAY_LABELS[item.dayOfWeek] ?? '-';
+              const laboratoryName = (item.laboratoryId
+                ? laboratoryById.get(item.laboratoryId)?.name
+                : undefined)
+                ?? item.room
+                ?? 'Laboratorium tidak diketahui';
 
               return (
                 <CrudCard
@@ -319,7 +324,7 @@ export default function ManageScreen() {
                   <Text style={styles.meta}>
                     {dayLabel} · {item.startTime}-{item.endTime}
                   </Text>
-                  <Text style={styles.meta}>Ruang {item.room}</Text>
+                  <Text style={styles.meta}>Laboratorium {laboratoryName}</Text>
                   <Text style={styles.meta}>
                     {item.jumlahPertemuan
                       ? `${item.jumlahPertemuan} pertemuan`
@@ -327,7 +332,7 @@ export default function ManageScreen() {
                   </Text>
                   <Pressable
                     accessibilityRole="button"
-                    accessibilityLabel={`Buat sesi dari jadwal ${item.room}`}
+                    accessibilityLabel={`Buat sesi dari jadwal ${laboratoryName}`}
                     onPress={() => router.push(manageHref('/assistant/manage/schedule-generate', item.id))}
                     style={({ pressed }) => [
                       styles.generateButton,

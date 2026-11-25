@@ -98,7 +98,7 @@ export function validateClassInput(input: ClassInput): void {
 export function validateScheduleInput(input: ScheduleInput): void {
   requireNonEmpty(input.classId, 'Kelas');
   requireNonEmpty(input.courseId, 'Mata kuliah');
-  requireNonEmpty(input.room, 'Ruangan');
+  requireNonEmpty(input.laboratoryId, 'Laboratorium');
 
   if (
     !Number.isInteger(input.dayOfWeek) ||
@@ -291,8 +291,13 @@ export async function createSchedule(
       || !classDoc.semesterParity) {
       throw new Error('Pilih kelas yang berada di bawah tanggung jawab akun ini.');
     }
+    const laboratoryId = await resolveLaboratory(input.laboratoryId);
+    if (!laboratoryId) {
+      throw new Error('Laboratorium tidak ditemukan.');
+    }
     const payload: ScheduleInput = {
       ...input,
+      laboratoryId,
       semesterParity: classDoc.semesterParity,
       assistantUid: classDoc.assistantUid,
     };
@@ -313,8 +318,13 @@ export async function updateSchedule(
       || !classDoc.semesterParity) {
       throw new Error('Pilih kelas yang berada di bawah tanggung jawab akun ini.');
     }
+    const laboratoryId = await resolveLaboratory(input.laboratoryId);
+    if (!laboratoryId) {
+      throw new Error('Laboratorium tidak ditemukan.');
+    }
     const payload: ScheduleInput = {
       ...input,
+      laboratoryId,
       semesterParity: classDoc.semesterParity,
       assistantUid: classDoc.assistantUid,
     };
