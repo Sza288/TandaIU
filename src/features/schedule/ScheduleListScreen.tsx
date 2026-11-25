@@ -311,6 +311,7 @@ export default function ScheduleListScreen() {
                 key={session.id}
                 session={session}
                 role={activeRole}
+                sessions={visibleSessions}
               />
             ))}
           </View>

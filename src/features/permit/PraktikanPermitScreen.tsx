@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -28,6 +28,14 @@ import { PermitStatusBadge } from './PermitBadges';
 
 const MIN_REASON_LENGTH = 10;
 const MAX_REASON_LENGTH = 280;
+
+function isPermitEligibleSession(session: PracticumSession, now = Date.now()): boolean {
+  if (session.status !== 'terjadwal' && session.status !== 'dibuka') {
+    return false;
+  }
+  const endsAtMs = Date.parse(session.endsAt);
+  return Number.isFinite(endsAtMs) && endsAtMs > now;
+}
 
 type Feedback = {
   tone: 'success' | 'warning' | 'error';
@@ -61,10 +69,22 @@ export default function PraktikanPermitScreen() {
   const sessionsLoading = sessionResult.loading || enrollmentResult.loading;
   const sessionsError = sessionResult.error ?? enrollmentResult.error;
 
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(timer);
+  }, []);
+
   const eligibleSessions = useMemo(
     () =>
       sessions
-        .filter((session) => session.classId && enrolledClassIds.has(session.classId))
+        .filter(
+          (session) =>
+            session.classId
+            && enrolledClassIds.has(session.classId)
+            && isPermitEligibleSession(session, now),
+        )
         .sort((a, b) => {
           if (a.status !== b.status) {
             if (a.status === 'dibuka') return -1;
@@ -72,7 +92,7 @@ export default function PraktikanPermitScreen() {
           }
           return Date.parse(b.startsAt) - Date.parse(a.startsAt);
         }),
-    [enrolledClassIds, sessions],
+    [enrolledClassIds, now, sessions],
   );
 
   const myPermits = useMemo(
@@ -107,6 +127,14 @@ export default function PraktikanPermitScreen() {
   };
 
   const handleChooseSession = (session: PracticumSession) => {
+    if (!isPermitEligibleSession(session)) {
+      setFeedback({
+        tone: 'error',
+        title: 'Sesi tidak dapat diajukan izin',
+        message: 'Izin hanya dapat diajukan untuk sesi terjadwal atau dibuka yang belum melewati tanggal/jam selesai.',
+      });
+      return;
+    }
     if (submittedSessionIds.has(session.id)) {
       setFeedback({
         tone: 'error',
@@ -125,6 +153,15 @@ export default function PraktikanPermitScreen() {
         tone: 'error',
         title: 'Sesi belum dipilih',
         message: 'Pilih sesi praktikum yang ingin diajukan izinnya.',
+      });
+      return;
+    }
+    const chosenSession = sessionById.get(sessionId);
+    if (!chosenSession || !isPermitEligibleSession(chosenSession)) {
+      setFeedback({
+        tone: 'error',
+        title: 'Sesi tidak dapat diajukan izin',
+        message: 'Izin hanya dapat diajukan untuk sesi terjadwal atau dibuka yang belum melewati tanggal/jam selesai.',
       });
       return;
     }

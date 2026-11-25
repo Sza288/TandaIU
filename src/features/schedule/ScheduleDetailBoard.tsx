@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { doc, onSnapshot } from 'firebase/firestore';
 import {
   ActivityIndicator,
   Pressable,
@@ -12,10 +13,14 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import SessionCard from '../../components/SessionCard';
 import { useClasses } from '../../hooks/useClasses';
-import { useSchedules } from '../../hooks/useSchedules';
+import { useLaboratories } from '../../hooks/useLaboratories';
 import { useSessions } from '../../hooks/useSessions';
+import { db } from '../../lib/firebase';
 import { useAuthSession } from '../auth/AuthSessionContext';
-import { getCourseName, goBackOr } from '../crud/crud.utils';
+import { goBackOr, manageHref } from '../crud/crud.utils';
+import { COLLECTIONS, type ScheduleDoc } from '../../types/praktikum';
+import { getCourseById } from '../../utils/academic';
+import { getEffectiveSessionStatus } from '../../utils/session';
 import { colors, fonts, radius, shadows, spacing } from '../../theme';
 
 const DAY_LABEL: Record<number, string> = {
@@ -28,6 +33,21 @@ const DAY_LABEL: Record<number, string> = {
   6: 'Sabtu',
 };
 
+function mapScheduleError(error: unknown): string {
+  const code =
+    typeof error === 'object' && error !== null && 'code' in error
+      ? String((error as { code?: unknown }).code)
+      : '';
+
+  if (code.includes('permission-denied')) {
+    return 'Anda tidak memiliki izin melihat jadwal ini';
+  }
+  if (code.includes('unavailable')) {
+    return 'Koneksi bermasalah';
+  }
+  return 'Terjadi kesalahan saat memuat jadwal.';
+}
+
 export default function ScheduleDetailScreen() {
   const params = useLocalSearchParams<{ id?: string | string[] }>();
   const scheduleId = Array.isArray(params.id) ? params.id[0] : params.id;
@@ -35,15 +55,54 @@ export default function ScheduleDetailScreen() {
   const authSession = useAuthSession();
   const profile = authSession?.status === 'authenticated' ? authSession.profile : null;
   const role = profile?.role ?? null;
+  const authStatus = authSession?.status ?? 'loading';
 
-  const scheduleResult = useSchedules();
   const sessionResult = useSessions();
-  const classResult = useClasses();
+  const laboratoryResult = useLaboratories();
+  const [scheduleData, setScheduleData] = useState<ScheduleDoc | null>(null);
+  const [scheduleErrorState, setScheduleErrorState] = useState<string | null>(null);
+  const [resolvedKey, setResolvedKey] = useState<string | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+  const canLoadSchedule = Boolean(scheduleId) && authStatus === 'authenticated';
 
-  const schedule = scheduleResult.data.find((item) => item.id === scheduleId);
+  useEffect(() => {
+    const interval = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    if (!scheduleId || authStatus !== 'authenticated') return undefined;
+
+    const unsubscribe = onSnapshot(
+      doc(db, COLLECTIONS.schedules, scheduleId),
+      (snapshot) => {
+        setScheduleData(snapshot.exists()
+          ? { id: snapshot.id, ...(snapshot.data() as Omit<ScheduleDoc, 'id'>) }
+          : null);
+        setScheduleErrorState(null);
+        setResolvedKey(scheduleId);
+      },
+      (snapshotError) => {
+        setScheduleData(null);
+        setScheduleErrorState(mapScheduleError(snapshotError));
+        setResolvedKey(scheduleId);
+      },
+    );
+    return unsubscribe;
+  }, [authStatus, scheduleId]);
+
+  const schedule = resolvedKey === scheduleId ? scheduleData : null;
+  const classResult = useClasses(schedule ? { classId: schedule.classId } : undefined);
+  const scheduleError = resolvedKey === scheduleId ? scheduleErrorState : null;
   const classDoc = schedule
     ? classResult.data.find((item) => item.id === schedule.classId)
     : undefined;
+  const visibleSchedule = schedule && classDoc ? schedule : null;
+  const laboratoryName = visibleSchedule
+    ? laboratoryResult.data.find((item) => item.id === visibleSchedule.laboratoryId)?.name
+      ?? visibleSchedule.room
+      ?? 'Laboratorium tidak diketahui'
+    : '';
 
   const sessions = useMemo(
     () =>
@@ -53,12 +112,17 @@ export default function ScheduleDetailScreen() {
     [sessionResult.data, scheduleId],
   );
 
-  const loading = scheduleResult.loading || sessionResult.loading;
-  const error = scheduleResult.error ?? sessionResult.error;
+  const loading = authStatus === 'loading'
+    || (canLoadSchedule && resolvedKey !== scheduleId)
+    || sessionResult.loading
+    || classResult.loading;
+  const error = scheduleError ?? classResult.error ?? sessionResult.error;
 
   const handleBack = () => goBackOr(router, '/schedule');
 
-  const title = schedule ? getCourseName(schedule.courseId) : 'Detail Jadwal';
+  const title = schedule
+    ? getCourseById(schedule.courseId)?.name ?? classDoc?.className ?? 'Detail Jadwal'
+    : 'Detail Jadwal';
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
@@ -90,13 +154,20 @@ export default function ScheduleDetailScreen() {
             <Text style={styles.stateTitle}>Jadwal tidak dapat dimuat</Text>
             <Text style={styles.stateText}>{error}</Text>
           </View>
-        ) : !schedule ? (
+        ) : !visibleSchedule ? (
           <View style={styles.stateCard}>
             <Ionicons name="calendar-outline" size={32} color={colors.textSecondary} />
             <Text style={styles.stateTitle}>Jadwal tidak ditemukan</Text>
             <Text style={styles.stateText}>
-              Jadwal ini mungkin sudah dihapus atau di luar kewenangan akun Anda.
+              Jadwal ini sudah dihapus, kelasnya tidak tersedia, atau di luar kewenangan akun Anda.
             </Text>
+            <Pressable
+              accessibilityRole="button"
+              onPress={handleBack}
+              style={styles.stateAction}
+            >
+              <Text style={styles.stateActionText}>Kembali ke Jadwal</Text>
+            </Pressable>
           </View>
         ) : (
           <>
@@ -104,23 +175,23 @@ export default function ScheduleDetailScreen() {
               <View style={styles.infoRow}>
                 <Ionicons name="calendar-outline" size={16} color={colors.primary} />
                 <Text style={styles.infoText}>
-                  {DAY_LABEL[schedule.dayOfWeek] ?? 'Hari tidak valid'}
+                  {DAY_LABEL[visibleSchedule.dayOfWeek] ?? 'Hari tidak valid'}
                 </Text>
               </View>
               <View style={styles.infoRow}>
                 <Ionicons name="time-outline" size={16} color={colors.primary} />
                 <Text style={styles.infoText}>
-                  {schedule.startTime}–{schedule.endTime} WIB
+                  {visibleSchedule.startTime}–{visibleSchedule.endTime} WIB
                 </Text>
               </View>
               <View style={styles.infoRow}>
                 <Ionicons name="location-outline" size={16} color={colors.primary} />
-                <Text style={styles.infoText}>{schedule.room}</Text>
+                <Text style={styles.infoText}>{laboratoryName}</Text>
               </View>
               <View style={styles.infoRow}>
                 <Ionicons name="school-outline" size={16} color={colors.primary} />
                 <Text style={styles.infoText}>
-                  {classDoc ? `Kelas ${classDoc.className}` : schedule.classId}
+                  {classDoc ? `Kelas ${classDoc.className}` : visibleSchedule.classId}
                 </Text>
               </View>
             </View>
@@ -140,7 +211,40 @@ export default function ScheduleDetailScreen() {
             ) : (
               <View style={styles.list}>
                 {sessions.map((session) => (
-                  <SessionCard key={session.id} session={session} role={role} />
+                  <View key={session.id} style={styles.sessionItem}>
+                    <SessionCard
+                      session={session}
+                      role={role}
+                      sessions={sessions}
+                    />
+                    {role === 'asisten' && getEffectiveSessionStatus(session, now) === 'terjadwal' ? (
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel={`Pindah jadwal ${session.practicumName}`}
+                        onPress={() =>
+                          router.push(
+                            manageHref('/assistant/manage/session-form', session.id),
+                          )
+                        }
+                        style={({ pressed }) => [
+                          styles.moveScheduleButton,
+                          pressed ? styles.moveScheduleButtonPressed : null,
+                        ]}
+                      >
+                        <Ionicons
+                          name="calendar-outline"
+                          size={15}
+                          color={colors.primaryDark}
+                        />
+                        <Text style={styles.moveScheduleText}>Pindah Jadwal</Text>
+                        <Ionicons
+                          name="chevron-forward"
+                          size={15}
+                          color={colors.primaryDark}
+                        />
+                      </Pressable>
+                    ) : null}
+                  </View>
                 ))}
               </View>
             )}
@@ -226,11 +330,36 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     marginTop: spacing.xs,
+    gap: spacing.sm,
   },
   sectionTitle: {
     color: colors.text,
     fontFamily: fonts.heading,
     fontSize: 16,
+  },
+  sectionActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  addButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 6,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    backgroundColor: colors.primarySofter,
+  },
+  addButtonText: {
+    color: colors.primaryDark,
+    fontFamily: fonts.bold,
+    fontSize: 11,
+  },
+  pressed: {
+    opacity: 0.7,
   },
   sectionCount: {
     color: colors.textMuted,
@@ -239,6 +368,28 @@ const styles = StyleSheet.create({
   },
   list: {
     gap: spacing.md,
+  },
+  sessionItem: {
+    gap: spacing.xs,
+  },
+  moveScheduleButton: {
+    minHeight: 40,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.primarySofter,
+    backgroundColor: colors.primarySofter,
+  },
+  moveScheduleButtonPressed: {
+    opacity: 0.75,
+  },
+  moveScheduleText: {
+    color: colors.primaryDark,
+    fontFamily: fonts.bold,
+    fontSize: 12,
   },
   stateCard: {
     alignItems: 'center',
@@ -249,6 +400,18 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     backgroundColor: colors.surface,
     ...shadows.card,
+  },
+  stateAction: {
+    marginTop: spacing.sm,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.pill,
+    backgroundColor: colors.primary,
+  },
+  stateActionText: {
+    color: colors.surface,
+    fontFamily: fonts.semiBold,
+    fontSize: 12,
   },
   stateTitle: {
     color: colors.text,
