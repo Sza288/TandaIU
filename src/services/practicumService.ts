@@ -4,6 +4,7 @@ import {
   deleteDoc,
   deleteField,
   doc,
+  documentId,
   getDoc,
   getDocs,
   query,
@@ -24,6 +25,7 @@ import {
   type ClassDoc,
   type ClassInput,
   type ClockTime,
+  type DayOfWeek,
   type LecturerId,
   type ScheduleDoc,
   type ScheduleInput,
@@ -37,6 +39,33 @@ const ISO_DATE_TIME_PATTERN =
 const CLOCK_TIME_PATTERN = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
 
 const SESSION_STATUSES: SessionStatus[] = ['terjadwal', 'dibuka', 'ditutup'];
+
+const SESSION_CHILD_COLLECTIONS = [
+  'attendances',
+  'permits',
+  'reviews',
+] as const;
+
+async function deleteSessionChildren(sessionIds: string[]): Promise<void> {
+  if (sessionIds.length === 0) return;
+
+  const snapshots = await Promise.all(
+    sessionIds.flatMap((sessionId) =>
+      SESSION_CHILD_COLLECTIONS.map((collectionName) =>
+        getDocs(query(
+          collection(db, collectionName),
+          where('sessionId', '==', sessionId),
+        )))),
+  );
+
+  for (const reference of snapshots.flatMap((snapshot) =>
+    snapshot.docs.map((document) => document.ref))) {
+    await deleteDoc(reference);
+  }
+  for (const sessionId of sessionIds) {
+    await deleteDoc(doc(db, 'attendanceQrTokens', sessionId));
+  }
+}
 
 function requireNonEmpty(value: string, label: string): void {
   if (typeof value !== 'string' || value.trim() === '') {
@@ -73,7 +102,7 @@ export function validateClassInput(input: ClassInput): void {
 export function validateScheduleInput(input: ScheduleInput): void {
   requireNonEmpty(input.classId, 'Kelas');
   requireNonEmpty(input.courseId, 'Mata kuliah');
-  requireNonEmpty(input.room, 'Ruangan');
+  requireNonEmpty(input.laboratoryId, 'Laboratorium');
 
   if (
     !Number.isInteger(input.dayOfWeek) ||
@@ -129,6 +158,38 @@ async function resolveLaboratory(laboratoryId?: string): Promise<string | null> 
   return laboratoryId;
 }
 
+function scheduleMatchFromStart(startsAt: string): {
+  dayOfWeek: DayOfWeek;
+  startTime: ClockTime;
+} | null {
+  const date = new Date(startsAt);
+  if (Number.isNaN(date.getTime())) return null;
+
+  const wib = new Date(date.getTime() + 7 * 60 * 60 * 1000);
+  const pad = (value: number) => String(value).padStart(2, '0');
+  return {
+    dayOfWeek: wib.getUTCDay() as DayOfWeek,
+    startTime: `${pad(wib.getUTCHours())}:${pad(wib.getUTCMinutes())}` as ClockTime,
+  };
+}
+
+async function resolveScheduleIdForSession(
+  input: SessionInput,
+  classDoc: ClassDoc,
+): Promise<string | undefined> {
+  if (input.scheduleId) return input.scheduleId;
+
+  const match = scheduleMatchFromStart(input.startsAt);
+  if (!match) return undefined;
+
+  const schedules = await getAllSchedules();
+  return schedules.find((schedule) =>
+    schedule.classId === classDoc.id
+    && schedule.semesterParity === classDoc.semesterParity
+    && schedule.dayOfWeek === match.dayOfWeek
+    && schedule.startTime === match.startTime)?.id;
+}
+
 function resolveLecturer(lecturerId: LecturerId, lecturer: string): string {
   const selected = dosen.find((item) => item.id === lecturerId);
   if (!selected) {
@@ -141,11 +202,34 @@ function resolveLecturer(lecturerId: LecturerId, lecturer: string): string {
   return selected.name;
 }
 
+async function getClassForSession(classId: string): Promise<ClassDoc | null> {
+  const user = auth.currentUser;
+  if (!user) throw new Error('Akun Asprak tidak valid.');
+  const token = await user.getIdTokenResult();
+  const parity = token.claims.assistantSemesterParity;
+  if (parity !== 'ganjil' && parity !== 'genap') {
+    throw new Error('Penugasan semester akun Asprak belum dikonfigurasi.');
+  }
+
+  return runFirestore(async () => {
+    const snapshot = await getDocs(query(
+      collection(db, COLLECTIONS.classes),
+      where('assistantUid', '==', user.uid),
+      where('semesterParity', '==', parity),
+      where(documentId(), '==', classId),
+    ));
+    const classSnapshot = snapshot.docs[0];
+    return classSnapshot
+      ? { id: classSnapshot.id, ...(classSnapshot.data() as Omit<ClassDoc, 'id'>) }
+      : null;
+  });
+}
+
 async function resolveSessionClass(
   classId: string,
   courseId: string,
 ): Promise<ClassDoc> {
-  const selected = await getClassById(classId);
+  const selected = await getClassForSession(classId);
   if (!selected) {
     throw new Error('Kelas tidak ditemukan.');
   }
@@ -198,6 +282,24 @@ function mapFirestoreError(error: unknown): Error {
     return new Error('Koneksi bermasalah, coba lagi');
   }
   return new Error('Terjadi kesalahan saat menghubungi server. Silakan coba lagi.');
+}
+
+async function withStage<T>(stage: string, operation: () => Promise<T>): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    const detail = error instanceof Error && error.message.trim()
+      ? error.message
+      : 'akses ditolak';
+    throw new Error(`${stage}: ${detail}`);
+  }
+}
+
+function isPermissionDenied(error: unknown): boolean {
+  return typeof error === 'object'
+    && error !== null
+    && 'code' in error
+    && String((error as FirestoreErrorLike).code).includes('permission-denied');
 }
 
 async function runFirestore<T>(operation: () => Promise<T>): Promise<T> {
@@ -266,8 +368,13 @@ export async function createSchedule(
       || !classDoc.semesterParity) {
       throw new Error('Pilih kelas yang berada di bawah tanggung jawab akun ini.');
     }
+    const laboratoryId = await resolveLaboratory(input.laboratoryId);
+    if (!laboratoryId) {
+      throw new Error('Laboratorium tidak ditemukan.');
+    }
     const payload: ScheduleInput = {
       ...input,
+      laboratoryId,
       semesterParity: classDoc.semesterParity,
       assistantUid: classDoc.assistantUid,
     };
@@ -288,8 +395,13 @@ export async function updateSchedule(
       || !classDoc.semesterParity) {
       throw new Error('Pilih kelas yang berada di bawah tanggung jawab akun ini.');
     }
+    const laboratoryId = await resolveLaboratory(input.laboratoryId);
+    if (!laboratoryId) {
+      throw new Error('Laboratorium tidak ditemukan.');
+    }
     const payload: ScheduleInput = {
       ...input,
+      laboratoryId,
       semesterParity: classDoc.semesterParity,
       assistantUid: classDoc.assistantUid,
     };
@@ -321,11 +433,6 @@ export async function deleteSession(id: string): Promise<void> {
   });
 }
 
-/**
- * Menghapus jadwal sekaligus sesi turunannya: sesi `terjadwal` dihapus, sesi
- * `ditutup` dipertahankan sebagai riwayat dengan melepas referensi scheduleId.
- * Penghapusan ditolak bila masih ada sesi yang sedang dibuka.
- */
 export async function deleteSchedule(id: string): Promise<void> {
   const schedule = await getScheduleById(id);
   if (!schedule) {
@@ -336,37 +443,20 @@ export async function deleteSchedule(id: string): Promise<void> {
   }
   const { assistantUid, semesterParity } = schedule;
 
-  const sessions = await runFirestore(async () => {
+  const sessionIds = await runFirestore(async () => {
     const snapshot = await getDocs(query(
       collection(db, COLLECTIONS.sessions),
       where('assistantUid', '==', assistantUid),
       where('semesterParity', '==', semesterParity),
       where('scheduleId', '==', id),
     ));
-    return snapshot.docs.map((document) => ({
-      id: document.id,
-      status: (document.data() as SessionDoc).status,
-    }));
+    return snapshot.docs.map((document) => document.id);
   });
 
-  if (sessions.some((session) => session.status === 'dibuka')) {
-    throw new Error(
-      'Masih ada sesi yang sedang dibuka pada jadwal ini. Tutup sesi tersebut terlebih dahulu.',
-    );
-  }
-
   return runFirestore(async () => {
-    for (const session of sessions) {
-      if (session.status === 'terjadwal') {
-        await deleteDoc(doc(db, COLLECTIONS.sessions, session.id));
-        continue;
-      }
-      // Sesi yang sudah ditutup tetap tersimpan sebagai riwayat. Detail sesi
-      // mensyaratkan scheduleId yang valid, jadi referensi dilepas sebelum
-      // dokumen jadwalnya dihapus.
-      await updateDoc(doc(db, COLLECTIONS.sessions, session.id), {
-        scheduleId: deleteField(),
-      });
+    await deleteSessionChildren(sessionIds);
+    for (const sessionId of sessionIds) {
+      await deleteDoc(doc(db, COLLECTIONS.sessions, sessionId));
     }
     await deleteDoc(doc(db, COLLECTIONS.schedules, id));
   });
@@ -435,6 +525,7 @@ export async function deleteClass(id: string): Promise<void> {
   }
 
   return runFirestore(async () => {
+    await deleteSessionChildren(sessions.map((session) => session.id));
     for (const session of sessions) {
       await deleteDoc(doc(db, COLLECTIONS.sessions, session.id));
     }
@@ -467,22 +558,26 @@ export async function generateSessionsFromSchedule(
   }
   requireNonEmpty(input.laboratoryId, 'Laboratorium');
 
-  const schedule = await getScheduleById(input.scheduleId);
+  const schedule = await withStage('Gagal memuat jadwal', () => getScheduleById(input.scheduleId));
   if (!schedule) {
     throw new Error('Jadwal tidak ditemukan.');
   }
-  const classDoc = await resolveSessionClass(schedule.classId, schedule.courseId);
-  if (classDoc.semesterParity !== 'ganjil' && classDoc.semesterParity !== 'genap') {
+  const classDoc = await withStage('Gagal memuat kelas', () =>
+    resolveSessionClass(schedule.classId, schedule.courseId));
+  const semesterParity = classDoc.semesterParity;
+  if (semesterParity !== 'ganjil' && semesterParity !== 'genap') {
     throw new Error('Semester kelas belum dikonfigurasi.');
   }
 
   const lecturer = resolveLecturer(input.lecturerId, input.lecturer);
-  const laboratoryId = await resolveLaboratory(input.laboratoryId);
+  const laboratoryId = await withStage('Gagal memuat laboratorium', () =>
+    resolveLaboratory(input.laboratoryId));
   if (!laboratoryId) {
     throw new Error('Laboratorium tidak ditemukan.');
   }
 
-  const existing = await getSessionsForClass(schedule.classId, classDoc.semesterParity);
+  const existing = await withStage('Gagal memuat sesi', () =>
+    getSessionsForClass(schedule.classId, semesterParity));
   const taken = new Set(
     existing.map((session) => session.startsAt.slice(0, 10)),
   );
@@ -527,7 +622,12 @@ export async function generateSessionsFromSchedule(
         endsAt: isoToFirestoreDate(payload.endsAt),
       });
       created.push(reference.id);
-    } catch {
+    } catch (error) {
+      if (isPermissionDenied(error)) {
+        throw new Error(
+          'Gagal menyimpan sesi: Anda tidak memiliki izin untuk melakukan aksi ini',
+        );
+      }
       failed.push(date);
     }
   }
@@ -561,8 +661,19 @@ export async function getScheduleById(
 }
 
 export async function getAllSchedules(): Promise<ScheduleDoc[]> {
+  const user = auth.currentUser;
+  if (!user) throw new Error('Akun Asprak tidak valid.');
+  const token = await user.getIdTokenResult();
+  const parity = token.claims.assistantSemesterParity;
+  if (parity !== 'ganjil' && parity !== 'genap') {
+    throw new Error('Penugasan semester akun Asprak belum dikonfigurasi.');
+  }
   return runFirestore(async () => {
-    const snapshot = await getDocs(collection(db, COLLECTIONS.schedules));
+    const snapshot = await getDocs(query(
+      collection(db, COLLECTIONS.schedules),
+      where('assistantUid', '==', user.uid),
+      where('semesterParity', '==', parity),
+    ));
     return snapshot.docs.map((document) => ({
       id: document.id,
       ...(document.data() as Omit<ScheduleDoc, 'id'>),
@@ -581,6 +692,7 @@ export async function createSession(input: SessionInput): Promise<SessionDoc> {
     throw new Error('Laboratorium wajib dipilih.');
   }
   const laboratoryId = await resolveLaboratory(input.laboratoryId);
+  const scheduleId = await resolveScheduleIdForSession(input, classDoc);
   const payload: Omit<SessionDoc, 'id'> = {
     classId: classDoc.id,
     courseId: classDoc.courseId,
@@ -595,7 +707,7 @@ export async function createSession(input: SessionInput): Promise<SessionDoc> {
     semesterParity: classDoc.semesterParity,
     assistantUid: classDoc.assistantUid,
     ...(laboratoryId ? { laboratoryId } : {}),
-    ...(input.scheduleId ? { scheduleId: input.scheduleId } : {}),
+    ...(scheduleId ? { scheduleId } : {}),
   };
 
   return runFirestore(async () => {
@@ -654,7 +766,7 @@ export async function updateSession(
     : false;
   const keptLaboratoryId = laboratoryId
     ?? (currentLaboratoryExists ? current.laboratoryId : undefined);
-  const keptScheduleId = input.scheduleId
+  const keptScheduleId = await resolveScheduleIdForSession(input, classDoc)
     ?? ((await sessionScheduleStillExists(current.scheduleId))
       ? current.scheduleId
       : undefined);

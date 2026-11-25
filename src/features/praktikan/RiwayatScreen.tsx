@@ -9,7 +9,6 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import BottomNav from '../../components/BottomNav';
 import PracticumIcon from '../../components/PracticumIcon';
 import ScreenHeader from '../../components/ScreenHeader';
 import { usePraktikanAttendance } from '../../hooks/useAttendanceRecords';
@@ -115,8 +114,6 @@ export default function RiwayatScreen() {
           </>
         )}
       </ScrollView>
-
-      <BottomNav />
     </SafeAreaView>
   );
 }

@@ -13,12 +13,11 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import BottomNav from '../../components/BottomNav';
 import { useClasses } from '../../hooks/useClasses';
 import { useEnrollments } from '../../hooks/useEnrollments';
+import { useLaboratories } from '../../hooks/useLaboratories';
 import { useSchedules } from '../../hooks/useSchedules';
 import { useAuthSession } from '../auth/AuthSessionContext';
-import {
-  getCourseName,
-  goBackOr,
-} from '../crud/crud.utils';
+import { goBackOr } from '../crud/crud.utils';
+import { getCourseById } from '../../utils/academic';
 import type { ScheduleDoc } from '../../types/praktikum';
 import { colors, fonts, radius, shadows, spacing } from '../../theme';
 
@@ -52,16 +51,22 @@ export default function ScheduleBoardScreen() {
   const scheduleResult = useSchedules(
     role === 'praktikan' ? { classIds: enrolledClassIds } : undefined,
   );
-  const classResult = useClasses();
+  const classResult = useClasses({ classIds: enrolledClassIds });
+  const laboratoryResult = useLaboratories();
 
   const classById = useMemo(
     () => new Map(classResult.data.map((item) => [item.id, item])),
     [classResult.data],
   );
+  const laboratoryById = useMemo(
+    () => new Map(laboratoryResult.data.map((item) => [item.id, item])),
+    [laboratoryResult.data],
+  );
 
   const groups = useMemo(() => {
     const byDay = new Map<DayKey, ScheduleDoc[]>();
     for (const schedule of scheduleResult.data) {
+      if (!classById.has(schedule.classId)) continue;
       const day = schedule.dayOfWeek as DayKey;
       if (!WEEKDAYS.includes(day)) continue;
       const current = byDay.get(day) ?? [];
@@ -76,11 +81,13 @@ export default function ScheduleBoardScreen() {
           (a, b) => a.startTime.localeCompare(b.startTime),
         ),
       }));
-  }, [scheduleResult.data]);
+  }, [classById, scheduleResult.data]);
 
-  const loading = scheduleResult.loading
+  const loading = classResult.loading
+    || scheduleResult.loading
     || (role === 'praktikan' && enrollmentResult.loading);
-  const error = scheduleResult.error
+  const error = classResult.error
+    ?? scheduleResult.error
     ?? (role === 'praktikan' ? enrollmentResult.error : null);
 
   const handleBack = () => goBackOr(router, role === 'praktikan' ? '/praktikan' : '/assistant');
@@ -107,7 +114,7 @@ export default function ScheduleBoardScreen() {
         </View>
 
         <Text style={styles.subtitle}>
-          Pola jadwal praktikum per hari. Ketuk jadwal untuk melihat sesi pertemuannya.
+          Pola jadwal praktikum per hari. Ketuk jadwal untuk melihat detailnya.
         </Text>
 
         {loading ? (
@@ -140,7 +147,14 @@ export default function ScheduleBoardScreen() {
 
               {schedules.map((schedule) => {
                 const classDoc = classById.get(schedule.classId);
-                const courseName = getCourseName(schedule.courseId);
+                const laboratoryName = (schedule.laboratoryId
+                  ? laboratoryById.get(schedule.laboratoryId)?.name
+                  : undefined)
+                  ?? schedule.room
+                  ?? 'Laboratorium tidak diketahui';
+                const courseName = getCourseById(schedule.courseId)?.name
+                  ?? classDoc?.className
+                  ?? 'Praktikum';
 
                 return (
                   <Pressable
@@ -168,20 +182,12 @@ export default function ScheduleBoardScreen() {
                       <View style={styles.metaRow}>
                         <Ionicons name="school-outline" size={12} color={colors.textMuted} />
                         <Text style={styles.metaText}>
-                          {classDoc ? `Kelas ${classDoc.className}` : schedule.classId}
+                          {classDoc ? `Kelas ${classDoc.className}` : 'Kelas tidak diketahui'}
                         </Text>
                       </View>
                       <View style={styles.metaRow}>
                         <Ionicons name="location-outline" size={12} color={colors.textMuted} />
-                        <Text style={styles.metaText} numberOfLines={1}>{schedule.room}</Text>
-                      </View>
-                      <View style={styles.metaRow}>
-                        <Ionicons name="repeat-outline" size={12} color={colors.textMuted} />
-                        <Text style={styles.metaText}>
-                          {schedule.jumlahPertemuan
-                            ? `${schedule.jumlahPertemuan} pertemuan`
-                            : 'Jumlah pertemuan belum diisi'}
-                        </Text>
+                        <Text style={styles.metaText} numberOfLines={1}>{laboratoryName}</Text>
                       </View>
                     </View>
 

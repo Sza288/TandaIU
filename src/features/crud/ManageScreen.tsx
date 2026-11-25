@@ -119,7 +119,7 @@ export default function ManageScreen() {
     confirmAction({
       title: 'Hapus jadwal ini?',
       message:
-        'Sesi terjadwal dari jadwal ini ikut terhapus. Sesi yang sudah ditutup tetap disimpan sebagai riwayat. Jadwal yang masih memiliki sesi dibuka tidak dapat dihapus.',
+        'Semua sesi dari jadwal ini ikut terhapus, beserta catatan kehadiran, izin, ulasan, dan token presensinya.',
       onConfirm: () => {
         void runDeleteSchedule(id);
       },
@@ -303,6 +303,11 @@ export default function ManageScreen() {
             {schedules.data.map((item) => {
               const classDoc = classById.get(item.classId);
               const dayLabel = DAY_LABELS[item.dayOfWeek] ?? '-';
+              const laboratoryName = (item.laboratoryId
+                ? laboratoryById.get(item.laboratoryId)?.name
+                : undefined)
+                ?? item.room
+                ?? 'Laboratorium tidak diketahui';
 
               return (
                 <CrudCard
@@ -319,15 +324,10 @@ export default function ManageScreen() {
                   <Text style={styles.meta}>
                     {dayLabel} · {item.startTime}-{item.endTime}
                   </Text>
-                  <Text style={styles.meta}>Ruang {item.room}</Text>
-                  <Text style={styles.meta}>
-                    {item.jumlahPertemuan
-                      ? `${item.jumlahPertemuan} pertemuan`
-                      : 'Jumlah pertemuan belum diisi'}
-                  </Text>
+                  <Text style={styles.meta}>Laboratorium {laboratoryName}</Text>
                   <Pressable
                     accessibilityRole="button"
-                    accessibilityLabel={`Buat sesi dari jadwal ${item.room}`}
+                    accessibilityLabel={`Buat sesi dari jadwal ${laboratoryName}`}
                     onPress={() => router.push(manageHref('/assistant/manage/schedule-generate', item.id))}
                     style={({ pressed }) => [
                       styles.generateButton,
@@ -346,8 +346,6 @@ export default function ManageScreen() {
         {tab === 'sessions' ? (
           <SectionShell
             title="Daftar Sesi"
-            addLabel="Tambah Sesi"
-            onAdd={() => openForm('session')}
             loading={sessions.loading}
             error={sessions.error}
             isEmpty={sessions.data.length === 0}
@@ -355,6 +353,8 @@ export default function ManageScreen() {
             emptyTitle="Belum ada sesi"
             emptyBody="Sesi praktikum yang ditambahkan akan tampil di sini."
             emptyAction={null}
+            addLabel="Tambah Sesi"
+            onAdd={() => openForm('session')}
           >
             <View style={styles.filterPanel}>
               <View style={styles.searchBox}>
@@ -561,8 +561,8 @@ function SectionShell({
   children,
 }: {
   title: string;
-  addLabel: string;
-  onAdd: () => void;
+  addLabel?: string;
+  onAdd?: () => void;
   loading: boolean;
   error: string | null;
   isEmpty: boolean;
@@ -576,15 +576,17 @@ function SectionShell({
     <View style={styles.section}>
       <View style={styles.sectionHeader}>
         <Text style={styles.sectionTitle}>{title}</Text>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={addLabel}
-          onPress={onAdd}
-          style={({ pressed }) => [styles.addButton, pressed ? styles.pressed : null]}
-        >
-          <Ionicons name="add" size={16} color={colors.textOnPrimary} />
-          <Text style={styles.addText}>Tambah</Text>
-        </Pressable>
+        {onAdd ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={addLabel ?? 'Tambah'}
+            onPress={onAdd}
+            style={({ pressed }) => [styles.addButton, pressed ? styles.pressed : null]}
+          >
+            <Ionicons name="add" size={16} color={colors.textOnPrimary} />
+            <Text style={styles.addText}>Tambah</Text>
+          </Pressable>
+        ) : null}
       </View>
 
       {error ? (
