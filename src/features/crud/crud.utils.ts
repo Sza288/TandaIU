@@ -248,11 +248,14 @@ export function confirmAction({
   title,
   message,
   confirmLabel = 'Hapus',
+  destructive = true,
   onConfirm,
 }: {
   title: string;
   message: string;
   confirmLabel?: string;
+  /** Aksi yang tidak menghapus data, misalnya mengaktifkan kembali, tampil netral. */
+  destructive?: boolean;
   onConfirm: () => void;
 }): void {
   if (Platform.OS === 'web') {
@@ -264,7 +267,7 @@ export function confirmAction({
 
   Alert.alert(title, message, [
     { text: 'Batal', style: 'cancel' },
-    { text: confirmLabel, style: 'destructive', onPress: onConfirm },
+    { text: confirmLabel, style: destructive ? 'destructive' : 'default', onPress: onConfirm },
   ]);
 }
 
