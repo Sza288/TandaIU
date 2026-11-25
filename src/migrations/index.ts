@@ -7,11 +7,21 @@ import {
 } from './classesSessions';
 import { getCoursesDosenStep } from './coursesDosen';
 import {
+  laboratorySeedStep,
+  seedLaboratories,
+} from './laboratories';
+import {
   buildEnrollmentAccountMap,
   buildEnrollmentPlan,
   createMissingEnrollments,
 } from './enrollments';
 import { getOtherDummyDataSteps } from './otherDummyData';
+import {
+  buildSchedulePlan,
+  injectSchedulesFromSessions,
+  readAssistantSessions,
+  scheduleInjectionStep,
+} from './schedulesFromSessions';
 import {
   describeFirestoreError,
   firestoreErrorCode,
@@ -35,6 +45,14 @@ export type RunMigrationOptions = {
   enrollmentAccounts?: EnrollmentAccount[];
   now?: () => Date;
   dryRun?: boolean;
+  /**
+   * Tautkan sesi lama yang belum punya `scheduleId` ke jadwal hasil turunan.
+   * Sengaja opt-in karena menulis ke koleksi `schedules` yang dipakai Sprint 2.
+   */
+  injectSchedules?: {
+    assistantUid: string;
+    semesterParity: 'ganjil' | 'genap';
+  };
 };
 
 function failedClassStep(error: unknown): MigrationStepResult {
@@ -225,10 +243,52 @@ export async function runMigrations(
     dryRun,
   );
 
+  let laboratoryStep: MigrationStepResult;
+  try {
+    const laboratoryResult = await seedLaboratories({ database, createdAt, dryRun });
+    laboratoryStep = laboratorySeedStep(laboratoryResult);
+  } catch (error) {
+    laboratoryStep = {
+      id: 'laboratories',
+      title: 'Laboratories',
+      status: firestoreErrorCode(error) === 'permission-denied' ? 'blocked' : 'failed',
+      summary: `Seed laboratorium gagal: ${describeFirestoreError(error)}`,
+      details: [
+        describeFirestoreError(error),
+        'Jalankan migrasi dengan akun asisten yang terautentikasi agar laboratories dapat ditulis.',
+      ],
+    };
+  }
+
   const verification: MigrationVerification = await verifyMigration(database, {
     uidByStudentCode: accountMap.uidByStudentCode,
     ...(classDocsResolved ? { classDocs } : {}),
   });
+
+  const scheduleSteps: MigrationStepResult[] = [];
+  if (options.injectSchedules) {
+    try {
+      const existingSessions = await readAssistantSessions(
+        database,
+        options.injectSchedules.assistantUid,
+        options.injectSchedules.semesterParity,
+      );
+      const plan = buildSchedulePlan(existingSessions);
+      const injection = await injectSchedulesFromSessions(plan, { database, dryRun });
+      scheduleSteps.push(scheduleInjectionStep(plan, injection));
+    } catch (error) {
+      scheduleSteps.push({
+        id: 'schedules-from-sessions',
+        title: 'Jadwal dari sesi',
+        status: firestoreErrorCode(error) === 'permission-denied' ? 'blocked' : 'failed',
+        summary: `Inject jadwal gagal: ${describeFirestoreError(error)}`,
+        details: [
+          describeFirestoreError(error),
+          'Jalankan dengan akun asisten pemilik sesi; Rules membatasi list sessions pada owner dan parity.',
+        ],
+      });
+    }
+  }
 
   const countsAfter = await readCollectionCounts(database);
 
@@ -239,6 +299,8 @@ export async function runMigrations(
     steps: [
       classesStep,
       enrollmentsStep,
+      laboratoryStep,
+      ...scheduleSteps,
       getCoursesDosenStep(),
       ...getOtherDummyDataSteps(),
     ],
@@ -274,6 +336,27 @@ export {
   buildSeedValidation,
 } from './preflight';
 export { getCoursesDosenInventory, getCoursesDosenStep } from './coursesDosen';
+export {
+  buildLaboratorySeeds,
+  laboratorySeedStep,
+  LABORATORIES_COLLECTION,
+  seedLaboratories,
+  verifyLaboratories,
+} from './laboratories';
+export {
+  buildSchedulePlan,
+  injectSchedulesFromSessions,
+  INJECTED_ROOM_LABEL,
+  readAssistantSessions,
+  scheduleInjectionStep,
+  SCHEDULES_COLLECTION,
+} from './schedulesFromSessions';
+export type {
+  ExistingSession,
+  ScheduleInjectionResult,
+  SchedulePlan,
+  SchedulePlanItem,
+} from './schedulesFromSessions';
 export { getLocalDummyInventory, getOtherDummyDataSteps } from './otherDummyData';
 export {
   describeFirestoreError,

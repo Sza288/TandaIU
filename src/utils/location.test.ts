@@ -6,6 +6,7 @@ import {
   validateCapturedLocation,
   withLocationTimeout,
 } from './location';
+import { measureAttendanceDistance, validateAttendancePosition } from './attendanceLocation';
 
 jest.mock('expo-location', () => {
   const actual = jest.requireActual('expo-location');
@@ -125,5 +126,60 @@ describe('location capture validation', () => {
 
   it('calculates exact-radius boundary through Haversine', () => {
     expect(haversineMeters(0, 0, 0, 0)).toBe(0);
+  });
+});
+
+describe('attendance location checks for Firestore submission', () => {
+  const lab = { latitude: -7.05, longitude: 110.44, radius: 100 };
+
+  it('accepts a valid position at the laboratory', () => {
+    expect(measureAttendanceDistance({
+      latitude: lab.latitude,
+      longitude: lab.longitude,
+      accuracyMeters: 50,
+    }, lab)).toEqual({ ok: true, distanceMeters: 0, radiusMeters: 100 });
+  });
+
+  it('rejects invalid coordinates and GPS accuracy above the limit', () => {
+    expect(validateAttendancePosition({
+      latitude: 91,
+      longitude: 110.44,
+      accuracyMeters: 5,
+    })).toMatchObject({ ok: false });
+    expect(validateAttendancePosition({
+      latitude: -7.05,
+      longitude: 110.44,
+      accuracyMeters: 50.1,
+    })).toMatchObject({ ok: false, reason: expect.stringContaining('50 meter') });
+  });
+
+  it('rejects positions outside the configured laboratory radius', () => {
+    expect(measureAttendanceDistance({
+      latitude: -7.06,
+      longitude: 110.44,
+      accuracyMeters: 10,
+    }, lab)).toMatchObject({ ok: false, reason: expect.stringContaining('Radius yang diperbolehkan') });
+  });
+
+  it('does not round an out-of-radius position into an accepted boundary', () => {
+    const longitudeJustOutside100Meters = (100.04 / 6_371_000) * (180 / Math.PI);
+    expect(measureAttendanceDistance({
+      latitude: 0,
+      longitude: longitudeJustOutside100Meters,
+      accuracyMeters: 10,
+    }, { latitude: 0, longitude: 0, radius: 100 })).toMatchObject({ ok: false });
+  });
+
+  it('rejects invalid laboratory coordinates or radius', () => {
+    expect(measureAttendanceDistance({
+      latitude: -7.05,
+      longitude: 110.44,
+      accuracyMeters: 10,
+    }, { ...lab, latitude: 91 })).toMatchObject({ ok: false });
+    expect(measureAttendanceDistance({
+      latitude: -7.05,
+      longitude: 110.44,
+      accuracyMeters: 10,
+    }, { ...lab, radius: 0 })).toMatchObject({ ok: false });
   });
 });

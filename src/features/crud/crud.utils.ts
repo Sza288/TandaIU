@@ -12,12 +12,6 @@ export const DAY_OPTIONS = DAY_LABELS.map((label, value) => ({
   value: String(value),
 }));
 
-export const SESSION_STATUS_OPTIONS = [
-  { label: 'Terjadwal', value: 'terjadwal' },
-  { label: 'Dibuka', value: 'dibuka' },
-  { label: 'Ditutup', value: 'ditutup' },
-];
-
 export const COURSE_OPTIONS = courses.map((course) => ({
   label: course.name,
   description: `Semester ${course.semester}`,
@@ -222,6 +216,32 @@ export function goBackOr(navigationRouter: ImperativeRouter, fallback: Href): vo
 
 export function returnToManage(): void {
   goBackOr(router, manageHref('/assistant/manage'));
+}
+
+/**
+ * Tanggal-tanggal pertemuan mingguan. Tanggal yang dipilih pengguna selalu
+ * menjadi pertemuan pertama, lalu bertambah tepat tujuh hari.
+ */
+export function scheduleMeetingDates(
+  jumlahPertemuan: number,
+  fromDate = todayDateValue(),
+): string[] {
+  if (!Number.isInteger(jumlahPertemuan) || jumlahPertemuan < 1) return [];
+
+  const start = new Date(`${fromDate}T00:00:00.000Z`);
+  if (Number.isNaN(start.getTime())) return [];
+
+  return Array.from({ length: jumlahPertemuan }, (_, index) => {
+    const date = new Date(start);
+    date.setUTCDate(start.getUTCDate() + index * 7);
+    return date.toISOString().slice(0, 10);
+  });
+}
+
+/** Hari (0–6) dari sebuah tanggal `YYYY-MM-DD`, atau null bila tidak valid. */
+export function weekdayOfDate(value: string): number | null {
+  const date = new Date(`${value}T00:00:00.000Z`);
+  return Number.isNaN(date.getTime()) ? null : date.getUTCDay();
 }
 
 export function confirmAction({

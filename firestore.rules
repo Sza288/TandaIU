@@ -1,3 +1,4 @@
+
 rules_version = '2';
 
 service cloud.firestore {
@@ -121,7 +122,8 @@ service cloud.firestore {
         ])
         && data.keys().hasOnly([
           'classId', 'courseId', 'practicumName', 'className', 'startsAt', 'endsAt',
-          'status', 'semester', 'semesterParity', 'assistantUid', 'lecturerId', 'lecturer', 'laboratoryId'
+          'status', 'semester', 'semesterParity', 'assistantUid', 'lecturerId', 'lecturer',
+          'laboratoryId', 'scheduleId'
         ])
         && data.practicumName is string
         && validSessionTimePair(data)
@@ -129,8 +131,37 @@ service cloud.firestore {
         && ((!data.keys().hasAny(['lecturerId', 'lecturer']))
           || (data.lecturerId is string && data.lecturer is string))
         && ((!data.keys().hasAny(['laboratoryId']))
-          || data.laboratoryId is string)
+          || (data.laboratoryId is string
+            && exists(/databases/$(database)/documents/laboratories/$(data.laboratoryId))))
+        && ((!data.keys().hasAny(['scheduleId']))
+          || (data.scheduleId is string
+            && exists(/databases/$(database)/documents/schedules/$(data.scheduleId))))
         && sessionMatchesClass(data);
+    }
+
+    function validLaboratory(data) {
+      return data.keys().hasAll([
+          'name', 'latitude', 'longitude', 'radius', 'lantai', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'name', 'latitude', 'longitude', 'radius', 'lantai', 'createdAt', 'updatedAt'
+        ])
+        && data.name is string
+        && data.name.size() > 0
+        && (data.latitude is float || data.latitude is int)
+        && data.latitude >= -90
+        && data.latitude <= 90
+        && (data.longitude is float || data.longitude is int)
+        && data.longitude >= -180
+        && data.longitude <= 180
+        && data.radius is int
+        && data.radius >= 1
+        && data.radius <= 500
+        && data.lantai is int
+        && data.lantai >= 1
+        && data.lantai <= 6
+        && data.createdAt is string
+        && data.updatedAt is string;
     }
 
     function assistantOwnsSession(sessionId) {
@@ -160,7 +191,7 @@ service cloud.firestore {
         ])
         && data.keys().hasOnly([
           'classId', 'courseId', 'dayOfWeek', 'startTime', 'endTime', 'room',
-          'semesterParity', 'assistantUid'
+          'semesterParity', 'assistantUid', 'jumlahPertemuan'
         ])
         && data.classId is string
         && data.courseId is string
@@ -170,6 +201,10 @@ service cloud.firestore {
         && data.startTime is string
         && data.endTime is string
         && data.room is string
+        && ((!data.keys().hasAny(['jumlahPertemuan']))
+          || (data.jumlahPertemuan is int
+            && data.jumlahPertemuan >= 1
+            && data.jumlahPertemuan <= 20))
         && data.assistantUid == request.auth.uid
         && exists(/databases/$(database)/documents/classes/$(data.classId))
         && get(/databases/$(database)/documents/classes/$(data.classId)).data.assistantUid == request.auth.uid
@@ -213,8 +248,6 @@ service cloud.firestore {
     }
 
     match /users/{userId} {
-      // A missing profile can be fetched by its owner, but grants no access to
-      // any protected collection because role helpers require a valid profile.
       allow get: if isSignedIn() && request.auth.uid == userId;
       allow list: if false;
       allow create: if isSignedIn()
@@ -230,8 +263,6 @@ service cloud.firestore {
     }
 
     match /courseCatalog/{courseId} {
-      // The app uses its bundled course list. Rules read catalog documents
-      // internally for validation; clients do not need direct catalog access.
       allow read, write: if false;
     }
 
@@ -243,19 +274,21 @@ service cloud.firestore {
           && validDirectory(resource.data)
           && semesterMatchesAssignment(resource.data.semester)
           && resource.data.semesterParity == request.auth.token.assistantSemesterParity);
-      // The enrollment management UI filters by the assistant's claim parity.
-      // The directory is Admin-SDK-only, so its semester/parity pair is trusted.
       allow list: if isAssistant()
         && resource.data.semesterParity == request.auth.token.assistantSemesterParity;
       allow create, update, delete: if false;
     }
 
     match /classes/{classId} {
-      allow get, list: if (isAssistant()
+      allow get: if (isAssistant()
           && validClass(resource.data)
           && resource.data.assistantUid == request.auth.uid
           && resource.data.semesterParity == request.auth.token.assistantSemesterParity)
         || (praktikanEnrolledInClass(classId) && validClass(resource.data));
+      allow list: if (isAssistant()
+          && resource.data.assistantUid == request.auth.uid
+          && resource.data.semesterParity == request.auth.token.assistantSemesterParity)
+        || praktikanEnrolledInClass(classId);
       allow create: if validClass(request.resource.data)
         && isAssistant()
         && request.resource.data.assistantUid == request.auth.uid
@@ -267,17 +300,21 @@ service cloud.firestore {
         && request.resource.data.semesterParity == resource.data.semesterParity
         && request.resource.data.courseId == resource.data.courseId
         && request.resource.data.createdAt == resource.data.createdAt;
-      // Client deletion could orphan sessions, enrollments, and attendance history.
-      // Delete only through a trusted administrative process after checking references.
       allow delete: if false;
     }
 
     match /schedules/{scheduleId} {
-      allow get, list: if (isPraktikan()
+      allow get: if (isPraktikan()
           && resource.data.classId is string
           && praktikanEnrolledInClass(resource.data.classId))
         || (isAssistant()
           && scheduleRecordInAssistantScope(resource.data)
+          && resource.data.semesterParity == request.auth.token.assistantSemesterParity);
+      allow list: if (isPraktikan()
+          && resource.data.classId is string
+          && praktikanEnrolledInClass(resource.data.classId))
+        || (isAssistant()
+          && resource.data.assistantUid == request.auth.uid
           && resource.data.semesterParity == request.auth.token.assistantSemesterParity);
       allow create: if scheduleRecordInAssistantScope(request.resource.data);
       allow update: if scheduleRecordInAssistantScope(resource.data)
@@ -293,9 +330,6 @@ service cloud.firestore {
           && validSession(resource.data)
           && resource.data.assistantUid == request.auth.uid
           && resource.data.semesterParity == request.auth.token.assistantSemesterParity);
-      // Queries expose their constrained fields to Rules. Keep list access scoped
-      // to class enrollment or assistant owner/parity; get and all writes validate
-      // the full session/class/course relationship.
       allow list: if (isPraktikan()
           && resource.data.classId is string
           && praktikanEnrolledInClass(resource.data.classId))
@@ -309,9 +343,16 @@ service cloud.firestore {
         && sessionRecordInAssistantScope(request.resource.data)
         && request.resource.data.startsAt is timestamp
         && request.resource.data.endsAt is timestamp;
-      // Client deletion could orphan attendance, permit, review, and archive history.
-      // Delete only through a trusted administrative process after checking references.
       allow delete: if false;
+    }
+
+    match /laboratories/{laboratoryId} {
+      allow get, list: if isSignedIn();
+      allow create: if isAssistant() && validLaboratory(request.resource.data);
+      allow update: if isAssistant()
+        && validLaboratory(request.resource.data)
+        && request.resource.data.createdAt == resource.data.createdAt;
+      allow delete: if isAssistant();
     }
 
     match /enrollments/{enrollmentId} {
@@ -341,13 +382,13 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/studentDirectory/$(request.resource.data.praktikanId)).data.name == request.resource.data.praktikanName
         && exists(userPath(request.resource.data.praktikanId))
         && get(userPath(request.resource.data.praktikanId)).data.role == 'praktikan';
-      allow update, delete: if false;
+      allow delete: if isAssistant()
+        && validEnrollment(resource.data, enrollmentId)
+        && assistantOwnsClass(resource.data.classId);
+      allow update: if false;
     }
 
     match /attendances/{attendanceId} {
-      // Successful attendance may only be written by the trusted Cloud Function.
-      // Reading a missing document reveals no attendance data and supports the
-      // owner's idempotent check-in lookup without granting any write access.
       allow get: if (isPraktikan() && resource == null)
         || (isPraktikan()
           && resource.data.praktikanId == request.auth.uid
@@ -358,14 +399,7 @@ service cloud.firestore {
       allow create, update, delete: if false;
     }
 
-    match /laboratories/{laboratoryId} {
-      allow get, list: if isSignedIn()
-        && (isPraktikan() || isAssistant());
-      allow update, delete: if false;
-    }
-
     match /permits/{permitId} {
-      // Permit submission checks a missing deterministic record in a transaction.
       allow get: if (isPraktikan() && resource == null)
         || (isPraktikan() && resource.data.studentId == request.auth.uid)
         || assistantOwnsSession(resource.data.sessionId);

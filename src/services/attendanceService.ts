@@ -4,9 +4,12 @@ import {
   onSnapshot,
   query,
   runTransaction,
+  serverTimestamp,
+  Timestamp,
   where,
   type DocumentData,
   type Firestore,
+  type Transaction,
   type Unsubscribe,
 } from 'firebase/firestore';
 import { initialAttendances } from '../data/attendances';
@@ -14,8 +17,9 @@ import { initialSessions } from '../data/sessions';
 import { praktikans } from '../data/praktikans';
 import type { CurrentUser } from '../lib/currentSession';
 import type { Attendance, MutationResult, PracticumSession } from '../types';
-import { firestoreDateToIso, isoToFirestoreDate } from '../utils/firestoreDate';
-import { httpsCallable } from 'firebase/functions';
+import { measureAttendanceDistance, validateAttendancePosition } from '../utils/attendanceLocation';
+import { firestoreDateToIso } from '../utils/firestoreDate';
+import { parseAttendanceQrPayload } from '../utils/attendanceQr';
 
 export type AttendanceRecord = Attendance & {
   id: string;
@@ -33,6 +37,25 @@ export type AttendanceLocation = {
   accuracyMeters: number;
 };
 
+type AttendanceQrResponse = {
+  ok: true;
+  qrPayload: string;
+  expiresAt: string;
+};
+
+export type AttendanceQrResult =
+  | AttendanceQrResponse
+  | { ok: false; reason: string };
+
+export type AttendanceQrValidationResult =
+  | {
+      ok: true;
+      practicumName: string;
+      className: string;
+      expiresAt: string;
+    }
+  | { ok: false; reason: string };
+
 type ServiceMode = 'firestore' | 'mock';
 
 export type AttendanceService = {
@@ -43,6 +66,22 @@ export type AttendanceService = {
     sessionId: string,
     user?: CurrentUser | null,
     location?: AttendanceLocation | null,
+  ) => Promise<MutationResult>;
+  cancelAttendance: (
+    sessionId: string,
+    attendanceId: string,
+    reason?: string,
+  ) => Promise<MutationResult>;
+  issueAttendanceQr: (sessionId: string) => Promise<AttendanceQrResult>;
+  revokeAttendanceQr: (sessionId: string) => Promise<MutationResult>;
+  validateAttendanceQr: (
+    sessionId: string,
+    qrPayload: string,
+  ) => Promise<AttendanceQrValidationResult>;
+  submitQrAttendance: (
+    sessionId: string,
+    qrPayload: string,
+    location: AttendanceLocation,
   ) => Promise<MutationResult>;
   subscribeToAttendance: (
     sessionId: string,
@@ -79,63 +118,10 @@ export type AttendanceServiceOptions = {
   attendances?: Attendance[];
 };
 
-const GENERIC_MUTATION_ERROR =
-  'Gagal menyimpan perubahan. Periksa koneksi dan konfigurasi Firebase.';
 const GENERIC_LISTENER_ERROR =
   'Gagal memuat data presensi. Periksa koneksi dan konfigurasi Firebase.';
 const FIREBASE_NOT_CONFIGURED_MESSAGE =
   'Firebase belum dikonfigurasi. Isi variabel EXPO_PUBLIC_FIREBASE_* pada .env.';
-const CALLABLE_DOMAIN_ERROR_MESSAGES: Record<string, string> = {
-  SESSION_NOT_OPEN: 'Presensi tidak bisa dilakukan, karena jam di luar sesi praktikum.',
-  SESSION_NOT_STARTED: 'Presensi belum dapat dilakukan karena sesi praktikum belum dimulai.',
-  SESSION_ENDED: 'Presensi tidak bisa dilakukan karena waktu sesi praktikum telah berakhir.',
-  SESSION_CLOSED: 'Presensi tidak bisa dilakukan karena sesi praktikum telah ditutup.',
-  SESSION_TIME_INVALID: 'Presensi tidak bisa dilakukan karena waktu sesi praktikum tidak valid.',
-  SESSION_NOT_FOUND: 'Sesi praktikum tidak ditemukan.',
-  LABORATORY_NOT_FOUND: 'Data laboratorium sesi ini tidak ditemukan.',
-  ATTENDANCE_NOT_FOUND: 'Data presensi tidak ditemukan.',
-};
-
-export function callableErrorMessage(error: unknown, fallback: string): string {
-  if (typeof error !== 'object' || error === null) return fallback;
-  const callableError = error as {
-    code?: unknown;
-    message?: unknown;
-    details?: unknown;
-  };
-  const details = typeof callableError.details === 'object' && callableError.details !== null
-    ? callableError.details as { reasonCode?: unknown }
-    : null;
-  if (typeof details?.reasonCode === 'string') {
-    const domainMessage = CALLABLE_DOMAIN_ERROR_MESSAGES[details.reasonCode];
-    if (domainMessage) return domainMessage;
-  }
-  const code = typeof callableError.code === 'string' ? callableError.code : '';
-  if (code === 'functions/not-found'
-    || (typeof callableError.message === 'string'
-      && /not found.*404|404.*not found/i.test(callableError.message))) {
-    return 'Layanan presensi tidak ditemukan pada backend yang terhubung. Periksa konfigurasi Firebase/Emulator lalu coba lagi.';
-  }
-  if (code === 'functions/unavailable') {
-    return 'Layanan presensi sedang tidak tersedia. Periksa koneksi dan coba lagi.';
-  }
-  if (code === 'functions/internal' || code === 'functions/unknown') return fallback;
-  if (code.startsWith('functions/')
-    && ![
-      'functions/already-exists',
-      'functions/deadline-exceeded',
-      'functions/failed-precondition',
-      'functions/invalid-argument',
-      'functions/permission-denied',
-      'functions/unauthenticated',
-    ].includes(code)) {
-    return fallback;
-  }
-  if (!code.startsWith('functions/')) return fallback;
-  return typeof callableError.message === 'string' && callableError.message.trim()
-    ? callableError.message
-    : fallback;
-}
 
 /**
  * Kontrak hasil mutasi presensi: setiap operasi selalu mengembalikan
@@ -295,71 +281,52 @@ function getConfiguredDatabase(): Firestore | undefined {
 
 class AttendanceServiceError extends Error {}
 
-type FirestoreTimestampValue = {
-  seconds: number;
-  nanoseconds: number;
-  toDate: () => Date;
-};
+const QR_TTL_MILLISECONDS = 2 * 60 * 1000;
+const QR_PREFIX = 'TANDAIU-ATTENDANCE:1:';
 
-function isFirestoreTimestamp(value: unknown): value is FirestoreTimestampValue {
-  return typeof value === 'object'
-    && value !== null
-    && 'seconds' in value
-    && typeof value.seconds === 'number'
-    && 'nanoseconds' in value
-    && typeof value.nanoseconds === 'number'
-    && 'toDate' in value
-    && typeof value.toDate === 'function';
-}
+function mutationErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof AttendanceServiceError) return error.message;
+  if (typeof error !== 'object' || error === null) return fallback;
 
-function sessionTimestampForWrite(value: unknown): Date | FirestoreTimestampValue {
-  if (isFirestoreTimestamp(value)) return value;
-  const iso = firestoreDateToIso(value);
-  if (!iso) throw new AttendanceServiceError('Waktu sesi tidak valid dan tidak dapat dinormalisasi.');
-  return isoToFirestoreDate(iso);
-}
-
-/**
- * Jenis operasi memengaruhi pesan kegagalan. Sebelumnya semua operasi memakai
- * satu pesan yang menyebut koleksi `attendances`, sehingga kegagalan pada
- * `sessions` (buka/tutup sesi) menyesatkan pengguna.
- */
-type MutationOperation = 'openSession' | 'closeSession' | 'checkIn';
-
-const SESSION_PERMISSION_DENIED_REASON: Record<'openSession' | 'closeSession', string> = {
-  openSession:
-    'Akses ditolak. Hanya asisten yang dapat membuka sesi. Periksa Firestore Security Rules untuk koleksi sessions.',
-  closeSession:
-    'Akses ditolak. Hanya asisten yang dapat menutup sesi. Periksa Firestore Security Rules untuk koleksi sessions.',
-};
-
-function toMutationFailure(
-  error: unknown,
-  operation: MutationOperation = 'checkIn',
-): MutationResult {
-  if (error instanceof AttendanceServiceError) {
-    return { ok: false, reason: error.message };
+  const firestoreError = error as { code?: unknown; message?: unknown };
+  if (firestoreError.code === 'permission-denied') {
+    return 'Aksi ditolak oleh Firestore. Pastikan akun, enrollment, dan Security Rules sesuai.';
   }
+  if (firestoreError.code === 'already-exists') return ATTENDANCE_ALREADY_CHECKED_IN_REASON;
+  if (firestoreError.code === 'unauthenticated') return ATTENDANCE_IDENTITY_INVALID_REASON;
+  return typeof firestoreError.message === 'string' && firestoreError.message.trim()
+    ? firestoreError.message
+    : fallback;
+}
 
-  if (
-    typeof error === 'object' &&
-    error !== null &&
-    'code' in error &&
-    (error as { code?: unknown }).code === 'permission-denied'
-  ) {
-    if (operation === 'checkIn') {
-      return {
-        ok: false,
-        reason: 'Presensi ditolak. Pastikan sesi sedang dibuka, waktu sesi masih berlaku, dan enrollment kamu valid.',
-      };
+function valueToMillis(value: unknown): number | null {
+  if (value instanceof Timestamp) return value.toMillis();
+  if (value instanceof Date) return value.getTime();
+  if (typeof value === 'string') {
+    const millis = Date.parse(value);
+    return Number.isFinite(millis) ? millis : null;
+  }
+  if (typeof value === 'object' && value !== null && 'toMillis' in value) {
+    const toMillis = (value as { toMillis?: unknown }).toMillis;
+    if (typeof toMillis === 'function') {
+      const millis = toMillis.call(value);
+      return typeof millis === 'number' && Number.isFinite(millis) ? millis : null;
     }
-    return { ok: false, reason: SESSION_PERMISSION_DENIED_REASON[operation] };
   }
+  return null;
+}
 
-  if (typeof console !== 'undefined' && typeof console.warn === 'function') {
-    console.warn('[attendanceService]', error);
-  }
-  return { ok: false, reason: GENERIC_MUTATION_ERROR };
+function hasSessionWindow(session: DocumentData, now: Date): boolean {
+  const startsAt = valueToMillis(session.startsAt);
+  const endsAt = valueToMillis(session.endsAt);
+  return startsAt !== null && endsAt !== null && endsAt > startsAt
+    && startsAt <= now.getTime() && now.getTime() < endsAt;
+}
+
+function createQrToken(database: Firestore): string {
+  return Array.from({ length: 3 }, () => doc(collection(database, 'attendanceQrTokens')).id)
+    .join('')
+    .slice(0, 43);
 }
 
 export function describeListenerError(error: unknown): string {
@@ -577,10 +544,47 @@ function createMockBackend(options: Required<Pick<AttendanceServiceOptions, 'get
     return { ok: true };
   };
 
+  const cancelAttendance = async (
+    sessionId: string,
+    attendanceId: string,
+    reason = '',
+  ): Promise<MutationResult> => {
+    const record = attendances.find((item) => item.id === attendanceId);
+    if (!record || record.sessionId !== sessionId) {
+      return { ok: false, reason: 'Data presensi tidak ditemukan pada sesi ini.' };
+    }
+    if (record.status !== 'hadir') {
+      return { ok: false, reason: 'Hanya presensi berhasil yang dapat dibatalkan.' };
+    }
+    const currentUser = options.getCurrentUser();
+    if (!currentUser || currentUser.role !== 'asisten') {
+      return { ok: false, reason: 'Hanya asisten yang dapat membatalkan presensi.' };
+    }
+    if (reason.trim().length > 300) {
+      return { ok: false, reason: 'Alasan pembatalan maksimal 300 karakter.' };
+    }
+    record.status = 'dibatalkan';
+    record.cancelledAt = options.now().toISOString();
+    record.cancelledBy = currentUser.uid;
+    record.cancelReason = reason.trim();
+    emitAttendance(sessionId, record.praktikanId);
+    return { ok: true };
+  };
+
+  const qrUnavailable = {
+    ok: false as const,
+    reason: 'QR presensi memerlukan Firebase Firestore yang telah dikonfigurasi.',
+  };
+
   return {
     openSession,
     closeSession,
     checkIn,
+    cancelAttendance,
+    issueAttendanceQr: async (): Promise<AttendanceQrResult> => qrUnavailable,
+    revokeAttendanceQr: async (): Promise<MutationResult> => qrUnavailable,
+    validateAttendanceQr: async (): Promise<AttendanceQrValidationResult> => qrUnavailable,
+    submitQrAttendance: async (): Promise<MutationResult> => qrUnavailable,
     subscribeToAttendance: (
       sessionId: string,
       onData: AttendanceListener,
@@ -649,125 +653,413 @@ function createFirestoreBackend(
   database: Firestore,
   options: Required<Pick<AttendanceServiceOptions, 'getCurrentUser' | 'now'>>,
 ): Omit<AttendanceService, 'mode'> {
+  const requireCurrentUser = (): CurrentUser | null => {
+    const user = options.getCurrentUser();
+    return user?.uid && !isDummyPraktikanId(user.uid) ? user : null;
+  };
+
+  const getProfile = async (
+    transaction: Transaction,
+    uid: string,
+  ) => transaction.get(doc(database, 'users', uid));
+
   const openSession = async (sessionId: string): Promise<MutationResult> => {
+    const user = requireCurrentUser();
+    if (!user) return { ok: false, reason: ATTENDANCE_IDENTITY_INVALID_REASON };
     try {
       await runTransaction(database, async (transaction) => {
+        const profile = await getProfile(transaction, user.uid);
+        if (!profile.exists() || !['asisten', 'assistant'].includes(profile.data().role)) {
+          throw new AttendanceServiceError('Hanya asisten yang dapat membuka sesi.');
+        }
         const sessionRef = doc(database, 'sessions', sessionId);
-        const sessionSnapshot = await transaction.get(sessionRef);
-
-        if (!sessionSnapshot.exists()) {
-          throw new AttendanceServiceError('Sesi tidak ditemukan.');
+        const session = await transaction.get(sessionRef);
+        if (!session.exists()) throw new AttendanceServiceError('Sesi tidak ditemukan.');
+        const data = session.data();
+        if (data.assistantUid !== user.uid) {
+          throw new AttendanceServiceError('Anda tidak memiliki kewenangan terhadap sesi ini.');
         }
-        const status = sessionSnapshot.data().status;
-        if (status === 'dibuka') {
-          throw new AttendanceServiceError('Sesi sudah dibuka.');
-        }
-        if (status !== 'terjadwal') {
+        if (data.status === 'dibuka') throw new AttendanceServiceError('Sesi sudah dibuka.');
+        if (data.status !== 'terjadwal') {
           throw new AttendanceServiceError('Sesi yang sudah ditutup tidak dapat dibuka kembali.');
         }
-
-        const sessionData = sessionSnapshot.data();
-        transaction.update(sessionRef, {
-          status: 'dibuka',
-          startsAt: sessionTimestampForWrite(sessionData.startsAt),
-          endsAt: sessionTimestampForWrite(sessionData.endsAt),
-        });
+        const startsAt = valueToMillis(data.startsAt);
+        const endsAt = valueToMillis(data.endsAt);
+        if (startsAt === null || endsAt === null || endsAt <= startsAt) {
+          throw new AttendanceServiceError('Waktu sesi praktikum tidak valid.');
+        }
+        if (endsAt <= options.now().getTime()) {
+          throw new AttendanceServiceError('Sesi yang waktunya sudah berakhir tidak dapat dibuka.');
+        }
+        transaction.update(sessionRef, { status: 'dibuka' });
       });
       return { ok: true };
     } catch (error) {
-      return toMutationFailure(error, 'openSession');
+      return { ok: false, reason: mutationErrorMessage(error, 'Sesi tidak dapat dibuka. Silakan coba lagi.') };
     }
   };
 
   const closeSession = async (sessionId: string): Promise<MutationResult> => {
+    const user = requireCurrentUser();
+    if (!user) return { ok: false, reason: ATTENDANCE_IDENTITY_INVALID_REASON };
     try {
       await runTransaction(database, async (transaction) => {
+        const profile = await getProfile(transaction, user.uid);
+        if (!profile.exists() || !['asisten', 'assistant'].includes(profile.data().role)) {
+          throw new AttendanceServiceError('Hanya asisten yang dapat menutup sesi.');
+        }
         const sessionRef = doc(database, 'sessions', sessionId);
-        const sessionSnapshot = await transaction.get(sessionRef);
-
-        if (!sessionSnapshot.exists()) {
-          throw new AttendanceServiceError('Sesi tidak ditemukan.');
+        const session = await transaction.get(sessionRef);
+        if (!session.exists()) throw new AttendanceServiceError('Sesi tidak ditemukan.');
+        const data = session.data();
+        if (data.assistantUid !== user.uid) {
+          throw new AttendanceServiceError('Anda tidak memiliki kewenangan terhadap sesi ini.');
         }
-        const status = sessionSnapshot.data().status;
-        if (status === 'ditutup') {
-          throw new AttendanceServiceError('Sesi sudah ditutup.');
-        }
-        if (status !== 'dibuka') {
+        if (data.status !== 'dibuka') {
           throw new AttendanceServiceError('Hanya sesi yang sedang dibuka yang dapat ditutup.');
         }
+        const qrRef = doc(database, 'attendanceQrTokens', sessionId);
+        const qr = await transaction.get(qrRef);
+        transaction.update(sessionRef, { status: 'ditutup' });
+        if (qr.exists() && qr.data().revokedAt == null) {
+          transaction.update(qrRef, {
+            revokedAt: serverTimestamp(),
+            revokedBy: user.uid,
+          });
+        }
+      });
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, reason: mutationErrorMessage(error, 'Sesi tidak dapat ditutup. Silakan coba lagi.') };
+    }
+  };
 
-        const sessionData = sessionSnapshot.data();
-        transaction.update(sessionRef, {
-          status: 'ditutup',
-          startsAt: sessionTimestampForWrite(sessionData.startsAt),
-          endsAt: sessionTimestampForWrite(sessionData.endsAt),
+  const checkIn = (
+    sessionId: string,
+    user: CurrentUser | null = options.getCurrentUser(),
+    location: AttendanceLocation | null = null,
+  ): Promise<MutationResult> =>
+    recordCheckIn(sessionId, user, location, 'location');
+
+  const recordCheckIn = async (
+    sessionId: string,
+    requestedUser: CurrentUser | null,
+    location: AttendanceLocation | null,
+    method: 'location' | 'qr',
+    qrPayload?: string,
+  ): Promise<MutationResult> => {
+    const currentUser = requireCurrentUser();
+    if (!currentUser || !requestedUser || requestedUser.uid !== currentUser.uid
+      || requestedUser.role !== 'praktikan') {
+      return { ok: false, reason: requestedUser?.role === 'asisten'
+        ? 'Hanya praktikan yang dapat melakukan presensi.'
+        : ATTENDANCE_IDENTITY_INVALID_REASON };
+    }
+    if (!location) return { ok: false, reason: 'Lokasi belum berhasil diperoleh. Silakan coba lagi.' };
+    const positionValidation = validateAttendancePosition(location);
+    if (!positionValidation.ok) return positionValidation;
+
+    const qrToken = method === 'qr' && qrPayload
+      ? parseAttendanceQrPayload(qrPayload)
+      : null;
+    if (method === 'qr' && !qrToken) return { ok: false, reason: 'QR presensi tidak valid.' };
+
+    try {
+      return await runTransaction(database, async (transaction) => {
+        const profile = await getProfile(transaction, currentUser.uid);
+        if (!profile.exists() || profile.data().role !== 'praktikan') {
+          throw new AttendanceServiceError(ATTENDANCE_IDENTITY_INVALID_REASON);
+        }
+        const profileData = profile.data();
+        if (typeof profileData.name !== 'string' || !profileData.name.trim()) {
+          throw new AttendanceServiceError(ATTENDANCE_IDENTITY_INVALID_REASON);
+        }
+        const sessionRef = doc(database, 'sessions', sessionId);
+        const sessionSnapshot = await transaction.get(sessionRef);
+        if (!sessionSnapshot.exists()) throw new AttendanceServiceError('Sesi tidak ditemukan.');
+        const session = sessionSnapshot.data();
+        if (session.status !== 'dibuka') {
+          throw new AttendanceServiceError(ATTENDANCE_SESSION_NOT_OPEN_REASON);
+        }
+        if (!(session.startsAt instanceof Timestamp) || !(session.endsAt instanceof Timestamp)) {
+          throw new AttendanceServiceError(
+            'Data waktu sesi belum berupa Firestore Timestamp. Sesi perlu diperbaiki sebelum presensi dapat dicatat.',
+          );
+        }
+        if (!hasSessionWindow(session, options.now())) {
+          throw new AttendanceServiceError(ATTENDANCE_SESSION_NOT_OPEN_REASON);
+        }
+        const classId = typeof session.classId === 'string' ? session.classId : '';
+        const laboratoryId = typeof session.laboratoryId === 'string' ? session.laboratoryId : '';
+        if (!classId) throw new AttendanceServiceError(ATTENDANCE_ENROLLMENT_UNVERIFIED_REASON);
+        if (!laboratoryId) {
+          throw new AttendanceServiceError('Sesi offline tidak memiliki laboratorium yang valid.');
+        }
+
+        const classSnapshot = await transaction.get(doc(database, 'classes', classId));
+        const enrollmentSnapshot = await transaction.get(
+          doc(database, 'enrollments', `${classId}_${currentUser.uid}`),
+        );
+        if (!classSnapshot.exists() || !enrollmentSnapshot.exists()) {
+          throw new AttendanceServiceError(ATTENDANCE_ENROLLMENT_UNVERIFIED_REASON);
+        }
+        const classData = classSnapshot.data();
+        const enrollment = enrollmentSnapshot.data();
+        if (classData.courseId !== session.courseId
+          || classData.className !== session.className
+          || classData.semester !== session.semester
+          || enrollment.praktikanId !== currentUser.uid
+          || enrollment.classId !== classId
+          || enrollment.courseId !== session.courseId
+          || enrollment.semester !== session.semester) {
+          throw new AttendanceServiceError(ATTENDANCE_ENROLLMENT_UNVERIFIED_REASON);
+        }
+
+        const laboratorySnapshot = await transaction.get(
+          doc(database, 'laboratories', laboratoryId),
+        );
+        if (!laboratorySnapshot.exists()) {
+          throw new AttendanceServiceError('Data laboratorium sesi ini tidak ditemukan.');
+        }
+        const laboratory = laboratorySnapshot.data();
+        if (typeof laboratory.name !== 'string' || !laboratory.name.trim()) {
+          throw new AttendanceServiceError('Nama laboratorium tidak valid.');
+        }
+        const distance = measureAttendanceDistance(location, {
+          latitude: laboratory.latitude,
+          longitude: laboratory.longitude,
+          radius: laboratory.radius,
+        });
+        if (!distance.ok) throw new AttendanceServiceError(distance.reason);
+        const attendanceRef = doc(
+          database,
+          'attendances',
+          getAttendanceDocId(sessionId, currentUser.uid),
+        );
+        const existingAttendance = await transaction.get(attendanceRef);
+        if (existingAttendance.exists()) {
+          throw new AttendanceServiceError(ATTENDANCE_ALREADY_CHECKED_IN_REASON);
+        }
+
+        if (method === 'qr' && qrToken) {
+          const qrSnapshot = await transaction.get(
+            doc(database, 'attendanceQrTokens', sessionId),
+          );
+          const qrData = qrSnapshot.data();
+          const expiry = qrData ? valueToMillis(qrData.expiresAt) : null;
+          if (!qrSnapshot.exists() || !qrData
+            || qrData.sessionId !== sessionId || qrData.token !== qrToken) {
+            throw new AttendanceServiceError('QR tidak berlaku untuk sesi yang dipilih.');
+          }
+          if (qrData.revokedAt != null) {
+            throw new AttendanceServiceError('QR telah dicabut oleh asisten.');
+          }
+          if (expiry === null || expiry <= options.now().getTime()) {
+            throw new AttendanceServiceError('QR presensi sudah kedaluwarsa. Minta asisten memperbarui QR.');
+          }
+        }
+
+        const attendanceData = {
+          sessionId,
+          praktikanId: currentUser.uid,
+          praktikanName: typeof profileData.name === 'string' ? profileData.name : '',
+          attendedAt: serverTimestamp(),
+          status: 'hadir',
+          attendanceMethod: method,
+          latitude: location.latitude,
+          longitude: location.longitude,
+          accuracyMeters: location.accuracyMeters,
+          distanceMeters: distance.distanceMeters,
+          laboratoryId,
+          laboratoryName: laboratory.name.trim(),
+          radiusMeters: distance.radiusMeters,
+          ...(qrToken ? { qrToken } : {}),
+        };
+        transaction.set(attendanceRef, attendanceData);
+        return {
+          ok: true,
+          distanceMeters: distance.distanceMeters,
+          radiusMeters: distance.radiusMeters,
+          latitude: location.latitude,
+          longitude: location.longitude,
+          accuracyMeters: location.accuracyMeters,
+        };
+      });
+    } catch (error) {
+      return { ok: false, reason: mutationErrorMessage(error, 'Presensi ditolak. Silakan coba lagi.') };
+    }
+  };
+
+  const cancelAttendance = async (
+    sessionId: string,
+    attendanceId: string,
+    reason = '',
+  ): Promise<MutationResult> => {
+    const user = requireCurrentUser();
+    if (!user) return { ok: false, reason: ATTENDANCE_IDENTITY_INVALID_REASON };
+    const trimmedReason = reason.trim();
+    if (trimmedReason.length > 300) {
+      return { ok: false, reason: 'Alasan pembatalan maksimal 300 karakter.' };
+    }
+    try {
+      await runTransaction(database, async (transaction) => {
+        const profile = await getProfile(transaction, user.uid);
+        if (!profile.exists() || !['asisten', 'assistant'].includes(profile.data().role)) {
+          throw new AttendanceServiceError('Hanya asisten yang dapat membatalkan presensi.');
+        }
+        const session = await transaction.get(doc(database, 'sessions', sessionId));
+        if (!session.exists()) throw new AttendanceServiceError('Sesi tidak ditemukan.');
+        if (session.data().assistantUid !== user.uid) {
+          throw new AttendanceServiceError('Anda tidak memiliki kewenangan terhadap sesi ini.');
+        }
+        const attendanceRef = doc(database, 'attendances', attendanceId);
+        const attendance = await transaction.get(attendanceRef);
+        if (!attendance.exists() || attendance.data().sessionId !== sessionId) {
+          throw new AttendanceServiceError('Data presensi tidak ditemukan pada sesi ini.');
+        }
+        if (attendance.data().status !== 'hadir') {
+          throw new AttendanceServiceError('Hanya presensi berhasil yang dapat dibatalkan.');
+        }
+        transaction.update(attendanceRef, {
+          status: 'dibatalkan',
+          cancelledAt: serverTimestamp(),
+          cancelledBy: user.uid,
+          cancelReason: trimmedReason || null,
         });
       });
       return { ok: true };
     } catch (error) {
-      return toMutationFailure(error, 'closeSession');
+      return { ok: false, reason: mutationErrorMessage(error, 'Pembatalan presensi ditolak.') };
     }
   };
 
-  const checkIn = async (
-    sessionId: string,
-    user: CurrentUser | null = options.getCurrentUser(),
-    location: AttendanceLocation | null = null,
-  ): Promise<MutationResult> => {
-    const currentUser = options.getCurrentUser();
-
-    if (!currentUser || !user) {
-      return { ok: false, reason: ATTENDANCE_IDENTITY_INVALID_REASON };
-    }
-    if (user.role !== 'praktikan') {
-      return { ok: false, reason: 'Hanya praktikan yang dapat melakukan presensi.' };
-    }
-    if (!user.uid || user.uid !== currentUser.uid || isDummyPraktikanId(user.uid)) {
-      return { ok: false, reason: ATTENDANCE_IDENTITY_INVALID_REASON };
-    }
-
-    if (!location) {
-      return { ok: false, reason: 'Lokasi belum berhasil diperoleh. Silakan coba lagi.' };
-    }
+  const issueAttendanceQr = async (sessionId: string): Promise<AttendanceQrResult> => {
+    const user = requireCurrentUser();
+    if (!user) return { ok: false, reason: ATTENDANCE_IDENTITY_INVALID_REASON };
+    const token = createQrToken(database);
+    const expiresAt = Timestamp.fromDate(new Date(options.now().getTime() + QR_TTL_MILLISECONDS));
     try {
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const firebase = require('../lib/firebase') as typeof import('../lib/firebase');
-      const submitAttendance = httpsCallable<
-        {
-          sessionId: string;
-          latitude: number;
-          longitude: number;
-          accuracyMeters: number;
-        },
-        { distanceMeters: number; radiusMeters: number }
-      >(firebase.functions, 'submitAttendance');
-      const response = await submitAttendance({
-        sessionId,
-        latitude: location.latitude,
-        longitude: location.longitude,
-        accuracyMeters: location.accuracyMeters,
+      await runTransaction(database, async (transaction) => {
+        const profile = await getProfile(transaction, user.uid);
+        if (!profile.exists() || !['asisten', 'assistant'].includes(profile.data().role)) {
+          throw new AttendanceServiceError('Hanya asisten yang dapat menerbitkan QR.');
+        }
+        const session = await transaction.get(doc(database, 'sessions', sessionId));
+        if (!session.exists()) throw new AttendanceServiceError('Sesi tidak ditemukan.');
+        if (session.data().assistantUid !== user.uid) {
+          throw new AttendanceServiceError('Anda tidak memiliki kewenangan terhadap sesi ini.');
+        }
+        if (session.data().status !== 'dibuka') {
+          throw new AttendanceServiceError('QR hanya dapat diterbitkan ketika sesi dibuka.');
+        }
+        transaction.set(doc(database, 'attendanceQrTokens', sessionId), {
+          sessionId,
+          token,
+          issuedBy: user.uid,
+          issuedAt: serverTimestamp(),
+          expiresAt,
+          revokedAt: null,
+          revokedBy: null,
+        });
       });
-      if (!Number.isFinite(response.data.distanceMeters)
-        || response.data.distanceMeters < 0
-        || !Number.isFinite(response.data.radiusMeters)
-        || response.data.radiusMeters <= 0) {
-        return { ok: false, reason: 'Respons validasi presensi dari server tidak valid.' };
-      }
       return {
         ok: true,
-        distanceMeters: response.data.distanceMeters,
-        radiusMeters: response.data.radiusMeters,
-        latitude: location.latitude,
-        longitude: location.longitude,
-        accuracyMeters: location.accuracyMeters,
+        qrPayload: `${QR_PREFIX}${token}`,
+        expiresAt: expiresAt.toDate().toISOString(),
       };
     } catch (error) {
-      return {
-        ok: false,
-        reason: callableErrorMessage(error, 'Presensi ditolak oleh server.'),
-      };
+      return { ok: false, reason: mutationErrorMessage(error, 'QR tidak dapat diterbitkan. Silakan coba lagi.') };
     }
   };
+
+  const revokeAttendanceQr = async (sessionId: string): Promise<MutationResult> => {
+    const user = requireCurrentUser();
+    if (!user) return { ok: false, reason: ATTENDANCE_IDENTITY_INVALID_REASON };
+    try {
+      await runTransaction(database, async (transaction) => {
+        const profile = await getProfile(transaction, user.uid);
+        if (!profile.exists() || !['asisten', 'assistant'].includes(profile.data().role)) {
+          throw new AttendanceServiceError('Hanya asisten yang dapat mencabut QR.');
+        }
+        const session = await transaction.get(doc(database, 'sessions', sessionId));
+        if (!session.exists()) throw new AttendanceServiceError('Sesi tidak ditemukan.');
+        if (session.data().assistantUid !== user.uid) {
+          throw new AttendanceServiceError('Anda tidak memiliki kewenangan terhadap sesi ini.');
+        }
+        const qrRef = doc(database, 'attendanceQrTokens', sessionId);
+        const qr = await transaction.get(qrRef);
+        if (qr.exists() && qr.data().revokedAt == null) {
+          transaction.update(qrRef, {
+            revokedAt: serverTimestamp(),
+            revokedBy: user.uid,
+          });
+        }
+      });
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, reason: mutationErrorMessage(error, 'QR tidak dapat dicabut. Silakan coba lagi.') };
+    }
+  };
+
+  const validateAttendanceQr = async (
+    sessionId: string,
+    qrPayload: string,
+  ): Promise<AttendanceQrValidationResult> => {
+    const user = requireCurrentUser();
+    const token = parseAttendanceQrPayload(qrPayload);
+    if (!user) return { ok: false, reason: ATTENDANCE_IDENTITY_INVALID_REASON };
+    if (!token) return { ok: false, reason: 'QR presensi tidak valid.' };
+    try {
+      return await runTransaction(database, async (transaction) => {
+        const profile = await getProfile(transaction, user.uid);
+        if (!profile.exists() || profile.data().role !== 'praktikan') {
+          throw new AttendanceServiceError('Hanya praktikan yang dapat menggunakan QR presensi.');
+        }
+        const sessionSnapshot = await transaction.get(doc(database, 'sessions', sessionId));
+        if (!sessionSnapshot.exists()) throw new AttendanceServiceError('Sesi tidak ditemukan.');
+        const session = sessionSnapshot.data();
+        if (session.status !== 'dibuka' || !hasSessionWindow(session, options.now())) {
+          throw new AttendanceServiceError(ATTENDANCE_SESSION_NOT_OPEN_REASON);
+        }
+        const classId = typeof session.classId === 'string' ? session.classId : '';
+        const enrollment = await transaction.get(
+          doc(database, 'enrollments', `${classId}_${user.uid}`),
+        );
+        if (!classId || !enrollment.exists()
+          || enrollment.data().praktikanId !== user.uid
+          || enrollment.data().classId !== classId
+          || enrollment.data().courseId !== session.courseId
+          || enrollment.data().semester !== session.semester) {
+          throw new AttendanceServiceError(ATTENDANCE_ENROLLMENT_UNVERIFIED_REASON);
+        }
+        const qr = await transaction.get(doc(database, 'attendanceQrTokens', sessionId));
+        const qrData = qr.data();
+        const expiry = qrData ? valueToMillis(qrData.expiresAt) : null;
+        if (!qr.exists() || !qrData || qrData.sessionId !== sessionId || qrData.token !== token) {
+          throw new AttendanceServiceError('QR tidak berlaku untuk sesi yang dipilih.');
+        }
+        if (qrData.revokedAt != null) throw new AttendanceServiceError('QR telah dicabut oleh asisten.');
+        if (expiry === null || expiry <= options.now().getTime()) {
+          throw new AttendanceServiceError('QR presensi sudah kedaluwarsa. Minta asisten memperbarui QR.');
+        }
+        return {
+          ok: true,
+          practicumName: typeof session.practicumName === 'string' ? session.practicumName : '',
+          className: typeof session.className === 'string' ? session.className : '',
+          expiresAt: new Date(expiry).toISOString(),
+        };
+      });
+    } catch (error) {
+      return { ok: false, reason: mutationErrorMessage(error, 'QR tidak dapat divalidasi. Silakan coba lagi.') };
+    }
+  };
+
+  const submitQrAttendance = (
+    sessionId: string,
+    qrPayload: string,
+    location: AttendanceLocation,
+  ): Promise<MutationResult> =>
+    recordCheckIn(sessionId, options.getCurrentUser(), location, 'qr', qrPayload);
 
   const subscribeToAttendance = (
     sessionId: string,
@@ -864,6 +1156,11 @@ function createFirestoreBackend(
     openSession,
     closeSession,
     checkIn,
+    cancelAttendance,
+    issueAttendanceQr,
+    revokeAttendanceQr,
+    validateAttendanceQr,
+    submitQrAttendance,
     subscribeToAttendance,
     subscribeToSession,
     subscribeToSessions,
@@ -917,182 +1214,27 @@ export const attendanceService = createAttendanceService({
 export const attendanceServiceMode = attendanceService.mode;
 
 export const openSession = (sessionId: string) => attendanceService.openSession(sessionId);
-export const closeSession = async (sessionId: string): Promise<MutationResult> => {
-  if (attendanceService.mode === 'mock') {
-    return attendanceService.closeSession(sessionId);
-  }
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const firebase = require('../lib/firebase') as typeof import('../lib/firebase');
-    const close = httpsCallable<{ sessionId: string }, { ok: true }>(
-      firebase.functions,
-      'closeSession',
-    );
-    await close({ sessionId });
-    return { ok: true };
-  } catch (error) {
-    return {
-      ok: false,
-      reason: callableErrorMessage(error, 'Sesi tidak dapat ditutup. Silakan coba lagi.'),
-    };
-  }
-};
-export const cancelAttendance = async (
+export const closeSession = (sessionId: string) => attendanceService.closeSession(sessionId);
+export const cancelAttendance = (
   sessionId: string,
   attendanceId: string,
   reason?: string,
-): Promise<MutationResult> => {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const firebase = require('../lib/firebase') as typeof import('../lib/firebase');
-    const cancel = httpsCallable(firebase.functions, 'cancelAttendance');
-    await cancel({ sessionId, attendanceId, reason: reason?.trim() ?? '' });
-    return { ok: true };
-  } catch (error) {
-    return {
-      ok: false,
-      reason: callableErrorMessage(error, 'Pembatalan presensi ditolak oleh server.'),
-    };
-  }
-};
-
-type AttendanceQrResponse = {
-  ok: true;
-  qrPayload: string;
-  expiresAt: string;
-};
-
-export type AttendanceQrResult =
-  | AttendanceQrResponse
-  | { ok: false; reason: string };
-
-export type AttendanceQrValidationResult =
-  | {
-      ok: true;
-      practicumName: string;
-      className: string;
-      expiresAt: string;
-    }
-  | { ok: false; reason: string };
-
-export const issueAttendanceQr = async (sessionId: string): Promise<AttendanceQrResult> => {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const firebase = require('../lib/firebase') as typeof import('../lib/firebase');
-    const issue = httpsCallable<{ sessionId: string }, AttendanceQrResponse>(
-      firebase.functions,
-      'issueAttendanceQr',
-    );
-    const response = await issue({ sessionId });
-    if (response.data.ok !== true
-      || typeof response.data.qrPayload !== 'string'
-      || typeof response.data.expiresAt !== 'string') {
-      return { ok: false, reason: 'Server mengirim data QR yang tidak valid.' };
-    }
-    return response.data;
-  } catch (error) {
-    return {
-      ok: false,
-      reason: callableErrorMessage(error, 'QR tidak dapat diterbitkan. Silakan coba lagi.'),
-    };
-  }
-};
-
-export const revokeAttendanceQr = async (sessionId: string): Promise<MutationResult> => {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const firebase = require('../lib/firebase') as typeof import('../lib/firebase');
-    const revoke = httpsCallable<{ sessionId: string }, { ok: true; revoked: boolean }>(
-      firebase.functions,
-      'revokeAttendanceQr',
-    );
-    await revoke({ sessionId });
-    return { ok: true };
-  } catch (error) {
-    return {
-      ok: false,
-      reason: callableErrorMessage(error, 'QR tidak dapat dicabut. Silakan coba lagi.'),
-    };
-  }
-};
-
-export const validateAttendanceQr = async (
+): Promise<MutationResult> => attendanceService.cancelAttendance(sessionId, attendanceId, reason);
+export const issueAttendanceQr = (sessionId: string): Promise<AttendanceQrResult> =>
+  attendanceService.issueAttendanceQr(sessionId);
+export const revokeAttendanceQr = (sessionId: string): Promise<MutationResult> =>
+  attendanceService.revokeAttendanceQr(sessionId);
+export const validateAttendanceQr = (
   sessionId: string,
   qrPayload: string,
-): Promise<AttendanceQrValidationResult> => {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const firebase = require('../lib/firebase') as typeof import('../lib/firebase');
-    const validate = httpsCallable<
-      { sessionId: string; qrPayload: string },
-      {
-        ok: true;
-        practicumName: string;
-        className: string;
-        expiresAt: string;
-      }
-    >(firebase.functions, 'validateAttendanceQr');
-    const response = await validate({ sessionId, qrPayload });
-    if (response.data.ok !== true
-      || typeof response.data.expiresAt !== 'string') {
-      return { ok: false, reason: 'Respons validasi QR dari server tidak valid.' };
-    }
-    return response.data;
-  } catch (error) {
-    return {
-      ok: false,
-      reason: callableErrorMessage(error, 'QR tidak dapat divalidasi. Silakan coba lagi.'),
-    };
-  }
-};
-
-export const submitQrAttendance = async (
+): Promise<AttendanceQrValidationResult> =>
+  attendanceService.validateAttendanceQr(sessionId, qrPayload);
+export const submitQrAttendance = (
   sessionId: string,
   qrPayload: string,
   location: AttendanceLocation,
-): Promise<MutationResult> => {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const firebase = require('../lib/firebase') as typeof import('../lib/firebase');
-    const submit = httpsCallable<
-      {
-        sessionId: string;
-        qrPayload: string;
-        latitude: number;
-        longitude: number;
-        accuracyMeters: number;
-      },
-      { ok: true; distanceMeters: number; radiusMeters: number }
-    >(firebase.functions, 'submitQrAttendance');
-    const response = await submit({
-      sessionId,
-      qrPayload,
-      latitude: location.latitude,
-      longitude: location.longitude,
-      accuracyMeters: location.accuracyMeters,
-    });
-    if (response.data.ok !== true
-      || !Number.isFinite(response.data.distanceMeters)
-      || response.data.distanceMeters < 0
-      || !Number.isFinite(response.data.radiusMeters)
-      || response.data.radiusMeters <= 0) {
-      return { ok: false, reason: 'Respons validasi QR dari server tidak valid.' };
-    }
-    return {
-      ok: true,
-      distanceMeters: response.data.distanceMeters,
-      radiusMeters: response.data.radiusMeters,
-      latitude: location.latitude,
-      longitude: location.longitude,
-      accuracyMeters: location.accuracyMeters,
-    };
-  } catch (error) {
-    return {
-      ok: false,
-      reason: callableErrorMessage(error, 'Presensi QR gagal diproses. Silakan coba lagi.'),
-    };
-  }
-};
+): Promise<MutationResult> =>
+  attendanceService.submitQrAttendance(sessionId, qrPayload, location);
 /**
  * Check-in praktikan untuk satu sesi (SRS-09). `user` default diambil dari
  * identitas Auth aktif; `null` diperlakukan sebagai identitas tidak valid.

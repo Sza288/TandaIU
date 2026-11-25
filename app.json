@@ -47,6 +47,12 @@
         }
       ],
       "expo-image",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Izinkan TandaIU menampilkan posisi Anda di peta."
+        }
+      ],
       "expo-status-bar",
       "expo-web-browser",
       "@react-native-google-signin/google-signin"

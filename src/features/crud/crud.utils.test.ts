@@ -2,7 +2,9 @@ import {
   addHoursToDateTime,
   combineDateTime,
   fromDateTimeInput,
+  scheduleMeetingDates,
   splitDateTimeInput,
+  weekdayOfDate,
 } from './crud.utils';
 
 describe('session form Asia/Jakarta date handling', () => {
@@ -40,5 +42,48 @@ describe('session form Asia/Jakarta date handling', () => {
       .toEqual({ date: '2026-11-01', time: '01:30' });
     expect(addHoursToDateTime('2026-12-31', '23:30', 2))
       .toEqual({ date: '2027-01-01', time: '01:30' });
+  });
+});
+
+describe('scheduleMeetingDates', () => {
+  it('uses the chosen date as the first meeting and steps one week', () => {
+    expect(scheduleMeetingDates(3, '2026-11-23')).toEqual([
+      '2026-11-23',
+      '2026-11-30',
+      '2026-12-07',
+    ]);
+  });
+
+  it('keeps a chosen date even when it is not the schedule weekday', () => {
+    // 2026-11-24 is a Tuesday; the chosen date must not be shifted.
+    expect(scheduleMeetingDates(2, '2026-11-24')).toEqual([
+      '2026-11-24',
+      '2026-12-01',
+    ]);
+  });
+
+  it('wraps correctly across month and year boundaries', () => {
+    expect(scheduleMeetingDates(3, '2026-12-21')).toEqual([
+      '2026-12-21',
+      '2026-12-28',
+      '2027-01-04',
+    ]);
+  });
+
+  it('returns nothing for a non-positive or invalid count', () => {
+    expect(scheduleMeetingDates(0, '2026-11-23')).toEqual([]);
+    expect(scheduleMeetingDates(-3, '2026-11-23')).toEqual([]);
+    expect(scheduleMeetingDates(2, 'bukan-tanggal')).toEqual([]);
+  });
+});
+
+describe('weekdayOfDate', () => {
+  it('returns the weekday index for a valid date', () => {
+    expect(weekdayOfDate('2026-11-23')).toBe(1);
+    expect(weekdayOfDate('2026-11-24')).toBe(2);
+  });
+
+  it('returns null for an invalid date', () => {
+    expect(weekdayOfDate('bukan-tanggal')).toBeNull();
   });
 });

@@ -1,24 +1,27 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, Stack, type Href } from 'expo-router';
-import { ReactNode, useState } from 'react';
+import { ReactNode, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import BottomNav from '../../components/BottomNav';
 import ScreenHeader from '../../components/ScreenHeader';
 import StatusBadge from '../../components/StatusBadge';
 import { useClasses } from '../../hooks/useClasses';
+import { useLaboratories } from '../../hooks/useLaboratories';
 import { useSchedules } from '../../hooks/useSchedules';
 import { useSessions } from '../../hooks/useSessions';
 import {
   deleteSchedule,
 } from '../../services/practicumService';
+import { deleteLaboratory } from '../../services/laboratoryService';
+import type { LaboratoryDoc } from '../../types/praktikum';
 import { colors, fonts, radius, shadows, spacing } from '../../theme';
 import { formatDateShort, formatTimeRange } from '../../utils/format';
 import CrudCard from './CrudCard';
@@ -31,31 +34,65 @@ import {
   manageHref,
 } from './crud.utils';
 
-type TabKey = 'classes' | 'schedules' | 'sessions';
-type CrudKind = 'class' | 'schedule' | 'session';
+type TabKey = 'classes' | 'schedules' | 'sessions' | 'laboratories';
+type CrudKind = 'class' | 'schedule' | 'session' | 'laboratory';
 
 const TABS: { key: TabKey; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
   { key: 'classes', label: 'Kelas', icon: 'school-outline' },
   { key: 'schedules', label: 'Jadwal', icon: 'calendar-outline' },
   { key: 'sessions', label: 'Sesi', icon: 'time-outline' },
+  { key: 'laboratories', label: 'Lab', icon: 'business-outline' },
 ];
 
 const FORM_PATHS: Record<CrudKind, string> = {
   class: '/assistant/manage/class-form',
   schedule: '/assistant/manage/schedule-form',
   session: '/assistant/manage/session-form',
+  laboratory: '/assistant/manage/laboratory-form',
 };
 
 export default function ManageScreen() {
   const [tab, setTab] = useState<TabKey>('classes');
   const [deletingScheduleId, setDeletingScheduleId] = useState<string | null>(null);
+  const [deletingLaboratoryId, setDeletingLaboratoryId] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [sessionQuery, setSessionQuery] = useState('');
 
   const classes = useClasses();
   const schedules = useSchedules();
   const sessions = useSessions();
+  const laboratories = useLaboratories();
 
   const classById = new Map(classes.data.map((item) => [item.id, item]));
+  const laboratoryById = new Map(laboratories.data.map((item) => [item.id, item]));
+
+  /**
+   * Hanya sesi `terjadwal` yang ditampilkan: sesi yang sedang dibuka atau sudah
+   * ditutup tidak dapat diubah, jadi tidak perlu muncul di pengelolaan.
+   */
+  const scheduledSessions = useMemo(
+    () => sessions.data.filter((item) => item.status === 'terjadwal'),
+    [sessions.data],
+  );
+
+  const filteredSessions = useMemo(() => {
+    const needle = sessionQuery.trim().toLocaleLowerCase('id-ID');
+    return scheduledSessions
+      .filter((item) => {
+        if (!needle) return true;
+        return [
+          item.practicumName,
+          getCourseName(item.courseId),
+          item.className,
+          item.lecturer ?? '',
+        ].some((value) => value.toLocaleLowerCase('id-ID').includes(needle));
+      })
+      .sort((a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt));
+  }, [scheduledSessions, sessionQuery]);
+
+  const resetSessionFilters = () => {
+    setSessionQuery('');
+  };
 
   const openForm = (kind: CrudKind, id?: string) => {
     router.push(manageHref(FORM_PATHS[kind], id));
@@ -79,6 +116,31 @@ export default function ManageScreen() {
       message: 'Data yang dihapus tidak dapat dikembalikan.',
       onConfirm: () => {
         void runDeleteSchedule(id);
+      },
+    });
+  };
+
+  const runDeleteLaboratory = async (id: string) => {
+    setDeletingLaboratoryId(id);
+    setDeleteError(null);
+    try {
+      await deleteLaboratory(id);
+    } catch (error) {
+      setDeleteError(getErrorMessage(error));
+    } finally {
+      setDeletingLaboratoryId(null);
+    }
+  };
+
+  const confirmDeleteLaboratory = (laboratory: LaboratoryDoc) => {
+    const usedBySession = sessions.data.some((session) => session.laboratoryId === laboratory.id);
+    confirmAction({
+      title: `Hapus ${laboratory.name}?`,
+      message: usedBySession
+        ? 'Laboratorium ini dipakai sesi praktikum. Sesi terkait akan kehilangan lokasi presensi dan ditandai belum diatur.'
+        : 'Data yang dihapus tidak dapat dikembalikan.',
+      onConfirm: () => {
+        void runDeleteLaboratory(laboratory.id);
       },
     });
   };
@@ -202,6 +264,23 @@ export default function ManageScreen() {
                     {dayLabel} · {item.startTime}-{item.endTime}
                   </Text>
                   <Text style={styles.meta}>Ruang {item.room}</Text>
+                  <Text style={styles.meta}>
+                    {item.jumlahPertemuan
+                      ? `${item.jumlahPertemuan} pertemuan`
+                      : 'Jumlah pertemuan belum diisi'}
+                  </Text>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={`Buat sesi dari jadwal ${item.room}`}
+                    onPress={() => router.push(manageHref('/assistant/manage/schedule-generate', item.id))}
+                    style={({ pressed }) => [
+                      styles.generateButton,
+                      pressed ? styles.pressed : null,
+                    ]}
+                  >
+                    <Ionicons name="add-circle-outline" size={15} color={colors.primaryDark} />
+                    <Text style={styles.generateText}>Buat Sesi</Text>
+                  </Pressable>
                 </CrudCard>
               );
             })}
@@ -221,45 +300,148 @@ export default function ManageScreen() {
             emptyBody="Sesi praktikum yang ditambahkan akan tampil di sini."
             emptyAction={null}
           >
-            {sessions.data.map((item) => {
-              const lecturerName = item.lecturer?.trim();
+            <View style={styles.filterPanel}>
+              <View style={styles.searchBox}>
+                <Ionicons name="search-outline" size={18} color={colors.primary} />
+                <TextInput
+                  value={sessionQuery}
+                  onChangeText={setSessionQuery}
+                  placeholder="Cari praktikum, kelas, atau dosen..."
+                  placeholderTextColor={colors.textMuted}
+                  style={styles.searchInput}
+                  returnKeyType="search"
+                  accessibilityLabel="Cari sesi praktikum"
+                />
+                {sessionQuery.length > 0 ? (
+                  <Pressable
+                    onPress={() => setSessionQuery('')}
+                    accessibilityRole="button"
+                    accessibilityLabel="Hapus pencarian sesi"
+                    hitSlop={8}
+                  >
+                    <Ionicons name="close-circle" size={18} color={colors.textMuted} />
+                  </Pressable>
+                ) : null}
+              </View>
 
-              return (
-                <CrudCard
-                  key={item.id}
-                  icon="flask-outline"
-                  eyebrow={getCourseName(item.courseId)}
-                  title={item.practicumName}
-                  onEdit={() => openForm('session', item.id)}
-                >
-                  <Text style={styles.meta}>
-                    Kelas {item.className} · {formatDateShort(item.startsAt)}
-                  </Text>
-                  <Text style={styles.meta}>
-                    {formatTimeRange(item.startsAt, item.endsAt)}
-                  </Text>
-                  <View style={styles.metaRow}>
-                    <Ionicons
-                      name="person-outline"
-                      size={13}
-                      color={lecturerName ? colors.primary : colors.textMuted}
-                    />
-                    <Text style={[styles.meta, !lecturerName ? styles.metaMuted : null]}>
-                      {lecturerName || 'Dosen belum diisi'}
+              <View style={styles.filterFooter}>
+                <Text style={styles.filterCount}>
+                  {filteredSessions.length} dari {scheduledSessions.length} sesi terjadwal
+                </Text>
+                {sessionQuery.trim() ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Reset filter sesi"
+                    onPress={resetSessionFilters}
+                    hitSlop={6}
+                  >
+                    <Text style={styles.filterReset}>Reset</Text>
+                  </Pressable>
+                ) : null}
+              </View>
+            </View>
+
+            {filteredSessions.length === 0 ? (
+              <View style={styles.stateCard}>
+                <Ionicons name="search-outline" size={30} color={colors.textSecondary} />
+                <Text style={styles.stateTitle}>Tidak ada sesi yang cocok</Text>
+                <Text style={styles.stateBody}>
+                  Ubah kata kunci atau status untuk melihat sesi lain.
+                </Text>
+              </View>
+            ) : (
+              filteredSessions.map((item) => {
+                const lecturerName = item.lecturer?.trim();
+                const laboratoryName = item.laboratoryId
+                  ? laboratoryById.get(item.laboratoryId)?.name
+                  : undefined;
+                // Jadwal sesi hanya boleh dipindah sebelum dibuka. Sesi yang
+                // sedang dibuka atau sudah ditutup tidak bisa diedit lagi.
+                const editable = item.status === 'terjadwal';
+
+                return (
+                  <CrudCard
+                    key={item.id}
+                    icon="flask-outline"
+                    eyebrow={getCourseName(item.courseId)}
+                    title={item.practicumName}
+                    {...(editable ? { onEdit: () => openForm('session', item.id) } : {})}
+                  >
+                    <Text style={styles.meta}>
+                      Kelas {item.className} · {formatDateShort(item.startsAt)}
                     </Text>
-                  </View>
-                  <View style={styles.statusRow}>
-                    <Text style={styles.meta}>Kelas {item.className}</Text>
-                    <StatusBadge status={item.status} />
-                  </View>
-                </CrudCard>
-              );
-            })}
+                    <Text style={styles.meta}>
+                      {formatTimeRange(item.startsAt, item.endsAt)}
+                    </Text>
+                    <View style={styles.metaRow}>
+                      <Ionicons
+                        name="person-outline"
+                        size={13}
+                        color={lecturerName ? colors.primary : colors.textMuted}
+                      />
+                      <Text style={[styles.meta, !lecturerName ? styles.metaMuted : null]}>
+                        {lecturerName || 'Dosen belum diisi'}
+                      </Text>
+                    </View>
+                    <View style={styles.metaRow}>
+                      <Ionicons
+                        name="business-outline"
+                        size={13}
+                        color={laboratoryName ? colors.primary : colors.textMuted}
+                      />
+                      <Text style={[styles.meta, !laboratoryName ? styles.metaMuted : null]}>
+                        {laboratoryName || 'Laboratorium belum diatur'}
+                      </Text>
+                    </View>
+                    <View style={styles.statusRow}>
+                      <Text style={styles.meta}>Kelas {item.className}</Text>
+                      <StatusBadge status={item.status} />
+                    </View>
+                  </CrudCard>
+                );
+              })
+            )}
+          </SectionShell>
+        ) : null}
+
+        {tab === 'laboratories' ? (
+          <SectionShell
+            title="Daftar Laboratorium"
+            addLabel="Tambah Laboratorium"
+            onAdd={() => openForm('laboratory')}
+            loading={laboratories.loading}
+            error={laboratories.error}
+            isEmpty={laboratories.data.length === 0}
+            emptyIcon="business-outline"
+            emptyTitle="Belum ada laboratorium"
+            emptyBody="Tambahkan laboratorium agar sesi praktikum dapat dipakai untuk presensi berbasis lokasi."
+            emptyAction={null}
+          >
+            {laboratories.data.map((item) => (
+              <CrudCard
+                key={item.id}
+                icon="business-outline"
+                eyebrow={`Lantai ${item.lantai}`}
+                title={item.name}
+                onEdit={() => openForm('laboratory', item.id)}
+                onDelete={() => confirmDeleteLaboratory(item)}
+                deleting={deletingLaboratoryId === item.id}
+              >
+                <View style={styles.metaRow}>
+                  <Ionicons name="location-outline" size={13} color={colors.textMuted} />
+                  <Text style={styles.meta}>
+                    {item.latitude}, {item.longitude}
+                  </Text>
+                </View>
+                <View style={styles.metaRow}>
+                  <Ionicons name="radio-outline" size={13} color={colors.textMuted} />
+                  <Text style={styles.meta}>Radius {item.radius} m</Text>
+                </View>
+              </CrudCard>
+            ))}
           </SectionShell>
         ) : null}
       </ScrollView>
-
-      <BottomNav />
     </SafeAreaView>
   );
 }
@@ -416,6 +598,69 @@ const styles = StyleSheet.create({
   list: {
     gap: spacing.md,
   },
+  filterPanel: {
+    gap: spacing.sm,
+  },
+  searchBox: {
+    minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.md,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.borderStrong,
+    backgroundColor: colors.surface,
+  },
+  searchInput: {
+    flex: 1,
+    minWidth: 0,
+    paddingVertical: spacing.sm,
+    color: colors.text,
+    fontFamily: fonts.regular,
+    fontSize: 13,
+  },
+  filterChips: {
+    gap: spacing.xs,
+    paddingVertical: 2,
+  },
+  filterChip: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: 6,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+  },
+  filterChipActive: {
+    borderColor: colors.primary,
+    backgroundColor: colors.primarySoft,
+  },
+  filterChipText: {
+    color: colors.textSecondary,
+    fontFamily: fonts.semiBold,
+    fontSize: 11,
+  },
+  filterChipTextActive: {
+    color: colors.primaryDark,
+    fontFamily: fonts.bold,
+  },
+  filterFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+  },
+  filterCount: {
+    color: colors.textMuted,
+    fontFamily: fonts.regular,
+    fontSize: 11,
+  },
+  filterReset: {
+    color: colors.primary,
+    fontFamily: fonts.bold,
+    fontSize: 11,
+  },
   meta: {
     color: colors.textSecondary,
     fontFamily: fonts.regular,
@@ -435,6 +680,23 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: spacing.sm,
+  },
+  generateButton: {
+    minHeight: 36,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    marginTop: spacing.xs,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    backgroundColor: colors.primarySofter,
+  },
+  generateText: {
+    color: colors.primaryDark,
+    fontFamily: fonts.bold,
+    fontSize: 12,
   },
   errorBanner: {
     flexDirection: 'row',
