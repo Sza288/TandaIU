@@ -186,6 +186,7 @@ describe('laboratory reader', () => {
       longitude: 110.4,
       radius: 50,
       lantai: 2,
+      isActive: true,
       createdAt: createdAt.toISOString(),
       updatedAt: updatedAt.toISOString(),
     }]);

@@ -1,7 +1,6 @@
 import {
   addDoc,
   collection,
-  deleteDoc,
   doc,
   getDoc,
   getDocs,
@@ -131,9 +130,10 @@ export async function createLaboratory(
   input: LaboratoryInput,
 ): Promise<LaboratoryDoc> {
   validateLaboratoryInput(input);
-  const payload: LaboratoryInput = {
+  const payload: LaboratoryInput & { isActive: boolean } = {
     ...input,
     name: input.name.trim(),
+    isActive: true,
   };
 
   const existing = await getAllLaboratories();
@@ -170,8 +170,19 @@ export async function updateLaboratory(
 
   return runFirestore(async () => {
     await updateDoc(doc(db, COLLECTIONS.laboratories, id), payload);
-    return { id, ...payload };
+    return { id, ...payload, isActive: current.isActive };
   });
+}
+
+function toLaboratoryDoc(
+  id: string,
+  data: Omit<LaboratoryDoc, 'id'>,
+): LaboratoryDoc {
+  return {
+    ...data,
+    id,
+    isActive: data.isActive !== false,
+  };
 }
 
 async function getLaboratoryByIdUnsafe(id: string): Promise<LaboratoryDoc | null> {
@@ -179,19 +190,16 @@ async function getLaboratoryByIdUnsafe(id: string): Promise<LaboratoryDoc | null
   if (!snapshot.exists()) {
     return null;
   }
-  return {
-    id: snapshot.id,
-    ...(snapshot.data() as Omit<LaboratoryDoc, 'id'>),
-  };
+  return toLaboratoryDoc(snapshot.id, snapshot.data() as Omit<LaboratoryDoc, 'id'>);
 }
 
 async function getAllLaboratoriesUnsafe(): Promise<LaboratoryDoc[]> {
   const snapshot = await getDocs(collection(db, COLLECTIONS.laboratories));
   return snapshot.docs
-    .map((document) => ({
-      id: document.id,
-      ...(document.data() as Omit<LaboratoryDoc, 'id'>),
-    }))
+    .map((document) => toLaboratoryDoc(
+      document.id,
+      document.data() as Omit<LaboratoryDoc, 'id'>,
+    ))
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
@@ -205,6 +213,9 @@ export async function getAllLaboratories(): Promise<LaboratoryDoc[]> {
 
 export async function deleteLaboratory(id: string): Promise<void> {
   return runFirestore(async () => {
-    await deleteDoc(doc(db, COLLECTIONS.laboratories, id));
+    await updateDoc(doc(db, COLLECTIONS.laboratories, id), {
+      isActive: false,
+      updatedAt: new Date().toISOString(),
+    });
   });
 }

@@ -48,6 +48,8 @@ export type LaboratoryDoc = {
   longitude: number;
   radius: number;
   lantai: number;
+  /** Laboratorium nonaktif tetap tersimpan, tetapi tidak dapat dipilih untuk sesi. */
+  isActive: boolean;
   createdAt: string;
   updatedAt: string;
 };
@@ -56,7 +58,7 @@ export type ClassInput = Omit<ClassDoc, "id">;
 
 export type ScheduleInput = Omit<ScheduleDoc, "id">;
 
-export type LaboratoryInput = Omit<LaboratoryDoc, "id">;
+export type LaboratoryInput = Omit<LaboratoryDoc, "id" | "isActive">;
 
 export type SessionInput = {
   classId: string;
