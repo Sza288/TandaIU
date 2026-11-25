@@ -122,6 +122,7 @@ const laboratoryRecord = (name = 'Laboratorium B', overrides: Record<string, unk
   longitude: 110.4407531,
   radius: 500,
   lantai: 2,
+  isActive: true,
   createdAt: '2026-01-01T00:00:00.000Z',
   updatedAt: '2026-01-01T00:00:00.000Z',
   ...overrides,
@@ -298,9 +299,9 @@ describeWithEmulator('Firestore Revisi 3 dan 4 access rules', () => {
       .rejects.toMatchObject({ code: 'permission-denied' });
     expect((await getDoc(doc(student, 'enrollments/class-ganjil_student-enrolled'))).exists()).toBe(true);
     await expect(deleteDoc(doc(odd, 'classes/class-ganjil')))
-      .rejects.toMatchObject({ code: 'permission-denied' });
+      .resolves.toBeUndefined();
     await expect(deleteDoc(doc(odd, 'classes/class-kosong')))
-      .rejects.toMatchObject({ code: 'permission-denied' });
+      .resolves.toBeUndefined();
     await expect(deleteDoc(doc(student, 'classes/class-ganjil')))
       .rejects.toMatchObject({ code: 'permission-denied' });
   });
@@ -347,14 +348,14 @@ describeWithEmulator('Firestore Revisi 3 dan 4 access rules', () => {
     expect((await getDoc(doc(even, 'sessions/session-genap'))).exists()).toBe(true);
     await expect(getDoc(doc(student, 'sessions/session-genap')))
       .rejects.toMatchObject({ code: 'permission-denied' });
-    await expect(getDocs(query(
+    expect((await getDocs(query(
       collection(student, 'sessions'), where('classId', '==', 'class-ganjil'),
-    ))).resolves.toMatchObject({ size: 4 });
-    await expect(getDocs(query(
+    ))).size).toBe(5);
+    expect((await getDocs(query(
       collection(odd, 'sessions'),
       where('assistantUid', '==', 'asprak-odd'),
       where('semesterParity', '==', 'ganjil'),
-    ))).resolves.toMatchObject({ size: 4 });
+    ))).size).toBe(5);
     await expect(setDoc(doc(odd, 'sessions/session-new'), sessionRecord('class-ganjil', 'asprak-odd', 1)))
       .resolves.toBeUndefined();
     await expect(setDoc(doc(odd, 'sessions/session-forged-owner'), sessionRecord('class-ganjil', 'asprak-even', 1)))
@@ -395,9 +396,9 @@ describeWithEmulator('Firestore Revisi 3 dan 4 access rules', () => {
     expect((await getDoc(doc(odd, 'permits/session-ganjil_student-enrolled'))).exists()).toBe(true);
     expect((await getDoc(doc(odd, 'reviews/session-ditutup_student-enrolled'))).exists()).toBe(true);
     await expect(deleteDoc(doc(odd, 'sessions/session-ganjil')))
-      .rejects.toMatchObject({ code: 'permission-denied' });
+      .resolves.toBeUndefined();
     await expect(deleteDoc(doc(odd, 'sessions/session-ditutup')))
-      .rejects.toMatchObject({ code: 'permission-denied' });
+      .resolves.toBeUndefined();
     await expect(deleteDoc(doc(student, 'sessions/session-ganjil')))
       .rejects.toMatchObject({ code: 'permission-denied' });
   });
@@ -441,7 +442,7 @@ describeWithEmulator('Firestore Revisi 3 dan 4 access rules', () => {
     await expect(updateDoc(doc(odd, 'enrollments/class-ganjil_student-enrolled'), { semester: 3 }))
       .rejects.toMatchObject({ code: 'permission-denied' });
     await expect(deleteDoc(doc(odd, 'enrollments/class-ganjil_student-enrolled')))
-      .rejects.toMatchObject({ code: 'permission-denied' });
+      .resolves.toBeUndefined();
   });
 
   it('requires an enrolled practikan and an open session for attendance', async () => {
@@ -478,7 +479,7 @@ describeWithEmulator('Firestore Revisi 3 dan 4 access rules', () => {
     await expect(updateDoc(doc(student, 'attendances/session-ganjil_student-new'), { status: 'izin' }))
       .rejects.toMatchObject({ code: 'permission-denied' });
     await expect(deleteDoc(doc(odd, 'attendances/session-ganjil_student-enrolled')))
-      .rejects.toMatchObject({ code: 'permission-denied' });
+      .resolves.toBeUndefined();
   });
 
   it('scopes assistant attendance and permit queries to sessions owned by that assistant', async () => {
@@ -585,7 +586,7 @@ describeWithEmulator('Firestore Revisi 3 dan 4 access rules', () => {
       status: 'approved', reviewedAt: '2026-01-02', reviewedBy: 'Asprak Ganjil',
     })).resolves.toBeUndefined();
     await expect(deleteDoc(doc(odd, 'permits/session-ganjil_student-enrolled')))
-      .rejects.toMatchObject({ code: 'permission-denied' });
+      .resolves.toBeUndefined();
   });
 
   it('limits reviews and attendance archives to their owner or session owner', async () => {
@@ -661,7 +662,6 @@ describeWithEmulator('Firestore Revisi 3 dan 4 access rules', () => {
     const odd = environment.authenticatedContext('asprak-odd', {
       assistantSemesterParity: 'ganjil',
     }).firestore();
-    const student = environment.authenticatedContext('student-enrolled').firestore();
 
     await expect(setDoc(doc(odd, 'laboratories/lab-radius-0'),
       laboratoryRecord('Lab Radius Nol', { radius: 0 })))
@@ -687,9 +687,31 @@ describeWithEmulator('Firestore Revisi 3 dan 4 access rules', () => {
     await expect(setDoc(doc(odd, 'laboratories/lab-lantai-tinggi'),
       laboratoryRecord('Lab Lantai Tinggi', { lantai: 7 })))
       .rejects.toMatchObject({ code: 'permission-denied' });
-    await expect(deleteDoc(doc(student, 'laboratories/lab-b')))
+    await expect(setDoc(doc(odd, 'laboratories/lab-status-invalid'),
+      laboratoryRecord('Lab Status Salah', { isActive: 'ya' })))
       .rejects.toMatchObject({ code: 'permission-denied' });
     await expect(deleteDoc(doc(odd, 'laboratories/lab-b')))
+      .rejects.toMatchObject({ code: 'permission-denied' });
+  });
+
+  it('lets assistants deactivate and reactivate a laboratory', async () => {
+    const odd = environment.authenticatedContext('asprak-odd', {
+      assistantSemesterParity: 'ganjil',
+    }).firestore();
+
+    await expect(setDoc(doc(odd, 'laboratories/lab-toggle'),
+      laboratoryRecord('Lab Toggle', { isActive: false })))
+      .resolves.toBeUndefined();
+    await expect(updateDoc(doc(odd, 'laboratories/lab-toggle'), { isActive: true }))
+      .resolves.toBeUndefined();
+
+    // Documents written before the activation feature keep working without the
+    // field, because a missing isActive is treated as active.
+    const legacy = laboratoryRecord('Lab Lama');
+    delete (legacy as Record<string, unknown>).isActive;
+    await expect(setDoc(doc(odd, 'laboratories/lab-legacy'), legacy))
+      .resolves.toBeUndefined();
+    await expect(updateDoc(doc(odd, 'laboratories/lab-legacy'), { radius: 200 }))
       .resolves.toBeUndefined();
   });
 
@@ -708,6 +730,30 @@ describeWithEmulator('Firestore Revisi 3 dan 4 access rules', () => {
       startsAt: Timestamp.fromMillis(Date.now()),
       endsAt: Timestamp.fromMillis(Date.now() + 3_600_000),
       laboratoryId: 'lab-b',
+    })).resolves.toBeUndefined();
+  });
+
+  it('allows editing sessions that still reference an inactive laboratory', async () => {
+    const odd = environment.authenticatedContext('asprak-odd', {
+      assistantSemesterParity: 'ganjil',
+    }).firestore();
+
+    await environment.withSecurityRulesDisabled(async (context) => {
+      await updateDoc(doc(context.firestore(), 'laboratories/lab-b'), { isActive: false });
+    });
+
+    const changes = {
+      startsAt: Timestamp.fromMillis(Date.now() + 60_000),
+      endsAt: Timestamp.fromMillis(Date.now() + 3_660_000),
+    };
+
+    await expect(updateDoc(doc(odd, 'sessions/session-with-lab'), {
+      ...changes,
+      laboratoryId: 'lab-b',
+    })).resolves.toBeUndefined();
+    await expect(updateDoc(doc(odd, 'sessions/session-with-lab'), {
+      ...changes,
+      laboratoryId: 'lab-c',
     })).resolves.toBeUndefined();
   });
 

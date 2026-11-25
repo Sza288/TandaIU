@@ -11,7 +11,6 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import BottomNav from '../../components/BottomNav';
 import ScreenHeader from '../../components/ScreenHeader';
 import { useAuthSession } from '../auth/AuthSessionContext';
 import { useMapUserLocation } from '../../hooks/useMapUserLocation';
@@ -229,7 +228,6 @@ function MapsScreenContent({ profile }: { profile: AuthProfile }) {
           </>
         )}
       </ScrollView>
-      <BottomNav />
     </SafeAreaView>
   );
 }
@@ -248,7 +246,6 @@ export default function MapsScreen() {
         <ActivityIndicator color={colors.primary} />
         <Text style={styles.stateText}>Memeriksa sesi akun...</Text>
       </View>
-      <BottomNav />
     </SafeAreaView>
   );
 }
