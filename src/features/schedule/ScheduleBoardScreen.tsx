@@ -50,7 +50,7 @@ export default function ScheduleBoardScreen() {
   const scheduleResult = useSchedules(
     role === 'praktikan' ? { classIds: enrolledClassIds } : undefined,
   );
-  const classResult = useClasses();
+  const classResult = useClasses({ classIds: enrolledClassIds });
 
   const classById = useMemo(
     () => new Map(classResult.data.map((item) => [item.id, item])),
