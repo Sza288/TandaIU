@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getApps, initializeApp } from 'firebase/app';
-import { getAuth, initializeAuth } from 'firebase/auth';
+import { connectAuthEmulator, getAuth, initializeAuth } from 'firebase/auth';
+import { connectFirestoreEmulator } from 'firebase/firestore';
 import { auth, db } from '../lib/firebase';
 
 jest.mock('@react-native-async-storage/async-storage', () => ({
@@ -19,12 +20,14 @@ jest.mock('firebase/app', () => ({
 }));
 
 jest.mock('firebase/auth', () => ({
+  connectAuthEmulator: jest.fn(),
   getAuth: jest.fn(() => ({ name: 'test-auth' })),
   getReactNativePersistence: jest.fn((storage) => ({ storage })),
   initializeAuth: jest.fn(() => ({ name: 'test-auth' })),
 }));
 
 jest.mock('firebase/firestore', () => ({
+  connectFirestoreEmulator: jest.fn(),
   getFirestore: jest.fn(() => ({ name: 'test-firestore' })),
 }));
 
@@ -49,6 +52,9 @@ it('initializes native Firebase Auth once with AsyncStorage persistence', () => 
     { persistence: { storage: AsyncStorage } },
   );
   expect(getAuth).not.toHaveBeenCalled();
+  expect(connectAuthEmulator).not.toHaveBeenCalled();
+  expect(connectFirestoreEmulator).not.toHaveBeenCalled();
+  expect(jest.requireMock('firebase/functions').connectFunctionsEmulator).not.toHaveBeenCalled();
   expect(auth).toEqual({ name: 'test-auth' });
   expect(db).toEqual({ name: 'test-firestore' });
 });

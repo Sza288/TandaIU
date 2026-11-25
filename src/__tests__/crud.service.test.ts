@@ -169,8 +169,8 @@ describe('laboratory reader', () => {
         id: 'lab-b',
         data: () => ({
           name: 'Lab B',
-          lat: -6.9,
-          lon: 110.4,
+          latitude: -6.9,
+          longitude: 110.4,
           radius: 50,
           lantai: 2,
           createdAt,
@@ -182,8 +182,8 @@ describe('laboratory reader', () => {
     await expect(getAllLaboratories()).resolves.toEqual([{
       id: 'lab-b',
       name: 'Lab B',
-      lat: -6.9,
-      lon: 110.4,
+      latitude: -6.9,
+      longitude: 110.4,
       radius: 50,
       lantai: 2,
       createdAt: createdAt.toISOString(),
@@ -197,8 +197,8 @@ describe('laboratory reader', () => {
         id: 'lab-invalid',
         data: () => ({
           name: 'Lab Invalid',
-          lat: -6.9,
-          lon: 110.4,
+          latitude: -6.9,
+          longitude: 110.4,
           radius: 0.5,
           lantai: '2',
           createdAt: new Date('2026-10-27T08:00:00.000Z'),
@@ -218,8 +218,8 @@ describe('laboratory reader', () => {
         id: 'lab-boundary',
         data: () => ({
           name: 'Lab Boundary',
-          lat: -6.9,
-          lon: 110.4,
+          latitude: -6.9,
+          longitude: 110.4,
           radius,
           lantai: 2,
           createdAt: new Date('2026-10-27T08:00:00.000Z'),
