@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { initializeApp } from 'firebase-admin/app';
-import { getFirestore, FieldValue, Timestamp, type DocumentData } from 'firebase-admin/firestore';
+import { getFirestore, FieldValue, Timestamp, type DocumentData, type Transaction } from 'firebase-admin/firestore';
 import { setGlobalOptions } from 'firebase-functions/v2';
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
 import { getSessionTimeFailure } from './sessionWindow.js';
@@ -80,6 +80,60 @@ function timestampToMillis(value: unknown): number | null {
     return Number.isFinite(milliseconds) ? milliseconds : null;
   }
   return null;
+}
+
+function isValidSemesterParity(value: unknown): value is 'ganjil' | 'genap' {
+  return value === 'ganjil' || value === 'genap';
+}
+
+function parseSessionId(rawData: unknown): string {
+  const data = getCallableData(rawData);
+  const sessionId = typeof data.sessionId === 'string' ? data.sessionId.trim() : '';
+  if (!sessionId || sessionId.includes('/')) {
+    reject('invalid-argument', 'Identitas sesi tidak valid.');
+  }
+  return sessionId;
+}
+
+async function assertSessionMatchesClass(
+  transaction: Transaction,
+  session: DocumentData,
+): Promise<string> {
+  const classId = typeof session.classId === 'string' ? session.classId.trim() : '';
+  if (!classId || classId.includes('/')) {
+    reject('failed-precondition', 'Sesi tidak terhubung dengan kelas.');
+  }
+  const classSnapshot = await transaction.get(db.doc(`classes/${classId}`));
+  if (!classSnapshot.exists) reject('failed-precondition', 'Kelas sesi tidak ditemukan.');
+  const classData = classSnapshot.data();
+  const semester = classData?.semester;
+  const parity = classData?.semesterParity;
+  if (typeof semester !== 'number'
+    || !Number.isInteger(semester)
+    || semester <= 0
+    || !isValidSemesterParity(parity)
+    || parity !== (semester % 2 === 1 ? 'ganjil' : 'genap')
+    || typeof classData?.courseId !== 'string'
+    || !classData.courseId
+    || typeof classData?.assistantUid !== 'string'
+    || !classData.assistantUid) {
+    reject('failed-precondition', 'Data kelas tidak valid.');
+  }
+  if (classData?.courseId !== session.courseId
+    || classData?.assistantUid !== session.assistantUid
+    || classData?.className !== session.className
+    || classData?.semester !== session.semester
+    || classData?.semesterParity !== session.semesterParity) {
+    reject('failed-precondition', 'Data kelas dan sesi tidak konsisten.');
+  }
+  const courseSnapshot = await transaction.get(db.doc(`courseCatalog/${classData.courseId}`));
+  const course = courseSnapshot.data();
+  if (!courseSnapshot.exists
+    || course?.semester !== semester
+    || course?.semesterParity !== parity) {
+    reject('failed-precondition', 'Mata kuliah dan kelas tidak konsisten.');
+  }
+  return classId;
 }
 
 function assertSessionAttendanceWindow(
@@ -202,25 +256,17 @@ async function recordAttendance(
       }
     }
 
-    const classId = typeof session?.classId === 'string' ? session.classId.trim() : '';
-    if (!classId) reject('failed-precondition', 'Sesi tidak terhubung dengan kelas.');
-    const classSnapshot = await transaction.get(db.doc(`classes/${classId}`));
-    if (!classSnapshot.exists) reject('failed-precondition', 'Kelas sesi tidak ditemukan.');
-    const classData = classSnapshot.data();
-    if (classData?.courseId !== session.courseId
-      || classData?.assistantUid !== session.assistantUid
-      || classData?.className !== session.className
-      || classData?.semester !== session.semester
-      || classData?.semesterParity !== session.semesterParity) {
-      reject('failed-precondition', 'Data kelas dan sesi tidak konsisten.');
-    }
+    const classId = await assertSessionMatchesClass(transaction, session);
 
     const enrollmentSnapshot = await transaction.get(enrollmentRef(classId));
     if (!enrollmentSnapshot.exists) {
       reject('failed-precondition', 'Enrollment sesi ini belum terverifikasi.');
     }
     const enrollment = enrollmentSnapshot.data();
-    if (enrollment?.praktikanId !== uid || enrollment?.classId !== classId) {
+    if (enrollment?.praktikanId !== uid
+      || enrollment?.classId !== classId
+      || enrollment?.courseId !== session.courseId
+      || enrollment?.semester !== session.semester) {
       reject('failed-precondition', 'Enrollment sesi ini belum terverifikasi.');
     }
 
@@ -236,8 +282,8 @@ async function recordAttendance(
       });
     }
     const laboratory = laboratorySnapshot.data();
-    const labLatitude = laboratory?.lat;
-    const labLongitude = laboratory?.lon;
+    const labLatitude = laboratory?.latitude;
+    const labLongitude = laboratory?.longitude;
     const radiusMeters = laboratory?.radius;
     const laboratoryName = typeof laboratory?.name === 'string' ? laboratory.name.trim() : '';
     if (!isFiniteCoordinate(labLatitude, -90, 90)
@@ -341,22 +387,13 @@ export const validateAttendanceQr = onCall(async (request) => {
       reject('deadline-exceeded', 'QR presensi sudah kedaluwarsa. Minta asisten memperbarui QR.');
     }
 
-    const classId = typeof session.classId === 'string' ? session.classId.trim() : '';
-    if (!classId) reject('failed-precondition', 'Sesi tidak terhubung dengan kelas.');
-    const classSnapshot = await transaction.get(db.doc(`classes/${classId}`));
-    if (!classSnapshot.exists) reject('failed-precondition', 'Kelas sesi tidak ditemukan.');
-    const classData = classSnapshot.data();
-    if (classData?.courseId !== session.courseId
-      || classData?.assistantUid !== session.assistantUid
-      || classData?.className !== session.className
-      || classData?.semester !== session.semester
-      || classData?.semesterParity !== session.semesterParity) {
-      reject('failed-precondition', 'Data kelas dan sesi tidak konsisten.');
-    }
+    const classId = await assertSessionMatchesClass(transaction, session);
     const enrollmentSnapshot = await transaction.get(db.doc(`enrollments/${classId}_${uid}`));
     if (!enrollmentSnapshot.exists
       || enrollmentSnapshot.data()?.praktikanId !== uid
-      || enrollmentSnapshot.data()?.classId !== classId) {
+      || enrollmentSnapshot.data()?.classId !== classId
+      || enrollmentSnapshot.data()?.courseId !== session.courseId
+      || enrollmentSnapshot.data()?.semester !== session.semester) {
       reject('failed-precondition', 'Enrollment sesi ini belum terverifikasi.');
     }
     return {
@@ -390,6 +427,9 @@ export const issueAttendanceQr = onCall(async (request) => {
   if (!request.auth) reject('unauthenticated', 'Autentikasi diperlukan.');
   const uid = request.auth.uid;
   const assistantSemesterParity = request.auth.token.assistantSemesterParity;
+  if (!isValidSemesterParity(assistantSemesterParity)) {
+    reject('permission-denied', 'Anda tidak memiliki kewenangan terhadap sesi ini.');
+  }
   const data = getCallableData(request.data);
   const sessionId = typeof data.sessionId === 'string' ? data.sessionId.trim() : '';
   if (!sessionId || sessionId.includes('/')) reject('invalid-argument', 'Identitas sesi tidak valid.');
@@ -412,9 +452,11 @@ export const issueAttendanceQr = onCall(async (request) => {
     }
     const session = sessionSnapshot.data();
     if (session?.assistantUid !== uid
+      || !isValidSemesterParity(session?.semesterParity)
       || session?.semesterParity !== assistantSemesterParity) {
       reject('permission-denied', 'Anda tidak memiliki kewenangan terhadap sesi ini.');
     }
+    await assertSessionMatchesClass(transaction, session);
     if (session.status !== 'dibuka') {
       reject('failed-precondition', 'QR hanya dapat diterbitkan ketika sesi dibuka.');
     }
@@ -440,6 +482,9 @@ export const revokeAttendanceQr = onCall(async (request) => {
   if (!request.auth) reject('unauthenticated', 'Autentikasi diperlukan.');
   const uid = request.auth.uid;
   const assistantSemesterParity = request.auth.token.assistantSemesterParity;
+  if (!isValidSemesterParity(assistantSemesterParity)) {
+    reject('permission-denied', 'Anda tidak memiliki kewenangan terhadap sesi ini.');
+  }
   const data = getCallableData(request.data);
   const sessionId = typeof data.sessionId === 'string' ? data.sessionId.trim() : '';
   if (!sessionId || sessionId.includes('/')) reject('invalid-argument', 'Identitas sesi tidak valid.');
@@ -459,9 +504,11 @@ export const revokeAttendanceQr = onCall(async (request) => {
     }
     const session = sessionSnapshot.data();
     if (session?.assistantUid !== uid
+      || !isValidSemesterParity(session?.semesterParity)
       || session?.semesterParity !== assistantSemesterParity) {
       reject('permission-denied', 'Anda tidak memiliki kewenangan terhadap sesi ini.');
     }
+    await assertSessionMatchesClass(transaction, session);
     const qrSnapshot = await transaction.get(qrRef);
     if (!qrSnapshot.exists || qrSnapshot.data()?.revokedAt != null) {
       return { ok: true, revoked: false };
@@ -474,13 +521,69 @@ export const revokeAttendanceQr = onCall(async (request) => {
   });
 });
 
+export const openSession = onCall(async (request) => {
+  if (!request.auth) reject('unauthenticated', 'Autentikasi diperlukan.');
+  const uid = request.auth.uid;
+  const assistantSemesterParity = request.auth.token.assistantSemesterParity;
+  if (!isValidSemesterParity(assistantSemesterParity)) {
+    reject('permission-denied', 'Anda tidak memiliki kewenangan terhadap sesi ini.');
+  }
+  const sessionId = parseSessionId(request.data);
+
+  const profileRef = db.doc(`users/${uid}`);
+  const sessionRef = db.doc(`sessions/${sessionId}`);
+  await db.runTransaction(async (transaction) => {
+    const profileSnapshot = await transaction.get(profileRef);
+    if (!profileSnapshot.exists
+      || !['asisten', 'assistant'].includes(profileSnapshot.data()?.role)) {
+      reject('permission-denied', 'Hanya asisten yang dapat membuka sesi.');
+    }
+    const sessionSnapshot = await transaction.get(sessionRef);
+    if (!sessionSnapshot.exists) {
+      reject('not-found', 'Sesi tidak ditemukan.', { reasonCode: 'SESSION_NOT_FOUND' });
+    }
+    const session = sessionSnapshot.data()!;
+    if (session.assistantUid !== uid
+      || !isValidSemesterParity(session.semesterParity)
+      || session.semesterParity !== assistantSemesterParity) {
+      reject('permission-denied', 'Anda tidak memiliki kewenangan terhadap sesi ini.');
+    }
+    await assertSessionMatchesClass(transaction, session);
+
+    if (session.status === 'dibuka') {
+      reject('failed-precondition', 'Sesi sudah dibuka.');
+    }
+    if (session.status !== 'terjadwal') {
+      reject('failed-precondition', 'Sesi yang sudah ditutup atau dibatalkan tidak dapat dibuka kembali.');
+    }
+
+    const startsAtMs = timestampToMillis(session.startsAt);
+    const endsAtMs = timestampToMillis(session.endsAt);
+    const timeFailure = getSessionTimeFailure(startsAtMs, endsAtMs, Date.now());
+    if (startsAtMs === null || endsAtMs === null || timeFailure === 'SESSION_TIME_INVALID') {
+      reject('failed-precondition', 'Waktu sesi praktikum tidak valid.');
+    }
+    if (timeFailure === 'SESSION_ENDED') {
+      reject('failed-precondition', 'Sesi yang waktunya sudah berakhir tidak dapat dibuka.');
+    }
+
+    transaction.update(sessionRef, {
+      status: 'dibuka',
+      startsAt: Timestamp.fromMillis(startsAtMs),
+      endsAt: Timestamp.fromMillis(endsAtMs),
+    });
+  });
+  return { ok: true };
+});
+
 export const closeSession = onCall(async (request) => {
   if (!request.auth) reject('unauthenticated', 'Autentikasi diperlukan.');
   const uid = request.auth.uid;
   const assistantSemesterParity = request.auth.token.assistantSemesterParity;
-  const data = getCallableData(request.data);
-  const sessionId = typeof data.sessionId === 'string' ? data.sessionId.trim() : '';
-  if (!sessionId || sessionId.includes('/')) reject('invalid-argument', 'Identitas sesi tidak valid.');
+  if (!isValidSemesterParity(assistantSemesterParity)) {
+    reject('permission-denied', 'Anda tidak memiliki kewenangan terhadap sesi ini.');
+  }
+  const sessionId = parseSessionId(request.data);
 
   const profileRef = db.doc(`users/${uid}`);
   const sessionRef = db.doc(`sessions/${sessionId}`);
@@ -497,9 +600,11 @@ export const closeSession = onCall(async (request) => {
     }
     const session = sessionSnapshot.data();
     if (session?.assistantUid !== uid
-      || session?.semesterParity !== assistantSemesterParity) {
+      || !isValidSemesterParity(session?.semesterParity)
+      || session.semesterParity !== assistantSemesterParity) {
       reject('permission-denied', 'Anda tidak memiliki kewenangan terhadap sesi ini.');
     }
+    await assertSessionMatchesClass(transaction, session);
     if (session.status !== 'dibuka') {
       reject('failed-precondition', 'Hanya sesi yang sedang dibuka yang dapat ditutup.');
     }
@@ -522,6 +627,9 @@ export const cancelAttendance = onCall(async (request) => {
   }
   const uid = request.auth.uid;
   const assistantSemesterParity = request.auth.token.assistantSemesterParity;
+  if (!isValidSemesterParity(assistantSemesterParity)) {
+    reject('permission-denied', 'Anda tidak memiliki kewenangan terhadap sesi ini.');
+  }
   const data = getCallableData(request.data);
   const sessionId = typeof data.sessionId === 'string' ? data.sessionId.trim() : '';
   const attendanceId = typeof data.attendanceId === 'string' ? data.attendanceId.trim() : '';
@@ -548,10 +656,13 @@ export const cancelAttendance = onCall(async (request) => {
     if (!sessionSnapshot.exists) {
       reject('not-found', 'Sesi tidak ditemukan.', { reasonCode: 'SESSION_NOT_FOUND' });
     }
-    if (sessionSnapshot.data()?.assistantUid !== uid
-      || sessionSnapshot.data()?.semesterParity !== assistantSemesterParity) {
+    const session = sessionSnapshot.data();
+    if (session?.assistantUid !== uid
+      || !isValidSemesterParity(session?.semesterParity)
+      || session.semesterParity !== assistantSemesterParity) {
       reject('permission-denied', 'Anda tidak memiliki kewenangan terhadap sesi ini.');
     }
+    await assertSessionMatchesClass(transaction, session);
     const attendanceSnapshot = await transaction.get(attendanceRef);
     if (!attendanceSnapshot.exists) {
       reject('not-found', 'Data presensi tidak ditemukan.', {

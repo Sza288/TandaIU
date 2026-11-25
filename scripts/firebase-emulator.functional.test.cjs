@@ -286,8 +286,30 @@ for (const account of [
       { code: 'permission-denied' },
     );
 
-    await updateDoc(doc(firebaseDb, 'sessions', account.sessionId), { status: 'dibuka' });
-    await updateDoc(doc(firebaseDb, 'sessions', account.sessionId), { status: 'ditutup' });
+    const sessionRef = doc(firebaseDb, 'sessions', account.sessionId);
+    const initialSession = (await getDoc(sessionRef)).data();
+    assert.equal(initialSession.status, 'terjadwal');
+    const shiftedStart = new Date(initialSession.startsAt.toMillis() + 15 * 60_000);
+    const shiftedEnd = new Date(initialSession.endsAt.toMillis() + 15 * 60_000);
+    await updateDoc(sessionRef, { startsAt: shiftedStart, endsAt: shiftedEnd });
+
+    await assert.rejects(
+      updateDoc(sessionRef, { status: 'dibuka' }),
+      { code: 'permission-denied' },
+    );
+    await httpsCallable(firebaseFunctions, 'openSession')({ sessionId: account.sessionId });
+    assert.equal((await getDoc(sessionRef)).data().status, 'dibuka');
+
+    await assert.rejects(
+      updateDoc(sessionRef, { status: 'ditutup' }),
+      { code: 'permission-denied' },
+    );
+    await assert.rejects(
+      updateDoc(sessionRef, { startsAt: initialSession.startsAt, endsAt: initialSession.endsAt }),
+      { code: 'permission-denied' },
+    );
+    await httpsCallable(firebaseFunctions, 'closeSession')({ sessionId: account.sessionId });
+    assert.equal((await getDoc(sessionRef)).data().status, 'ditutup');
     await updateDoc(doc(firebaseDb, 'schedules', account.scheduleId), { room: 'Lab Emulator Teruji' });
 
     const directorySnapshot = await getDoc(doc(firebaseDb, 'studentDirectory', account.studentId));
@@ -362,6 +384,7 @@ test('enrolled Praktikan reads its enrollment and class sessions', async () => {
   ]);
   assert.ok(sessions.length > 0);
   assert.ok(sessions.every((item) => item.classId === enrollments[0].classId));
+  assert.ok(sessions.some((item) => item.scheduleId === `emu-schedule-${enrollments[0].classId}`));
 });
 
 test('unenrolled Praktikan cannot read a different class or create attendance', async () => {

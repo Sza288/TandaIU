@@ -32,6 +32,7 @@ const {
   getFirestore,
   query,
   setDoc,
+  updateDoc,
   where,
 } = require('firebase/firestore');
 const {
@@ -61,8 +62,8 @@ const adminAuth = getAdminAuth(adminApp);
 const adminFirestore = getAdminFirestore(adminApp);
 let sequence = 0;
 const labs = {
-  lat: 0,
-  lon: 0,
+  latitude: 0,
+  longitude: 0,
   radius: 100,
   name: 'Local lab',
   lantai: 2,
@@ -133,6 +134,7 @@ async function createFixture({
     praktikanId: user.uid,
     classId,
     courseId: 'test-course',
+    semester: 3,
   });
   await adminFirestore.doc(`sessions/${sessionId}`).set({
     classId,
@@ -186,6 +188,10 @@ function submitQr(sessionId, qrPayload, overrides = {}) {
     endsAt: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
     ...overrides,
   });
+}
+
+function openSession(sessionId) {
+  return httpsCallable(functions, 'openSession')({ sessionId });
 }
 
 function closeSession(sessionId) {
@@ -401,7 +407,7 @@ test('missing laboratory and invalid laboratory coordinates are rejected', async
   await expectCallableError(submit(request(missing.sessionId)), 'not-found');
 
   const invalid = await createFixture({
-    laboratory: { ...labs, lat: 91 },
+    laboratory: { ...labs, latitude: 91 },
   });
   await expectCallableError(submit(request(invalid.sessionId)), 'failed-precondition');
 
@@ -605,6 +611,8 @@ test('one valid QR can be used by multiple enrolled praktikan and stores QR meth
   await adminFirestore.doc(`enrollments/${fixture.classId}_${secondStudent.uid}`).set({
     praktikanId: secondStudent.uid,
     classId: fixture.classId,
+    courseId: 'test-course',
+    semester: 3,
   });
   const second = await submitQr(fixture.sessionId, qrPayload);
   assert.equal(second.data.ok, true);
@@ -803,12 +811,16 @@ test('QR attendance enforces role, enrollment, UID identity, radius, accuracy, a
   await adminFirestore.doc(`enrollments/${fixture.classId}_${unEnrolled.uid}`).set({
     praktikanId: unEnrolled.uid,
     classId: fixture.classId,
+    courseId: 'test-course',
+    semester: 3,
   });
 
   const enrolled = await createAccount('praktikan');
   await adminFirestore.doc(`enrollments/${fixture.classId}_${enrolled.uid}`).set({
     praktikanId: enrolled.uid,
     classId: fixture.classId,
+    courseId: 'test-course',
+    semester: 3,
   });
   const enrolledSubmission = await submitQr(fixture.sessionId, qr.data.qrPayload);
   assert.equal(enrolledSubmission.data.ok, true);
@@ -930,4 +942,87 @@ test('class and schedule persist across login and are visible only through match
     where('classId', '==', classId),
   ));
   assert.equal(schedules.docs.some((item) => item.id === scheduleId), true);
+});
+
+test('openSession callable validates role, ownership, class consistency, status, and window while Firestore Rules block client status updates', async () => {
+  const futureStart = new Date(Date.now() + 30 * 60 * 1000).toISOString();
+  const futureEnd = new Date(Date.now() + 90 * 60 * 1000).toISOString();
+  const fixture = await createFixture({
+    sessionStatus: 'terjadwal',
+    startsAt: futureStart,
+    endsAt: futureEnd,
+  });
+
+  await signOut(auth);
+  await expectCallableError(openSession(fixture.sessionId), 'unauthenticated');
+
+  await signInWithEmailAndPassword(auth, fixture.email, PASSWORD);
+  await expectCallableError(openSession(fixture.sessionId), 'permission-denied');
+
+  const otherAssistant = await createAccount('asisten');
+  await expectCallableError(openSession(fixture.sessionId), 'permission-denied');
+  assert.ok(otherAssistant.uid);
+
+  const owner = await assignAssistantOwner(fixture);
+  await assert.rejects(
+    updateDoc(doc(firestore, 'sessions', fixture.sessionId), { status: 'dibuka' }),
+    { code: 'permission-denied' },
+  );
+
+  await expectCallableError(openSession('missing-session-id'), 'not-found', 'SESSION_NOT_FOUND');
+
+  await adminAuth.setCustomUserClaims(owner.uid, { assistantSemesterParity: 'genap' });
+  await auth.currentUser.getIdToken(true);
+  await expectCallableError(openSession(fixture.sessionId), 'permission-denied');
+  await adminAuth.setCustomUserClaims(owner.uid, { assistantSemesterParity: 'ganjil' });
+  await auth.currentUser.getIdToken(true);
+
+  await adminFirestore.doc(`classes/${fixture.classId}`).update({ semesterParity: 'genap' });
+  await expectCallableError(openSession(fixture.sessionId), 'failed-precondition');
+  await adminFirestore.doc(`classes/${fixture.classId}`).update({ semesterParity: 'ganjil' });
+  await adminFirestore.doc('courseCatalog/test-course').update({
+    semester: 4,
+    semesterParity: 'genap',
+  });
+  await expectCallableError(openSession(fixture.sessionId), 'failed-precondition');
+  await adminFirestore.doc('courseCatalog/test-course').update({
+    semester: 3,
+    semesterParity: 'ganjil',
+  });
+
+  const openResult = await openSession(fixture.sessionId);
+  assert.equal(openResult.data.ok, true);
+  const openedSession = (await adminFirestore.doc(`sessions/${fixture.sessionId}`).get()).data();
+  assert.equal(openedSession.status, 'dibuka');
+  assert.equal(typeof openedSession.startsAt?.toMillis, 'function');
+  assert.equal(typeof openedSession.endsAt?.toMillis, 'function');
+
+  await expectCallableError(openSession(fixture.sessionId), 'failed-precondition');
+  await assert.rejects(
+    updateDoc(doc(firestore, 'sessions', fixture.sessionId), { status: 'ditutup' }),
+    { code: 'permission-denied' },
+  );
+
+  await closeSession(fixture.sessionId);
+  await expectCallableError(openSession(fixture.sessionId), 'failed-precondition');
+
+  const cancelledFixture = await createFixture({ sessionStatus: 'dibatalkan' });
+  await assignAssistantOwner(cancelledFixture);
+  await expectCallableError(openSession(cancelledFixture.sessionId), 'failed-precondition');
+
+  const endedFixture = await createFixture({
+    sessionStatus: 'terjadwal',
+    startsAt: new Date(Date.now() - 2 * 60 * 60 * 1000),
+    endsAt: new Date(Date.now() - 60 * 1000),
+  });
+  await assignAssistantOwner(endedFixture);
+  await expectCallableError(openSession(endedFixture.sessionId), 'failed-precondition');
+
+  const reversedFixture = await createFixture({
+    sessionStatus: 'terjadwal',
+    startsAt: new Date(Date.now() + 60 * 60 * 1000),
+    endsAt: new Date(Date.now() + 30 * 60 * 1000),
+  });
+  await assignAssistantOwner(reversedFixture);
+  await expectCallableError(openSession(reversedFixture.sessionId), 'failed-precondition');
 });
