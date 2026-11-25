@@ -509,6 +509,21 @@ service cloud.firestore {
       allow create, update, delete: if false;
     }
 
+    match /deviceTokens/{installationId} {
+      allow get: if isSignedIn() && resource.data.uid == request.auth.uid;
+      allow list: if false;
+      allow create, update: if isSignedIn()
+        && installationId.matches('^[A-Za-z0-9_-]{16,128}$')
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.platform == 'android'
+        && request.resource.data.token is string
+        && request.resource.data.token.size() > 0
+        && request.resource.data.token.size() <= 4096
+        && request.resource.data.keys().hasAll(['uid','token','platform','updatedAt'])
+        && request.resource.data.keys().hasOnly(['uid','token','platform','updatedAt']);
+      allow delete: if isSignedIn() && resource.data.uid == request.auth.uid;
+    }
+
     // Deny every collection that has no explicit policy above.
     match /{document=**} {
       allow read, write: if false;

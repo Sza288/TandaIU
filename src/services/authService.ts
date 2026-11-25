@@ -492,6 +492,12 @@ export async function signOut(): Promise<void> {
 
     try {
       // AuthNavigationGate observes this state change and performs the single route transition.
+      try {
+        const { removeCurrentDeviceToken } = await import('./notificationService');
+        await removeCurrentDeviceToken();
+      } catch {
+        // best-effort: kegagalan notifikasi tidak boleh menggagalkan logout
+      }
       await firebaseSignOut(auth);
     } catch (error) {
       throw new AuthServiceError('logout-failed', getAuthErrorMessage(error));

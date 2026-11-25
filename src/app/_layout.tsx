@@ -8,7 +8,19 @@ import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { AuthProvider } from '../features/auth/AuthSessionContext';
 import AuthNavigationGate from '../features/auth/AuthNavigationGate';
+import { useNotificationNavigation } from '../hooks/useNotificationNavigation';
+import { useNotificationRegistration } from '../hooks/useNotificationRegistration';
 import { colors, fonts } from '../theme';
+
+function NotificationRegistration(): null {
+  useNotificationRegistration();
+  return null;
+}
+
+function NotificationNavigation(): null {
+  useNotificationNavigation();
+  return null;
+}
 
 export default function RootLayout() {
   const [fontsLoaded, fontError] = useFonts({
@@ -25,6 +37,8 @@ export default function RootLayout() {
 
   return (
     <AuthProvider>
+      <NotificationRegistration />
+      <NotificationNavigation />
       <StatusBar style="dark" />
       <AuthNavigationGate>
           <Stack
