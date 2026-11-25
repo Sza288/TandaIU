@@ -18,9 +18,11 @@ import { useLaboratories } from '../../hooks/useLaboratories';
 import { useSchedules } from '../../hooks/useSchedules';
 import { useSessions } from '../../hooks/useSessions';
 import {
+  deleteClass,
   deleteSchedule,
+  deleteSession,
 } from '../../services/practicumService';
-import { deleteLaboratory } from '../../services/laboratoryService';
+import { setLaboratoryActive } from '../../services/laboratoryService';
 import type { LaboratoryDoc } from '../../types/praktikum';
 import { colors, fonts, radius, shadows, spacing } from '../../theme';
 import { formatDateShort, formatTimeRange } from '../../utils/format';
@@ -32,6 +34,7 @@ import {
   getErrorMessage,
   goBackOr,
   manageHref,
+  showMessage,
 } from './crud.utils';
 
 type TabKey = 'classes' | 'schedules' | 'sessions' | 'laboratories';
@@ -53,8 +56,10 @@ const FORM_PATHS: Record<CrudKind, string> = {
 
 export default function ManageScreen() {
   const [tab, setTab] = useState<TabKey>('classes');
+  const [deletingClassId, setDeletingClassId] = useState<string | null>(null);
   const [deletingScheduleId, setDeletingScheduleId] = useState<string | null>(null);
-  const [deletingLaboratoryId, setDeletingLaboratoryId] = useState<string | null>(null);
+  const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null);
+  const [togglingLaboratoryId, setTogglingLaboratoryId] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [sessionQuery, setSessionQuery] = useState('');
 
@@ -104,7 +109,7 @@ export default function ManageScreen() {
     try {
       await deleteSchedule(id);
     } catch (error) {
-      setDeleteError(getErrorMessage(error));
+      showMessage('Jadwal tidak dapat dihapus', getErrorMessage(error));
     } finally {
       setDeletingScheduleId(null);
     }
@@ -113,34 +118,83 @@ export default function ManageScreen() {
   const confirmDeleteSchedule = (id: string) => {
     confirmAction({
       title: 'Hapus jadwal ini?',
-      message: 'Data yang dihapus tidak dapat dikembalikan.',
+      message:
+        'Sesi terjadwal dari jadwal ini ikut terhapus. Sesi yang sudah ditutup tetap disimpan sebagai riwayat. Jadwal yang masih memiliki sesi dibuka tidak dapat dihapus.',
       onConfirm: () => {
         void runDeleteSchedule(id);
       },
     });
   };
 
-  const runDeleteLaboratory = async (id: string) => {
-    setDeletingLaboratoryId(id);
+  const runDeleteSession = async (id: string) => {
+    setDeletingSessionId(id);
     setDeleteError(null);
     try {
-      await deleteLaboratory(id);
+      await deleteSession(id);
     } catch (error) {
-      setDeleteError(getErrorMessage(error));
+      showMessage('Sesi tidak dapat dihapus', getErrorMessage(error));
     } finally {
-      setDeletingLaboratoryId(null);
+      setDeletingSessionId(null);
     }
   };
 
-  const confirmDeleteLaboratory = (laboratory: LaboratoryDoc) => {
-    const usedBySession = sessions.data.some((session) => session.laboratoryId === laboratory.id);
+  const confirmDeleteSession = (item: { id: string; practicumName: string }) => {
     confirmAction({
-      title: `Hapus ${laboratory.name}?`,
-      message: usedBySession
-        ? 'Laboratorium ini dipakai sesi praktikum. Sesi terkait akan kehilangan lokasi presensi dan ditandai belum diatur.'
-        : 'Data yang dihapus tidak dapat dikembalikan.',
+      title: `Hapus sesi ${item.practicumName}?`,
+      message:
+        'Sesi dihapus tanpa menghapus kelas dan jadwalnya. Sesi yang sudah dibuka atau ditutup tidak dapat dihapus.',
       onConfirm: () => {
-        void runDeleteLaboratory(laboratory.id);
+        void runDeleteSession(item.id);
+      },
+    });
+  };
+
+  const runDeleteClass = async (id: string) => {
+    setDeletingClassId(id);
+    setDeleteError(null);
+    try {
+      await deleteClass(id);
+    } catch (error) {
+      showMessage('Kelas tidak dapat dihapus', getErrorMessage(error));
+    } finally {
+      setDeletingClassId(null);
+    }
+  };
+
+  const confirmDeleteClass = (item: { id: string; className: string }) => {
+    confirmAction({
+      title: `Hapus Kelas ${item.className}?`,
+      message:
+        'Sesi dan enrollment kelas ini ikut terhapus. Kelas yang masih memiliki jadwal, sesi terjadwal, atau sesi yang sedang dibuka tidak dapat dihapus.',
+      onConfirm: () => {
+        void runDeleteClass(item.id);
+      },
+    });
+  };
+
+  const runSetLaboratoryActive = async (id: string, isActive: boolean) => {
+    setTogglingLaboratoryId(id);
+    setDeleteError(null);
+    try {
+      await setLaboratoryActive(id, isActive);
+    } catch (error) {
+      setDeleteError(getErrorMessage(error));
+    } finally {
+      setTogglingLaboratoryId(null);
+    }
+  };
+
+  const confirmToggleLaboratory = (laboratory: LaboratoryDoc) => {
+    const isActive = laboratory.isActive !== false;
+    confirmAction({
+      title: isActive ? `Nonaktifkan ${laboratory.name}?` : `Aktifkan ${laboratory.name}?`,
+      message: isActive
+        ? 'Laboratorium tidak dapat dipilih untuk sesi baru, tetapi data dan riwayat sesi yang sudah ada tetap tersimpan. Laboratorium dapat diaktifkan kembali.'
+        : 'Laboratorium dapat dipilih kembali untuk sesi praktikum.',
+      confirmLabel: isActive ? 'Nonaktifkan' : 'Aktifkan',
+      destructive: isActive,
+      onConfirm: () => {
+        void runSetLaboratoryActive(laboratory.id, !isActive);
       },
     });
   };
@@ -223,6 +277,8 @@ export default function ManageScreen() {
                 eyebrow={getCourseName(item.courseId)}
                 title={`Kelas ${item.className}`}
                 onEdit={() => openForm('class', item.id)}
+                onDelete={() => confirmDeleteClass(item)}
+                deleting={deletingClassId === item.id}
               >
                 <Text style={styles.meta}>
                   Dibuat {formatDateShort(item.createdAt)}
@@ -366,6 +422,8 @@ export default function ManageScreen() {
                     eyebrow={getCourseName(item.courseId)}
                     title={item.practicumName}
                     {...(editable ? { onEdit: () => openForm('session', item.id) } : {})}
+                    onDelete={() => confirmDeleteSession(item)}
+                    deleting={deletingSessionId === item.id}
                   >
                     <Text style={styles.meta}>
                       Kelas {item.className} · {formatDateShort(item.startsAt)}
@@ -417,28 +475,71 @@ export default function ManageScreen() {
             emptyBody="Tambahkan laboratorium agar sesi praktikum dapat dipakai untuk presensi berbasis lokasi."
             emptyAction={null}
           >
-            {laboratories.data.map((item) => (
-              <CrudCard
-                key={item.id}
-                icon="business-outline"
-                eyebrow={`Lantai ${item.lantai}`}
-                title={item.name}
-                onEdit={() => openForm('laboratory', item.id)}
-                onDelete={() => confirmDeleteLaboratory(item)}
-                deleting={deletingLaboratoryId === item.id}
-              >
-                <View style={styles.metaRow}>
-                  <Ionicons name="location-outline" size={13} color={colors.textMuted} />
-                  <Text style={styles.meta}>
-                    {item.latitude}, {item.longitude}
-                  </Text>
-                </View>
-                <View style={styles.metaRow}>
-                  <Ionicons name="radio-outline" size={13} color={colors.textMuted} />
-                  <Text style={styles.meta}>Radius {item.radius} m</Text>
-                </View>
-              </CrudCard>
-            ))}
+            {laboratories.data.map((item) => {
+              const isActive = item.isActive !== false;
+              return (
+                <CrudCard
+                  key={item.id}
+                  icon="business-outline"
+                  eyebrow={`Lantai ${item.lantai}${isActive ? '' : ' · Nonaktif'}`}
+                  title={item.name}
+                  onEdit={() => openForm('laboratory', item.id)}
+                >
+                  <View style={styles.metaRow}>
+                    <Ionicons name="location-outline" size={13} color={colors.textMuted} />
+                    <Text style={styles.meta}>
+                      {item.latitude}, {item.longitude}
+                    </Text>
+                  </View>
+                  <View style={styles.metaRow}>
+                    <Ionicons name="radio-outline" size={13} color={colors.textMuted} />
+                    <Text style={styles.meta}>Radius {item.radius} m</Text>
+                  </View>
+                  <View style={styles.metaRow}>
+                    <Ionicons
+                      name={isActive ? 'checkmark-circle-outline' : 'pause-circle-outline'}
+                      size={13}
+                      color={isActive ? colors.success : colors.textMuted}
+                    />
+                    <Text style={[styles.meta, !isActive ? styles.metaMuted : null]}>
+                      {isActive
+                        ? 'Aktif dan dapat dipilih untuk sesi'
+                        : 'Nonaktif, tidak dapat dipilih untuk sesi'}
+                    </Text>
+                  </View>
+                  <View style={styles.labActionRow}>
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={
+                        isActive ? `Nonaktifkan ${item.name}` : `Aktifkan ${item.name}`
+                      }
+                      disabled={togglingLaboratoryId === item.id}
+                      onPress={() => confirmToggleLaboratory(item)}
+                      style={({ pressed }) => [
+                        styles.labToggleButton,
+                        togglingLaboratoryId === item.id ? styles.labToggleDisabled : null,
+                        pressed && togglingLaboratoryId !== item.id ? styles.labTogglePressed : null,
+                      ]}
+                    >
+                      {togglingLaboratoryId === item.id ? (
+                        <ActivityIndicator size="small" color={colors.primaryDark} />
+                      ) : (
+                        <>
+                          <Ionicons
+                            name={isActive ? 'pause-outline' : 'play-outline'}
+                            size={14}
+                            color={colors.primaryDark}
+                          />
+                          <Text style={styles.labToggleText}>
+                            {isActive ? 'Nonaktifkan' : 'Aktifkan'}
+                          </Text>
+                        </>
+                      )}
+                    </Pressable>
+                  </View>
+                </CrudCard>
+              );
+            })}
           </SectionShell>
         ) : null}
       </ScrollView>
@@ -674,6 +775,33 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.xs,
+  },
+  labActionRow: {
+    flexDirection: 'row',
+    marginTop: spacing.xs,
+  },
+  labToggleButton: {
+    flex: 1,
+    minHeight: 36,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.borderStrong,
+    backgroundColor: colors.surface,
+  },
+  labToggleDisabled: {
+    opacity: 0.6,
+  },
+  labTogglePressed: {
+    opacity: 0.8,
+  },
+  labToggleText: {
+    color: colors.primaryDark,
+    fontFamily: fonts.bold,
+    fontSize: 12,
   },
   statusRow: {
     flexDirection: 'row',

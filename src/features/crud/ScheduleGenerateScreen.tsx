@@ -86,6 +86,7 @@ export default function ScheduleGenerateScreen() {
   const selectedDates = meetingDates.filter((date) => !excluded.has(date));
   const selectedLecturer = dosen.find((item) => item.id === lecturerId);
   const selectedLaboratory = laboratories.data.find((item) => item.id === laboratoryId);
+  const activeLaboratories = laboratories.data.filter((item) => item.isActive !== false);
 
   const toggleDate = (date: string) => {
     setExcluded((current) => {
@@ -263,7 +264,7 @@ export default function ScheduleGenerateScreen() {
       <OptionPicker
         visible={laboratoryPickerVisible}
         title="Pilih Laboratorium"
-        options={laboratories.data.map((item) => ({
+        options={activeLaboratories.map((item) => ({
           value: item.id,
           label: item.name,
           description: `Lantai ${item.lantai} · radius ${item.radius} m`,
@@ -271,7 +272,7 @@ export default function ScheduleGenerateScreen() {
         selectedValue={laboratoryId}
         onSelect={setLaboratoryId}
         onClose={() => setLaboratoryPickerVisible(false)}
-        emptyMessage="Belum ada laboratorium. Tambahkan laboratorium terlebih dahulu."
+        emptyMessage="Belum ada laboratorium aktif. Tambahkan atau aktifkan laboratorium terlebih dahulu."
       />
     </FormScaffold>
   );
