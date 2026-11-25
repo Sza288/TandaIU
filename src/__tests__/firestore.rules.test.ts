@@ -122,6 +122,7 @@ const laboratoryRecord = (name = 'Laboratorium B', overrides: Record<string, unk
   longitude: 110.4407531,
   radius: 500,
   lantai: 2,
+  isActive: true,
   createdAt: '2026-01-01T00:00:00.000Z',
   updatedAt: '2026-01-01T00:00:00.000Z',
   ...overrides,
@@ -661,7 +662,6 @@ describeWithEmulator('Firestore Revisi 3 dan 4 access rules', () => {
     const odd = environment.authenticatedContext('asprak-odd', {
       assistantSemesterParity: 'ganjil',
     }).firestore();
-    const student = environment.authenticatedContext('student-enrolled').firestore();
 
     await expect(setDoc(doc(odd, 'laboratories/lab-radius-0'),
       laboratoryRecord('Lab Radius Nol', { radius: 0 })))
@@ -687,9 +687,31 @@ describeWithEmulator('Firestore Revisi 3 dan 4 access rules', () => {
     await expect(setDoc(doc(odd, 'laboratories/lab-lantai-tinggi'),
       laboratoryRecord('Lab Lantai Tinggi', { lantai: 7 })))
       .rejects.toMatchObject({ code: 'permission-denied' });
-    await expect(deleteDoc(doc(student, 'laboratories/lab-b')))
+    await expect(setDoc(doc(odd, 'laboratories/lab-status-invalid'),
+      laboratoryRecord('Lab Status Salah', { isActive: 'ya' })))
       .rejects.toMatchObject({ code: 'permission-denied' });
     await expect(deleteDoc(doc(odd, 'laboratories/lab-b')))
+      .rejects.toMatchObject({ code: 'permission-denied' });
+  });
+
+  it('lets assistants deactivate and reactivate a laboratory', async () => {
+    const odd = environment.authenticatedContext('asprak-odd', {
+      assistantSemesterParity: 'ganjil',
+    }).firestore();
+
+    await expect(setDoc(doc(odd, 'laboratories/lab-toggle'),
+      laboratoryRecord('Lab Toggle', { isActive: false })))
+      .resolves.toBeUndefined();
+    await expect(updateDoc(doc(odd, 'laboratories/lab-toggle'), { isActive: true }))
+      .resolves.toBeUndefined();
+
+    // Documents written before the activation feature keep working without the
+    // field, because a missing isActive is treated as active.
+    const legacy = laboratoryRecord('Lab Lama');
+    delete (legacy as Record<string, unknown>).isActive;
+    await expect(setDoc(doc(odd, 'laboratories/lab-legacy'), legacy))
+      .resolves.toBeUndefined();
+    await expect(updateDoc(doc(odd, 'laboratories/lab-legacy'), { radius: 200 }))
       .resolves.toBeUndefined();
   });
 

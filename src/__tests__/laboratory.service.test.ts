@@ -3,10 +3,11 @@ import { addDoc, getDoc, getDocs, updateDoc } from 'firebase/firestore';
 import {
   createLaboratory,
   normalizeLaboratoryName,
+  setLaboratoryActive,
   updateLaboratory,
   validateLaboratoryInput,
 } from '../services/laboratoryService';
-import type { LaboratoryInput } from '../types/praktikum';
+import type { LaboratoryDoc, LaboratoryInput } from '../types/praktikum';
 
 jest.mock('firebase/firestore', () => ({
   addDoc: jest.fn(),
@@ -31,10 +32,13 @@ const validLaboratory: LaboratoryInput = {
   updatedAt: '2026-11-23T08:00:00.000Z',
 };
 
-function laboratoryDocument(overrides: Partial<LaboratoryInput> = {}, id = 'lab-b') {
+function laboratoryDocument(
+  overrides: Partial<LaboratoryDoc> = {},
+  id = 'lab-b',
+) {
   return {
     id,
-    data: () => ({ ...validLaboratory, ...overrides }),
+    data: () => ({ ...validLaboratory, isActive: true, ...overrides }),
     exists: () => true,
   };
 }
@@ -189,5 +193,68 @@ describe('updateLaboratory', () => {
     ).rejects.toThrow(/sudah dipakai/i);
 
     expect(updateDoc).not.toHaveBeenCalled();
+  });
+
+  it('keeps the activation status when other fields are edited', async () => {
+    (getDoc as jest.Mock).mockResolvedValue(
+      laboratoryDocument({ isActive: false }),
+    );
+    (getDocs as jest.Mock).mockResolvedValue({ docs: [] });
+    (updateDoc as jest.Mock).mockResolvedValue(undefined);
+
+    await expect(updateLaboratory('lab-b', validLaboratory)).resolves.toMatchObject({
+      id: 'lab-b',
+      isActive: false,
+    });
+  });
+});
+
+describe('laboratory activation', () => {
+  it('deactivates a laboratory without deleting it', async () => {
+    (getDoc as jest.Mock).mockResolvedValue(laboratoryDocument());
+    (updateDoc as jest.Mock).mockResolvedValue(undefined);
+
+    await expect(setLaboratoryActive('lab-b', false)).resolves.toMatchObject({
+      id: 'lab-b',
+      isActive: false,
+    });
+
+    expect(updateDoc).toHaveBeenCalledWith(
+      undefined,
+      expect.objectContaining({ isActive: false }),
+    );
+  });
+
+  it('reactivates a previously deactivated laboratory', async () => {
+    (getDoc as jest.Mock).mockResolvedValue(laboratoryDocument({ isActive: false }));
+    (updateDoc as jest.Mock).mockResolvedValue(undefined);
+
+    await expect(setLaboratoryActive('lab-b', true)).resolves.toMatchObject({
+      id: 'lab-b',
+      isActive: true,
+    });
+  });
+
+  it('rejects toggling a laboratory that no longer exists', async () => {
+    (getDoc as jest.Mock).mockResolvedValue({ exists: () => false });
+
+    await expect(setLaboratoryActive('lab-hilang', false)).rejects.toThrow(
+      /tidak ditemukan/i,
+    );
+    expect(updateDoc).not.toHaveBeenCalled();
+  });
+
+  it('treats a legacy document without isActive as active', async () => {
+    (getDoc as jest.Mock).mockResolvedValue({
+      id: 'lab-lama',
+      data: () => ({ ...validLaboratory }),
+      exists: () => true,
+    });
+    (updateDoc as jest.Mock).mockResolvedValue(undefined);
+
+    await expect(setLaboratoryActive('lab-lama', false)).resolves.toMatchObject({
+      id: 'lab-lama',
+      isActive: false,
+    });
   });
 });
