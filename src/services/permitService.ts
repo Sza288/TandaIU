@@ -8,6 +8,7 @@ import {
 } from 'firebase/firestore';
 import { Permit, PermitStatus } from '../features/permit/permit.types';
 import { auth, db } from '../lib/firebase';
+import { analyzeReviewSentiment } from '../features/review/sentiment';
 
 export type SubmitPermitInput = {
   sessionId: string;
@@ -78,9 +79,7 @@ export function getPermitErrorMessage(error: unknown): string {
 }
 
 /**
- * Menyimpan pengajuan izin ke koleksi Firestore `permits`.
- * Alasan izin tidak dianalisis sentimen; sentimen hanya dipakai untuk ulasan
- * pasca-praktikum di `reviewService`.
+ * Menyimpan pengajuan izin dan analisis sentimennya ke `permits`.
  */
 export async function submitPermit(input: SubmitPermitInput): Promise<PermitMutationResult> {
   const reason = input.reason.trim();
@@ -103,11 +102,14 @@ export async function submitPermit(input: SubmitPermitInput): Promise<PermitMuta
     return { ok: false, reason: 'Identitas pengajuan tidak cocok dengan akun yang sedang masuk.' };
   }
 
+  const sentiment = await analyzeReviewSentiment(reason);
   const payload = {
     sessionId: input.sessionId,
     studentId: user.uid,
     studentName: input.studentName,
     reason,
+    sentiment: sentiment.sentiment,
+    sentimentSource: sentiment.source,
     status: 'pending' as const,
     createdAt: new Date().toISOString(),
   };

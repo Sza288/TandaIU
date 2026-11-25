@@ -238,6 +238,12 @@ function PermitReviewCard({
 
       <Text style={styles.reasonLabel}>Alasan izin</Text>
       <Text style={styles.reason}>{permit.reason}</Text>
+      {permit.sentiment ? (
+        <Text style={styles.sentiment}>
+          Sentimen: {permit.sentiment}
+          {permit.sentimentSource === 'fallback' ? ' · Analisis cadangan' : ' · Model lokal'}
+        </Text>
+      ) : null}
 
       <Text style={styles.timestamp}>
         Diajukan {formatDateTime(permit.createdAt)}
@@ -444,6 +450,12 @@ const styles = StyleSheet.create({
     fontFamily: fonts.regular,
     fontSize: 12,
     lineHeight: 18,
+  },
+  sentiment: {
+    marginTop: spacing.xs,
+    color: colors.textSecondary,
+    fontFamily: fonts.semiBold,
+    fontSize: 12,
   },
   timestamp: {
     color: colors.textMuted,
