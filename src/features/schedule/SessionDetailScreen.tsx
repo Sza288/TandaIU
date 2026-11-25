@@ -535,7 +535,7 @@ export default function SessionDetailScreen() {
                   <Text style={styles.sessionTitle}>{session.practicumName}</Text>
                   <Text style={styles.sessionSubtitle}>
                     {sessionCourse ? `Semester ${sessionCourse.semester} · ` : ''}
-                    {getLabLabel(session)} · Pertemuan {getMeetingNumber(session)}
+                    {getLabLabel(session)} · Pertemuan {getMeetingNumber(session, sessionResult.data)}
                   </Text>
                 </View>
                 <View style={styles.sessionIcon}>
@@ -560,7 +560,7 @@ export default function SessionDetailScreen() {
                 <InfoRow
                   icon="people"
                   label="KELAS"
-                  value={`Kelas ${session.className} · Pertemuan ${getMeetingNumber(session)}`}
+                  value={`Kelas ${session.className} · Pertemuan ${getMeetingNumber(session, sessionResult.data)}`}
                 />
               </View>
             </View>

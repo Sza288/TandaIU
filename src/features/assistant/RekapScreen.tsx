@@ -81,7 +81,7 @@ export default function RekapScreen() {
                   <Text style={styles.sessionTitle}>{session.practicumName}</Text>
                   <Text style={styles.sessionMeta}>
                     {course ? `Semester ${course.semester} · ` : ''}
-                    Kelas {session.className} · Pertemuan {getMeetingNumber(session)}
+                    Kelas {session.className} · Pertemuan {getMeetingNumber(session, sessionResult.data)}
                   </Text>
                 </View>
                 <StatusBadge status={session.status} />

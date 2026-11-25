@@ -18,9 +18,10 @@ function detailLabelFor(role: Role | null) {
 type Props = {
   session: PracticumSession;
   role: Role | null;
+  sessions?: PracticumSession[];
 };
 
-export default function SessionCard({ session, role }: Props) {
+export default function SessionCard({ session, role, sessions }: Props) {
   const isClosed = session.status === 'ditutup';
   const course = getCourseById(session.courseId);
 
@@ -44,7 +45,7 @@ export default function SessionCard({ session, role }: Props) {
       </View>
 
       <Text style={styles.meeting}>
-        {course ? `Semester ${course.semester} · ` : ''}Pertemuan {getMeetingNumber(session)}
+        {course ? `Semester ${course.semester} · ` : ''}Pertemuan {getMeetingNumber(session, sessions)}
       </Text>
 
       <View style={styles.dateTimeRow}>
