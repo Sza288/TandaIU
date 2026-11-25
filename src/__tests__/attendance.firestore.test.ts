@@ -4,14 +4,13 @@ import {
   onSnapshot,
   query,
   runTransaction,
+  Timestamp,
   where,
   type DocumentData,
 } from 'firebase/firestore';
 import type { CurrentUser } from '../lib/currentSession';
-import { httpsCallable } from 'firebase/functions';
 import {
   ATTENDANCE_ENROLLMENT_UNVERIFIED_REASON,
-  ATTENDANCE_IDENTITY_INVALID_REASON,
   createAttendanceService,
   type AttendanceRecord,
 } from '../services/attendanceService';
@@ -20,15 +19,12 @@ const mockGetCurrentUser = jest.fn<CurrentUser, []>();
 
 jest.mock('../lib/firebase', () => ({
   db: { name: 'fake-firestore' },
-  functions: { name: 'fake-functions' },
-}));
-jest.mock('firebase/functions', () => ({
-  httpsCallable: jest.fn(),
 }));
 jest.mock('../lib/currentSession', () => ({
   getCurrentUser: () => mockGetCurrentUser(),
 }));
 jest.mock('firebase/firestore', () => ({
+  ...jest.requireActual('firebase/firestore'),
   collection: jest.fn(),
   doc: jest.fn(),
   onSnapshot: jest.fn(),
@@ -45,12 +41,11 @@ const user: CurrentUser = {
   role: 'praktikan',
 };
 
-const validProfile = {
-  uid: 'u1',
-  name: 'User Satu Profil',
-  email: 'user.satu@students.undip.ac.id',
-  role: 'praktikan',
-  studentCode: '24060124120001',
+const assistant: CurrentUser = {
+  uid: 'asst-1',
+  name: 'Asisten Satu',
+  email: 'asisten@example.test',
+  role: 'asisten',
 };
 
 const fixedNow = new Date('2026-11-15T10:15:00+07:00');
@@ -62,81 +57,76 @@ const mockedQuery = jest.mocked(query);
 const mockedRunTransaction = jest.mocked(runTransaction);
 const mockedWhere = jest.mocked(where);
 
-function makeService() {
+function makeService(currentUser: CurrentUser | null = user) {
   return createAttendanceService({
     mode: 'firestore',
     database: {} as never,
-    getCurrentUser: () => user,
+    getCurrentUser: () => currentUser,
     now: () => fixedNow,
   });
 }
 
-function mockCallableFailure(
-  message: string,
-  code = 'functions/failed-precondition',
-) {
-  jest.mocked(httpsCallable).mockReturnValue(
-    jest.fn().mockRejectedValue(Object.assign(new Error(message), { code })) as never,
-  );
-}
-
-beforeEach(() => {
-  jest.mocked(httpsCallable).mockReturnValue(
-    jest.fn().mockResolvedValue({
-      data: { ok: true, distanceMeters: 10, radiusMeters: 50 },
-    }) as never,
-  );
-});
-
-function sessionSnapshot(status: string | null, classId = 'class-1') {
+function snapshot(data: Record<string, unknown> | null, id = '') {
   return {
-    id: 's5',
-    exists: () => status !== null,
-    data: () => ({
-      status,
-      classId,
-      startsAt: '2026-11-15T10:00:00+07:00',
-      endsAt: '2026-11-15T12:00:00+07:00',
-    }),
+    id,
+    exists: () => data !== null,
+    data: () => data ?? undefined,
   };
 }
 
-function profileSnapshot(profile: Record<string, unknown> | null) {
-  return {
-    id: 'u1',
-    exists: () => profile !== null,
-    data: () => profile,
-  };
+function profileSnapshot(role: 'praktikan' | 'asisten' = 'praktikan') {
+  return snapshot({ name: 'User Satu Profil', role }, role === 'praktikan' ? 'u1' : 'asst-1');
 }
 
-function enrollmentSnapshot(
-  enrollment: Record<string, unknown> | null = {
+function sessionSnapshot(status: string = 'dibuka', overrides: Record<string, unknown> = {}) {
+  return snapshot({
+    status,
+    classId: 'class-1',
+    className: 'A1',
+    courseId: 'course-1',
+    semester: 1,
+    assistantUid: 'asst-1',
+    laboratoryId: 'lab-1',
+    startsAt: Timestamp.fromDate(new Date(fixedNow.getTime() - 15 * 60_000)),
+    endsAt: Timestamp.fromDate(new Date(fixedNow.getTime() + 105 * 60_000)),
+    practicumName: 'Praktikum Satu',
+    ...overrides,
+  }, 's5');
+}
+
+function classSnapshot() {
+  return snapshot({ courseId: 'course-1', className: 'A1', semester: 1 }, 'class-1');
+}
+
+function enrollmentSnapshot(enrollment: Record<string, unknown> | null = {
     praktikanId: 'u1',
     classId: 'class-1',
-  },
-) {
-  return {
-    id: 'class-1_u1',
-    exists: () => enrollment !== null,
-    data: () => enrollment,
-  };
+    courseId: 'course-1',
+    semester: 1,
+  }) {
+  return snapshot(enrollment, 'class-1_u1');
+}
+
+function laboratorySnapshot(overrides: Record<string, unknown> = {}) {
+  return snapshot({
+    name: 'Laboratorium Satu',
+    latitude: -7.05,
+    longitude: 110.44,
+    radius: 500,
+    ...overrides,
+  }, 'lab-1');
 }
 
 function attendanceSnapshot(exists: boolean) {
-  return {
-    id: 's5_u1',
-    exists: () => exists,
-    data: () => ({}),
-  };
+  return snapshot(exists ? { status: 'hadir' } : null, 's5_u1');
+}
+
+function qrSnapshot(data: Record<string, unknown> | null = null) {
+  return snapshot(data, 's5');
 }
 
 function makeTransaction(
-  results: (
-    | ReturnType<typeof sessionSnapshot>
-    | ReturnType<typeof enrollmentSnapshot>
-    | ReturnType<typeof profileSnapshot>
-    | ReturnType<typeof attendanceSnapshot>
-  )[],
+  results: ReturnType<typeof snapshot>[],
 ) {
   const get = jest.fn();
   results.forEach((result) => get.mockResolvedValueOnce(result));
@@ -147,7 +137,8 @@ function makeTransaction(
   };
 }
 
-function useTransaction(transaction: ReturnType<typeof makeTransaction>) {
+function useTransaction(results: ReturnType<typeof snapshot>[]) {
+  const transaction = makeTransaction(results);
   mockedRunTransaction.mockImplementationOnce(async (_database, updateFunction) =>
     updateFunction(transaction as never),
   );
@@ -158,9 +149,10 @@ beforeEach(() => {
   jest.clearAllMocks();
   mockGetCurrentUser.mockReturnValue(user);
   mockedCollection.mockImplementation((_database, path) => ({ path } as never));
-  mockedDoc.mockImplementation(
-    (_database, collectionPath, id) => ({ path: `${collectionPath}/${id}`, id } as never),
-  );
+  mockedDoc.mockImplementation(((...args: unknown[]) => {
+    if (args.length === 1) return { id: 'x'.repeat(20) } as never;
+    return { path: `${String(args[1])}/${String(args[2])}`, id: args[2] } as never;
+  }) as never);
   mockedQuery.mockImplementation((...args) => args as never);
   mockedWhere.mockImplementation(
     (field, operator, value) => ({ field, operator, value } as never),
@@ -169,214 +161,158 @@ beforeEach(() => {
 });
 
 describe('attendanceService (Firestore mode)', () => {
-  it('opens a terjadwal session with a transaction (SRS-08)', async () => {
-    const service = makeService();
-    const result = sessionSnapshot('terjadwal');
-    const transaction = useTransaction(makeTransaction([result]));
+  it('opens a scheduled session through a Firestore transaction', async () => {
+    const transaction = useTransaction([
+      profileSnapshot('asisten'),
+      sessionSnapshot('terjadwal'),
+    ]);
 
-    await expect(service.openSession('s5')).resolves.toEqual({ ok: true });
-
+    await expect(makeService(assistant).openSession('s5')).resolves.toEqual({ ok: true });
     expect(transaction.update).toHaveBeenCalledWith(
       expect.objectContaining({ path: 'sessions/s5' }),
-      {
-        status: 'dibuka',
-        startsAt: new Date('2026-11-15T03:00:00.000Z'),
-        endsAt: new Date('2026-11-15T05:00:00.000Z'),
-      },
+      { status: 'dibuka' },
     );
   });
 
-  it('closes a dibuka session with a transaction (SRS-08)', async () => {
-    const service = makeService();
-    const transaction = useTransaction(makeTransaction([sessionSnapshot('dibuka')]));
+  it('closes an open session and revokes its active QR atomically', async () => {
+    const transaction = useTransaction([
+      profileSnapshot('asisten'),
+      sessionSnapshot(),
+      qrSnapshot({ revokedAt: null }),
+    ]);
 
-    await expect(service.closeSession('s5')).resolves.toEqual({ ok: true });
-
-    expect(transaction.update).toHaveBeenCalledWith(
+    await expect(makeService(assistant).closeSession('s5')).resolves.toEqual({ ok: true });
+    expect(transaction.update).toHaveBeenNthCalledWith(
+      1,
       expect.objectContaining({ path: 'sessions/s5' }),
-      {
-        status: 'ditutup',
-        startsAt: new Date('2026-11-15T03:00:00.000Z'),
-        endsAt: new Date('2026-11-15T05:00:00.000Z'),
-      },
+      { status: 'ditutup' },
+    );
+    expect(transaction.update).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ path: 'attendanceQrTokens/s5' }),
+      expect.objectContaining({ revokedBy: 'asst-1' }),
     );
   });
 
-  it('creates attendances/{sessionId}_{uid} for a check-in (SRS-09)', async () => {
-    const service = makeService();
-    await expect(service.checkIn('s5', user, {
-      latitude: -7.0,
-      longitude: 110.0,
+  it('creates an attendance record with measured distance and server timestamp', async () => {
+    const transaction = useTransaction([
+      profileSnapshot(),
+      sessionSnapshot(),
+      classSnapshot(),
+      enrollmentSnapshot(),
+      laboratorySnapshot(),
+      attendanceSnapshot(false),
+    ]);
+
+    await expect(makeService().checkIn('s5', user, {
+      latitude: -7.05,
+      longitude: 110.44,
       accuracyMeters: 20,
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       ok: true,
-      distanceMeters: 10,
-      radiusMeters: 50,
-      latitude: -7.0,
-      longitude: 110.0,
+      distanceMeters: 0,
+      radiusMeters: 500,
+    });
+
+    expect(transaction.set).toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'attendances/s5_u1' }),
+      expect.objectContaining({
+        sessionId: 's5',
+        praktikanId: 'u1',
+        attendanceMethod: 'location',
+        distanceMeters: 0,
+        laboratoryId: 'lab-1',
+        attendedAt: 'server_timestamp_sentinel',
+      }),
+    );
+  });
+
+  it('rejects legacy string session times before the attendance write', async () => {
+    const transaction = useTransaction([
+      profileSnapshot(),
+      sessionSnapshot('dibuka', {
+        startsAt: '2026-11-15T10:00:00+07:00',
+        endsAt: '2026-11-15T12:00:00+07:00',
+      }),
+    ]);
+
+    await expect(makeService().checkIn('s5', user, {
+      latitude: -7.05,
+      longitude: 110.44,
       accuracyMeters: 20,
-    });
-  });
-
-  it('rejects a duplicate check-in atomically (SRS-11)', async () => {
-    mockCallableFailure('Kamu sudah melakukan presensi pada sesi ini.');
-    const service = makeService();
-    const transaction = useTransaction(
-      makeTransaction([
-        sessionSnapshot('dibuka'),
-        enrollmentSnapshot(),
-        profileSnapshot(validProfile),
-        attendanceSnapshot(true),
-      ]),
-    );
-
-    await expect(service.checkIn('s5', user, {
-      latitude: -7.0,
-      longitude: 110.0,
-      accuracyMeters: 20,
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       ok: false,
-      reason: 'Kamu sudah melakukan presensi pada sesi ini.',
+      reason: expect.stringContaining('Timestamp'),
     });
     expect(transaction.set).not.toHaveBeenCalled();
   });
 
-  it('rejects check-in when the session is not dibuka', async () => {
-    mockCallableFailure('Presensi hanya tersedia saat sesi dibuka.');
-    const service = makeService();
-    const transaction = useTransaction(makeTransaction([sessionSnapshot('ditutup')]));
-
-    await expect(service.checkIn('s5', user, { latitude: -7, longitude: 110, accuracyMeters: 20 })).resolves.toEqual({
-      ok: false,
-      reason: 'Presensi hanya tersedia saat sesi dibuka.',
-    });
-    expect(transaction.set).not.toHaveBeenCalled();
-  });
-
-  it('rejects check-in when the session has no enrollment class', async () => {
-    mockCallableFailure(ATTENDANCE_ENROLLMENT_UNVERIFIED_REASON);
-    const service = makeService();
-    const transaction = useTransaction(
-      makeTransaction([sessionSnapshot('dibuka', '')]),
-    );
-
-    await expect(service.checkIn('s5', user, { latitude: -7, longitude: 110, accuracyMeters: 20 })).resolves.toEqual({
-      ok: false,
-      reason: ATTENDANCE_ENROLLMENT_UNVERIFIED_REASON,
-    });
-    expect(transaction.set).not.toHaveBeenCalled();
-  });
-
-  it('rejects check-in when the enrollment document is missing', async () => {
-    mockCallableFailure(ATTENDANCE_ENROLLMENT_UNVERIFIED_REASON);
-    const service = makeService();
-    const transaction = useTransaction(
-      makeTransaction([
-        sessionSnapshot('dibuka'),
-        enrollmentSnapshot(null),
-      ]),
-    );
-
-    await expect(service.checkIn('s5', user, { latitude: -7, longitude: 110, accuracyMeters: 20 })).resolves.toEqual({
-      ok: false,
-      reason: ATTENDANCE_ENROLLMENT_UNVERIFIED_REASON,
-    });
-    expect(transaction.set).not.toHaveBeenCalled();
-  });
-
-  it('rejects check-in when the enrollment class does not match the session', async () => {
-    mockCallableFailure(ATTENDANCE_ENROLLMENT_UNVERIFIED_REASON);
-    const service = makeService();
-    const transaction = useTransaction(
-      makeTransaction([
-        sessionSnapshot('dibuka'),
-        enrollmentSnapshot({ praktikanId: 'u1', classId: 'class-2' }),
-      ]),
-    );
-
-    await expect(service.checkIn('s5', user, { latitude: -7, longitude: 110, accuracyMeters: 20 })).resolves.toEqual({
-      ok: false,
-      reason: ATTENDANCE_ENROLLMENT_UNVERIFIED_REASON,
-    });
-    expect(transaction.set).not.toHaveBeenCalled();
-  });
-
-  it('rejects check-in when the users/{uid} profile is missing', async () => {
-    mockCallableFailure(ATTENDANCE_IDENTITY_INVALID_REASON);
-    const service = makeService();
-    const transaction = useTransaction(
-      makeTransaction([
-        sessionSnapshot('dibuka'),
-        enrollmentSnapshot(),
-        profileSnapshot(null),
-      ]),
-    );
-
-    await expect(service.checkIn('s5', user, { latitude: -7, longitude: 110, accuracyMeters: 20 })).resolves.toEqual({
-      ok: false,
-      reason: ATTENDANCE_IDENTITY_INVALID_REASON,
-    });
-    expect(transaction.set).not.toHaveBeenCalled();
-  });
-
-  it('rejects check-in when the profile role is not praktikan', async () => {
-    mockCallableFailure(ATTENDANCE_IDENTITY_INVALID_REASON);
-    const service = makeService();
-    const transaction = useTransaction(
-      makeTransaction([
-        sessionSnapshot('dibuka'),
-        enrollmentSnapshot(),
-        profileSnapshot({ ...validProfile, role: 'asisten' }),
-      ]),
-    );
-
-    await expect(service.checkIn('s5', user, { latitude: -7, longitude: 110, accuracyMeters: 20 })).resolves.toEqual({
-      ok: false,
-      reason: ATTENDANCE_IDENTITY_INVALID_REASON,
-    });
-    expect(transaction.set).not.toHaveBeenCalled();
-  });
-
-  it('rejects a dummy p1..p31 identity in Firestore mode', async () => {
-    const service = makeService();
-    const dummy: CurrentUser = { ...user, uid: 'p1' };
-
-    await expect(service.checkIn('s5', dummy)).resolves.toEqual({
-      ok: false,
-      reason: ATTENDANCE_IDENTITY_INVALID_REASON,
-    });
+  it('rejects invalid GPS accuracy before reading Firestore', async () => {
+    await expect(makeService().checkIn('s5', user, {
+      latitude: -7.05,
+      longitude: 110.44,
+      accuracyMeters: 51,
+    })).resolves.toMatchObject({ ok: false, reason: expect.stringContaining('50 meter') });
     expect(mockedRunTransaction).not.toHaveBeenCalled();
   });
 
-  it('rejects check-in when there is no authenticated identity', async () => {
-    const service = createAttendanceService({
-      mode: 'firestore',
-      database: {} as never,
-      getCurrentUser: () => null,
-      now: () => fixedNow,
-    });
+  it('rejects duplicate attendance and does not write a second record', async () => {
+    const transaction = useTransaction([
+      profileSnapshot(),
+      sessionSnapshot(),
+      classSnapshot(),
+      enrollmentSnapshot(),
+      laboratorySnapshot(),
+      attendanceSnapshot(true),
+    ]);
 
-    await expect(service.checkIn('s5', user)).resolves.toEqual({
-      ok: false,
-      reason: ATTENDANCE_IDENTITY_INVALID_REASON,
-    });
-    expect(mockedRunTransaction).not.toHaveBeenCalled();
+    await expect(makeService().checkIn('s5', user, {
+      latitude: -7.05,
+      longitude: 110.44,
+      accuracyMeters: 20,
+    })).resolves.toMatchObject({ ok: false, reason: 'Kamu sudah melakukan presensi pada sesi ini.' });
+    expect(transaction.set).not.toHaveBeenCalled();
   });
 
-  it('explains that a Rules rejection may be caused by time, status, or enrollment', async () => {
-    const service = makeService();
-    await expect(service.checkIn('s5', user, {
-      latitude: -7,
-      longitude: 110,
+  it('rejects a check-in when the session is closed or enrollment is missing', async () => {
+    useTransaction([profileSnapshot(), sessionSnapshot('ditutup')]);
+    await expect(makeService().checkIn('s5', user, {
+      latitude: -7.05,
+      longitude: 110.44,
       accuracyMeters: 20,
-    })).resolves.toEqual({
-      ok: true,
-      distanceMeters: 10,
-      radiusMeters: 50,
-      latitude: -7,
-      longitude: 110,
+    })).resolves.toMatchObject({ ok: false, reason: 'Presensi hanya tersedia saat sesi dibuka.' });
+
+    const transaction = useTransaction([
+      profileSnapshot(),
+      sessionSnapshot(),
+      classSnapshot(),
+      enrollmentSnapshot(null),
+    ]);
+    await expect(makeService().checkIn('s5', user, {
+      latitude: -7.05,
+      longitude: 110.44,
       accuracyMeters: 20,
-    });
+    })).resolves.toMatchObject({ ok: false, reason: ATTENDANCE_ENROLLMENT_UNVERIFIED_REASON });
+    expect(transaction.set).not.toHaveBeenCalled();
+  });
+
+  it('cancels a present attendance only for the owning assistant', async () => {
+    const transaction = useTransaction([
+      profileSnapshot('asisten'),
+      sessionSnapshot(),
+      snapshot({ sessionId: 's5', status: 'hadir' }, 's5_u1'),
+    ]);
+
+    await expect(makeService(assistant).cancelAttendance('s5', 's5_u1', 'duplikat'))
+      .resolves.toEqual({ ok: true });
+    expect(transaction.update).toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'attendances/s5_u1' }),
+      expect.objectContaining({
+        status: 'dibatalkan',
+        cancelledBy: 'asst-1',
+        cancelReason: 'duplikat',
+      }),
+    );
   });
 
   it('scopes a praktikan session attendance listener to that praktikan', () => {
@@ -518,6 +454,94 @@ describe('attendanceService (Firestore mode)', () => {
 
     expect(onError).toHaveBeenCalledWith(
       'Gagal memuat data presensi. Periksa koneksi dan konfigurasi Firebase.',
+    );
+  });
+});
+
+describe('Spark QR workflow', () => {
+  const token = 'x'.repeat(43);
+  const payload = `TANDAIU-ATTENDANCE:1:${token}`;
+  const validQr = {
+    sessionId: 's5',
+    token,
+    issuedBy: 'asst-1',
+    issuedAt: Timestamp.fromDate(fixedNow),
+    expiresAt: Timestamp.fromDate(new Date(fixedNow.getTime() + 60_000)),
+    revokedAt: null,
+    revokedBy: null,
+  };
+
+  it('issues a QR document with the existing payload prefix and two-minute expiry', async () => {
+    const transaction = useTransaction([
+      profileSnapshot('asisten'),
+      sessionSnapshot(),
+    ]);
+
+    const result = await makeService(assistant).issueAttendanceQr('s5');
+    expect(result).toMatchObject({
+      ok: true,
+      qrPayload: expect.stringMatching(/^TANDAIU-ATTENDANCE:1:[A-Za-z0-9_-]{43}$/),
+    });
+    expect(transaction.set).toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'attendanceQrTokens/s5' }),
+      expect.objectContaining({
+        sessionId: 's5',
+        issuedBy: 'asst-1',
+        revokedAt: null,
+        revokedBy: null,
+      }),
+    );
+  });
+
+  it('validates a QR against the active session, enrollment, and token record', async () => {
+    useTransaction([
+      profileSnapshot(),
+      sessionSnapshot(),
+      enrollmentSnapshot(),
+      qrSnapshot(validQr),
+    ]);
+
+    await expect(makeService().validateAttendanceQr('s5', payload)).resolves.toMatchObject({
+      ok: true,
+      practicumName: 'Praktikum Satu',
+      className: 'A1',
+      expiresAt: new Date(fixedNow.getTime() + 60_000).toISOString(),
+    });
+  });
+
+  it('submits QR attendance and stores the token with the attendance record', async () => {
+    const transaction = useTransaction([
+      profileSnapshot(),
+      sessionSnapshot(),
+      classSnapshot(),
+      enrollmentSnapshot(),
+      laboratorySnapshot(),
+      attendanceSnapshot(false),
+      qrSnapshot(validQr),
+    ]);
+
+    await expect(makeService().submitQrAttendance('s5', payload, {
+      latitude: -7.05,
+      longitude: 110.44,
+      accuracyMeters: 20,
+    })).resolves.toMatchObject({ ok: true, distanceMeters: 0, radiusMeters: 500 });
+    expect(transaction.set).toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'attendances/s5_u1' }),
+      expect.objectContaining({ attendanceMethod: 'qr', qrToken: token }),
+    );
+  });
+
+  it('revokes a QR through a Firestore transaction', async () => {
+    const transaction = useTransaction([
+      profileSnapshot('asisten'),
+      sessionSnapshot(),
+      qrSnapshot(validQr),
+    ]);
+
+    await expect(makeService(assistant).revokeAttendanceQr('s5')).resolves.toEqual({ ok: true });
+    expect(transaction.update).toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'attendanceQrTokens/s5' }),
+      expect.objectContaining({ revokedBy: 'asst-1' }),
     );
   });
 });
