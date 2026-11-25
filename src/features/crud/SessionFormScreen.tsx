@@ -319,16 +319,10 @@ export default function SessionFormScreen() {
             hint="Kelas sesi tidak berubah."
           />
 
-          {lecturerId ? null : (
-            <FormPickerField
-              label="Dosen pengampu"
-              value={selectedLecturer?.name ?? ''}
-              placeholder="Pilih dosen pengampu"
-              error={errors.lecturerId}
-              hint="Sesi ini belum memiliki dosen, pilih salah satu dosen yang tersedia."
-              onPress={() => setLecturerPickerVisible(true)}
-            />
-          )}
+          <FormReadOnlyField
+            label="Dosen pengampu"
+            value={selectedLecturer?.name ?? ''}
+          />
 
           <FormNote>
             Ubah tanggal dan jam untuk memindahkan sesi ini ke jadwal lain, lalu pilih
