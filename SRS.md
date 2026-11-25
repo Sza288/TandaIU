@@ -535,7 +535,7 @@ Jika ada keperluan mengubah file di `src/lib` atau `src/data`, **PM** melakukann
 | SRS Kode | User‑Story |
 |----------|------------|
 | **SRS‑05** | Sebagai **Asisten**, saya dapat **CRUD** data kelas, jadwal, dan sesi praktikum. |
-| **SRS‑06** | Saat membuat/menedit sesi, saya wajib memilih **dosen pengampu** (Nurul Hidayati atau Dimas Setiawan). |
+| **SRS‑06** | Saat membuat sesi, saya wajib memilih **dosen pengampu** (Nurul Hidayati atau Dimas Setiawan). |
 | **SRS‑07** | Sebagai **Sistem**, security‑rules harus membatasi **write** hanya untuk user dengan `role=="assistant"`; **read** di‑izinkan untuk semua user ter‑autentikasi. |
 
 **Deliverable**  
@@ -815,15 +815,18 @@ Kriteria penerimaan:
 - Radius presensi wajib diisi saat laboratorium ditambahkan (nilai mengikuti S3-SRS-07); laboratorium tanpa radius tidak dapat dipakai untuk presensi.
 - Sistem memvalidasi kelengkapan dan kewajaran data sebelum disimpan.
 
-#### S3-SRS-06 — Mengubah Data Laboratorium
+#### S3-SRS-06 — Mengelola Data Laboratorium
 
-Sistem harus memungkinkan asisten mengubah informasi laboratorium yang sudah tersimpan.
+Sistem harus memungkinkan asisten mengubah informasi laboratorium serta mengaktifkan atau menonaktifkan laboratorium yang sudah terdaftar.
 
 Kriteria penerimaan:
-- Asisten dapat memilih data laboratorium yang ingin diubah.
-- Asisten dapat mengubah nama dan koordinat laboratorium dengan validasi yang sama seperti S3-SRS-05.
-- Perubahan tersimpan dan digunakan oleh fitur yang membutuhkan data laboratorium.
-- Perubahan tidak mengubah data presensi yang sudah tercatat.
+- Asisten yang memiliki hak akses dapat mengubah informasi laboratorium.
+- Asisten dapat menonaktifkan laboratorium melalui konfirmasi sebelum perubahan dilakukan.
+- Laboratorium yang dinonaktifkan tidak dapat dipilih untuk sesi praktikum baru atau sesi yang sedang diedit.
+- Data laboratorium yang dinonaktifkan tetap tersimpan di Firestore dan tidak menghilangkan riwayat sesi yang pernah menggunakan laboratorium tersebut.
+- Asisten dapat melihat dan mengaktifkan kembali laboratorium yang sebelumnya dinonaktifkan.
+- Perubahan status laboratorium hanya dapat dilakukan oleh asisten yang memiliki hak akses sesuai validasi backend dan Firestore Rules.
+- Penghapusan permanen data laboratorium tidak disediakan melalui aplikasi.
 
 #### S3-SRS-07 — Mengatur Radius Laboratorium
 
@@ -1154,3 +1157,52 @@ Fitur Sprint 3 dinyatakan selesai apabila:
 3. Jika terdapat perubahan requirement, perubahan harus dicatat pada bagian sprint yang bersangkutan dan disetujui pihak yang bertanggung jawab.
 4. Kode kebutuhan lama tidak boleh dipakai ulang untuk requirement baru tanpa penanda sprint.
 5. Implementasi aktual harus mengikuti struktur dan dependensi repository yang berlaku, bukan menganggap seluruh path yang pernah direncanakan pasti sudah tersedia.
+
+---
+
+# LAMPIRAN — ASUMSI MODUL LABORATORIUM (ANGGOTA 2)
+
+Bagian ini mencatat asumsi yang diambil untuk mengisi hal-hal yang belum ditentukan pada S3-SRS-05 sampai S3-SRS-08. Asumsi bukan kutipan persyaratan; perubahan keputusan harus dicatat di sini dan disetujui pihak yang bertanggung jawab.
+
+## A. Cakupan dan kepemilikan data laboratorium
+
+1. **Laboratorium bersifat global.** Dokumen `laboratories` tidak memiliki pemilik (`assistantUid`) dan tidak terikat pada semester atau semester parity. Alasannya, laboratorium adalah ruangan milik program studi yang dipakai lintas asisten dan lintas semester, sementara validasi presensi seluruh kelas bergantung pada koordinat yang sama.
+2. **Laboratorium tidak difilter per semester** pada pembacaan maupun pengelolaan, berbeda dari `classes`, `schedules`, dan `sessions` yang dibatasi `semesterParity`.
+3. **"Asisten yang berwenang"** pada S3-SRS-08 dan Aturan Bisnis 5 diartikan sebagai `isAssistant()`: pengguna terautentikasi yang memiliki profil `users/{uid}` valid dengan role `asisten` serta custom claim `assistantSemesterParity` bernilai `ganjil` atau `genap`. Tidak ada peran kepala asisten, koordinator laboratorium, atau claim tambahan.
+4. **Firestore Rules koleksi `laboratories`**: pembacaan diizinkan untuk seluruh pengguna yang terautentikasi karena data laboratorium dibutuhkan modul Maps (S3-SRS-09) dan presensi (S3-SRS-04); pembuatan dan perubahan hanya untuk `isAssistant()`. Rules tidak memverifikasi keterkaitan antara asisten dan laboratorium tertentu karena relasi tersebut tidak tersimpan.
+5. **Penghapusan laboratorium tidak disediakan** pada antarmuka maupun Rules. SRS Bagian III 1.2 mengecualikan penghapusan data laboratorium, dan penghapusan dapat membuat referensi pada sesi serta riwayat presensi kehilangan titik acuan.
+6. **Setiap asisten dapat mengubah laboratorium mana pun**, termasuk yang dibuat asisten lain. Konsekuensinya, tidak ada pembatasan "asisten hanya boleh mengubah laboratorium yang ia ampu".
+
+## B. Atribut dan validasi
+
+7. Atribut laboratorium adalah `name`, `latitude`, `longitude`, `radius`, `lantai`, `createdAt`, dan `updatedAt`. Tidak ada atribut lain seperti gedung, foto, atau keterangan.
+8. **`lantai`** ditambahkan sebagai atribut karena SRS 6.1 menyebut daftar atribut sebagai "minimal" dan informasi lantai tidak dapat diturunkan dari data lain. Nilainya bilangan bulat minimal 1; nilai desimal, nol, atau negatif ditolak.
+9. **`radius`** berupa bilangan bulat dengan rentang 1 sampai 500 meter. Nilai desimal, nol, negatif, atau di atas 500 ditolak. Nilai 700 meter tidak digunakan pada Sprint 3.
+10. **Nama laboratorium wajib diisi dan unik tanpa membedakan huruf besar-kecil** setelah spasi di awal dan akhir dibuang. Keunikan diperiksa pada layanan sebelum data disimpan karena Firestore Rules tidak dapat menjalankan query. Duplikat yang lolos pemeriksaan ditangani sebagai kesalahan data.
+11. **`createdAt` dan `updatedAt`** disimpan sebagai string ISO 8601 dari sisi klien, mengikuti pola `classes.createdAt`. `updatedAt` diperbarui setiap kali data laboratorium berubah.
+12. **Identitas dokumen laboratorium** memakai ID otomatis Firestore untuk data yang dibuat melalui aplikasi, dan ID tetap untuk data contoh. Tidak diperlukan ID deterministik seperti pada `permits` atau `attendances`.
+13. **Sesi hanya menyimpan `laboratoryId`** dan tidak menyalin koordinat maupun radius. Koordinat dan radius selalu dibaca dari dokumen laboratorium terbaru sesuai S3-SRS-08. Riwayat presensi tetap bermakna karena `distanceMeters` dibekukan pada dokumen presensi oleh S3-SRS-04.
+
+## C. Data contoh laboratorium
+
+14. Data contoh yang disediakan adalah **tiga laboratorium** dengan ID tetap `lab-b`, `lab-c`, dan `lab-d`, seluruhnya berada pada **lantai 2** dengan **radius 500 meter**.
+15. Ketiga laboratorium memakai **koordinat titik gedung yang sama**, yaitu `latitude -7.0482469` dan `longitude 110.4407531` (Plus Code `XC2R+P8`/`XC2R+P82`, Tembalang, Semarang). Nilai ini adalah titik tengah gedung, bukan titik tiap ruangan.
+16. **Laboratorium AP tidak disertakan** pada data contoh karena koordinat finalnya belum tersedia. Laboratorium tersebut dapat ditambahkan melalui antarmuka pengelolaan bila diperlukan.
+17. Koordinat ketiga laboratorium **belum diverifikasi terhadap lokasi ruangan yang sebenarnya** dan bersifat sementara. Asisten wajib memverifikasi ulang melalui antarmuka pengelolaan di lokasi asli sebelum data dipakai untuk pengujian presensi.
+18. Karena koordinat ketiga laboratorium identik, **marker pada halaman Maps akan bertumpuk**. Pemisahan marker atau pengelompokan marker per gedung menjadi keputusan modul Maps (S3-SRS-09 dan S3-SRS-11), bukan modul laboratorium. Radius tidak dipakai untuk membedakan ruangan.
+19. Data contoh disediakan melalui perangkat migration yang sudah ada, bukan ditulis sebagai konstanta pada antarmuka, agar modul presensi dan Maps membaca sumber data yang sama sesuai Ketergantungan Antaranggota 9.
+
+## D. Hubungan sesi dengan laboratorium
+
+20. **`laboratoryId` wajib diisi ketika sesi dibuat.** Sesi tanpa laboratorium tidak dapat dipakai untuk presensi sesuai Aturan Bisnis 14, sehingga pembuatan sesi tanpa laboratorium dicegah sejak awal.
+21. **`laboratoryId` tidak boleh dikosongkan ketika sesi diubah.** Sesi lama yang belum memiliki laboratorium tetap dapat diubah dan tetap ditampilkan, dengan keterangan laboratorium belum diatur, sesuai S3-AT-25.
+22. **Koleksi `schedules` tidak diberi atribut `laboratoryId`.** Atribut `room` pada jadwal tetap berupa teks bebas tanpa relasi ke laboratorium, sehingga laboratorium tidak dapat diturunkan dari jadwal. Penambahan laboratorium hanya dilakukan pada sesi, sesuai batas S3-SRS-08 dan Bagian III 8.
+23. **Sesi yang menunjuk laboratorium yang dokumennya tidak ditemukan** diperlakukan sama seperti sesi tanpa laboratorium: presensi ditolak dan keterangan ditampilkan.
+24. **Tidak ada validasi bentrok penggunaan laboratorium.** Satu laboratorium boleh dipakai beberapa sesi sepanjang semester, termasuk sesi yang berlangsung bersamaan. S3-SRS-12 secara eksplisit mengizinkan beberapa sesi berlangsung pada laboratorium yang sama untuk ditampilkan. Pencegahan terbatas pada peringatan di antarmuka formulir sesi yang hanya dapat membandingkan sesi milik asisten yang sedang masuk, karena Rules tidak dapat menjalankan query dan akses daftar sesi dibatasi pada sesi milik asisten tersebut.
+
+## E. Teknis
+
+25. **Koordinat laboratorium diisi melalui dua cara**: pengetikan manual dan tombol yang mengambil lokasi perangkat saat ini menggunakan `expo-location`. Pemilihan titik melalui peta ditunda sampai modul Maps memasang pustaka peta, sesuai S3-SRS-05 yang menyebut "memasukkan atau menentukan" koordinat.
+26. **`expo-location` dipasang satu kali** dan dipakai bersama modul laboratorium (S3-SRS-05) dan modul presensi (S3-SRS-03). Pustaka ini memerlukan development build karena tidak tersedia pada Expo Go.
+27. Pemeriksaan rentang `latitude` dan `longitude` **tidak mendeteksi kesalahan penulisan** yang masih berada di dalam rentang, misalnya tertukarnya tanda negatif. Karena itu tombol pengambilan lokasi perangkat lebih diutamakan daripada pengetikan manual untuk memperoleh koordinat.
+28. Perubahan radius laboratorium **berlaku pada validasi presensi berikutnya** dan tidak mengubah data presensi yang sudah tercatat, sesuai S3-SRS-06 dan S3-SRS-07.

@@ -1,8 +1,8 @@
-import { dosen } from '../data/dosen';
-import type { PracticumSession, SessionStatus } from '../types';
+import { dosen } from "../data/dosen";
+import type { PracticumSession, SessionStatus } from "../types";
 
 export type Dosen = (typeof dosen)[number];
-export type LecturerId = Dosen['id'];
+export type LecturerId = Dosen["id"];
 
 export type DayOfWeek = 0 | 1 | 2 | 3 | 4 | 5 | 6;
 export type ClockTime = `${number}${number}:${number}${number}`;
@@ -13,7 +13,7 @@ export type ClassDoc = {
   className: string;
   createdAt: string;
   semester?: number;
-  semesterParity?: 'ganjil' | 'genap';
+  semesterParity?: "ganjil" | "genap";
   assistantUid?: string;
 };
 
@@ -25,7 +25,8 @@ export type ScheduleDoc = {
   startTime: ClockTime;
   endTime: ClockTime;
   room: string;
-  semesterParity?: 'ganjil' | 'genap';
+  jumlahPertemuan?: number;
+  semesterParity?: "ganjil" | "genap";
   assistantUid?: string;
 };
 
@@ -34,14 +35,28 @@ export type SessionDoc = PracticumSession & {
   lecturerId?: LecturerId;
   lecturer?: string;
   semester?: number;
-  semesterParity?: 'ganjil' | 'genap';
+  semesterParity?: "ganjil" | "genap";
   assistantUid?: string;
   laboratoryId?: string;
+  scheduleId?: string;
 };
 
-export type ClassInput = Omit<ClassDoc, 'id'>;
+export type LaboratoryDoc = {
+  id: string;
+  name: string;
+  latitude: number;
+  longitude: number;
+  radius: number;
+  lantai: number;
+  createdAt: string;
+  updatedAt: string;
+};
 
-export type ScheduleInput = Omit<ScheduleDoc, 'id'>;
+export type ClassInput = Omit<ClassDoc, "id">;
+
+export type ScheduleInput = Omit<ScheduleDoc, "id">;
+
+export type LaboratoryInput = Omit<LaboratoryDoc, "id">;
 
 export type SessionInput = {
   classId: string;
@@ -54,22 +69,23 @@ export type SessionInput = {
   lecturerId: LecturerId;
   lecturer: string;
   laboratoryId?: string;
+  scheduleId?: string;
 };
 
-export type LaboratoryDoc = {
-  id: string;
-  name: string;
-  lat: number;
-  lon: number;
-  radius: number;
-  lantai: number | string;
-  createdAt: string;
-  updatedAt: string;
-};
+export const LABORATORY_LIMITS = {
+  minRadius: 1,
+  maxRadius: 500,
+  minLantai: 1,
+  maxLantai: 6,
+  minLatitude: -90,
+  maxLatitude: 90,
+  minLongitude: -180,
+  maxLongitude: 180,
+} as const;
 
 export const COLLECTIONS = {
-  classes: 'classes',
-  schedules: 'schedules',
-  sessions: 'sessions',
-  laboratories: 'laboratories',
+  classes: "classes",
+  schedules: "schedules",
+  sessions: "sessions",
+  laboratories: "laboratories",
 } as const;

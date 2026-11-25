@@ -1,3 +1,4 @@
+
 import * as Linking from 'expo-linking';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -746,84 +747,84 @@ export default function SessionDetailScreen() {
                         <Ionicons name="share-social-outline" size={18} color={colors.textOnPrimary} />
                         <Text style={styles.shareButtonText}>Bagikan Link</Text>
                       </Pressable>
-                        <View style={styles.qrPanel}>
-                          <Text style={styles.shareLabel}>QR PRESENSI ASISTEN</Text>
-                          <Text style={styles.qrSessionInfo}>
-                            {session.practicumName} · Kelas {session.className}
+                      <View style={styles.qrPanel}>
+                        <Text style={styles.shareLabel}>QR PRESENSI ASISTEN</Text>
+                        <Text style={styles.qrSessionInfo}>
+                          {session.practicumName} · Kelas {session.className}
+                        </Text>
+                        {issuedQr && qrRemainingSeconds > 0 ? (
+                          <View style={styles.qrContainer}>
+                            <QRCode value={issuedQr.qrPayload} size={200} />
+                            <Text style={styles.qrCaption}>
+                              Berlaku {Math.floor(qrRemainingSeconds / 60)}:
+                              {String(qrRemainingSeconds % 60).padStart(2, '0')} lagi
+                              {' · sampai '}
+                              {new Date(issuedQr.expiresAt).toLocaleTimeString('id-ID', {
+                                hour: '2-digit',
+                                minute: '2-digit',
+                                second: '2-digit',
+                              })}
+                            </Text>
+                          </View>
+                        ) : issuedQr ? (
+                          <Text style={styles.inactiveShareText}>
+                            QR kedaluwarsa. Perbarui untuk menerbitkan token baru.
                           </Text>
-                          {issuedQr && qrRemainingSeconds > 0 ? (
-                            <View style={styles.qrContainer}>
-                              <QRCode value={issuedQr.qrPayload} size={200} />
-                              <Text style={styles.qrCaption}>
-                                Berlaku {Math.floor(qrRemainingSeconds / 60)}:
-                                {String(qrRemainingSeconds % 60).padStart(2, '0')} lagi
-                                {' · sampai '}
-                                {new Date(issuedQr.expiresAt).toLocaleTimeString('id-ID', {
-                                  hour: '2-digit',
-                                  minute: '2-digit',
-                                  second: '2-digit',
-                                })}
-                              </Text>
-                            </View>
-                          ) : issuedQr ? (
-                            <Text style={styles.inactiveShareText}>
-                              QR kedaluwarsa. Perbarui untuk menerbitkan token baru.
-                            </Text>
+                        ) : (
+                          <Text style={styles.inactiveShareText}>
+                            QR memiliki masa berlaku singkat dan terikat pada sesi ini.
+                          </Text>
+                        )}
+                        <Pressable
+                          accessibilityRole="button"
+                          disabled={qrBusy}
+                          onPress={() => void handleIssueQr()}
+                          style={({ pressed }) => [
+                            styles.shareButton,
+                            styles.qrButton,
+                            qrBusy && styles.disabledButton,
+                            pressed && !qrBusy && styles.buttonPressed,
+                          ]}
+                        >
+                          {qrBusy ? (
+                            <ActivityIndicator size="small" color={colors.primaryDark} />
                           ) : (
-                            <Text style={styles.inactiveShareText}>
-                              QR memiliki masa berlaku singkat dan terikat pada sesi ini.
-                            </Text>
+                            <Ionicons name="qr-code-outline" size={18} color={colors.primaryDark} />
                           )}
+                          <Text style={styles.qrButtonText}>
+                            {qrBusy
+                              ? 'Memproses...'
+                              : issuedQr
+                                ? 'Perbarui QR'
+                                : 'Buat QR Presensi'}
+                          </Text>
+                        </Pressable>
+                        {issuedQr ? (
                           <Pressable
                             accessibilityRole="button"
                             disabled={qrBusy}
-                            onPress={() => void handleIssueQr()}
+                            onPress={handleRevokeQr}
                             style={({ pressed }) => [
-                              styles.shareButton,
-                              styles.qrButton,
+                              styles.revokeQrButton,
                               qrBusy && styles.disabledButton,
                               pressed && !qrBusy && styles.buttonPressed,
                             ]}
                           >
-                            {qrBusy ? (
-                              <ActivityIndicator size="small" color={colors.primaryDark} />
-                            ) : (
-                              <Ionicons name="qr-code-outline" size={18} color={colors.primaryDark} />
-                            )}
-                            <Text style={styles.qrButtonText}>
-                              {qrBusy
-                                ? 'Memproses...'
-                                : issuedQr
-                                  ? 'Perbarui QR'
-                                  : 'Buat QR Presensi'}
-                            </Text>
+                            <Text style={styles.revokeQrText}>Cabut QR</Text>
                           </Pressable>
-                          {issuedQr ? (
-                            <Pressable
-                              accessibilityRole="button"
-                              disabled={qrBusy}
-                              onPress={handleRevokeQr}
-                              style={({ pressed }) => [
-                                styles.revokeQrButton,
-                                qrBusy && styles.disabledButton,
-                                pressed && !qrBusy && styles.buttonPressed,
-                              ]}
-                            >
-                              <Text style={styles.revokeQrText}>Cabut QR</Text>
-                            </Pressable>
-                          ) : null}
-                          {qrError ? (
-                            <Text accessibilityLiveRegion="polite" style={styles.qrError}>
-                              {qrError}
-                            </Text>
-                          ) : null}
-                        </View>
+                        ) : null}
+                        {qrError ? (
+                          <Text accessibilityLiveRegion="polite" style={styles.qrError}>
+                            {qrError}
+                          </Text>
+                        ) : null}
+                      </View>
                     </>
                   ) : (
                     <Text style={styles.inactiveShareText}>
                       {session.status === 'terjadwal'
-                          ? 'Link dan QR presensi tersedia setelah sesi dibuka.'
-                          : 'Sesi sudah ditutup. QR tidak dapat diterbitkan atau digunakan.'}
+                        ? 'Link dan QR presensi tersedia setelah sesi dibuka.'
+                        : 'Sesi sudah ditutup. QR tidak dapat diterbitkan atau digunakan.'}
                     </Text>
                   )}
                 </View>
@@ -854,10 +855,10 @@ export default function SessionDetailScreen() {
                     const statusLabel = isCancelled
                       ? 'Presensi dibatalkan'
                       : isExcused
-                      ? attendance.excuseReason === 'sakit' ? 'Sakit' : 'Izin lainnya'
-                      : hasAttended
-                        ? `Hadir · ${formatTime(attendance.attendedAt)} WIB`
-                        : session.status === 'ditutup' ? 'Alpha' : 'Belum melakukan presensi';
+                        ? attendance.excuseReason === 'sakit' ? 'Sakit' : 'Izin lainnya'
+                        : hasAttended
+                          ? `Hadir · ${formatTime(attendance.attendedAt)} WIB`
+                          : session.status === 'ditutup' ? 'Alpha' : 'Belum melakukan presensi';
                     const methodLabel = attendance?.attendanceMethod
                       ? ` · ${attendance.attendanceMethod === 'qr' ? 'QR Asprak' : 'Lokasi'}`
                       : '';
@@ -905,18 +906,18 @@ export default function SessionDetailScreen() {
                           name={attendance
                             ? 'chevron-forward'
                             : isExcused
-                                ? 'document-text-outline'
-                                : hasAttended
-                                  ? 'checkmark-circle'
-                                  : 'time-outline'}
+                              ? 'document-text-outline'
+                              : hasAttended
+                                ? 'checkmark-circle'
+                                : 'time-outline'}
                           size={20}
                           color={attendance
                             ? colors.primary
                             : isExcused
-                                ? colors.primary
-                                : hasAttended
-                                  ? colors.success
-                                  : colors.warning}
+                              ? colors.primary
+                              : hasAttended
+                                ? colors.success
+                                : colors.warning}
                         />
                       </Pressable>
                     );
