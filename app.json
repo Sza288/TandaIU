@@ -29,7 +29,7 @@
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "TandaIU menggunakan lokasi perangkat hanya untuk memvalidasi presensi di laboratorium."
+          "locationWhenInUsePermission": "TandaIU menggunakan lokasi perangkat untuk memvalidasi presensi di laboratorium dan menampilkan posisi Anda di peta."
         }
       ],
       [
@@ -47,12 +47,6 @@
         }
       ],
       "expo-image",
-      [
-        "expo-location",
-        {
-          "locationWhenInUsePermission": "Izinkan TandaIU menampilkan posisi Anda di peta."
-        }
-      ],
       "expo-status-bar",
       "expo-web-browser",
       "@react-native-google-signin/google-signin"

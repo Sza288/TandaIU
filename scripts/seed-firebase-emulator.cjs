@@ -194,8 +194,8 @@ function buildFirestoreDocuments(now) {
 
   add('laboratories', LABORATORY_ID, {
     name: 'Laboratorium Emulator',
-    lat: 0,
-    lon: 0,
+    latitude: 0,
+    longitude: 0,
     radius: 100,
     lantai: 2,
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
@@ -224,6 +224,7 @@ function buildFirestoreDocuments(now) {
         semester: course.semester,
         semesterParity: course.parity,
         assistantUid: course.assistantUid,
+        scheduleId: `emu-schedule-${course.classId}`,
         laboratoryId: LABORATORY_ID,
       });
       if (!sessionsByClass.has(course.classId)) sessionsByClass.set(course.classId, []);
