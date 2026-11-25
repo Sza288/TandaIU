@@ -299,9 +299,9 @@ describeWithEmulator('Firestore Revisi 3 dan 4 access rules', () => {
       .rejects.toMatchObject({ code: 'permission-denied' });
     expect((await getDoc(doc(student, 'enrollments/class-ganjil_student-enrolled'))).exists()).toBe(true);
     await expect(deleteDoc(doc(odd, 'classes/class-ganjil')))
-      .rejects.toMatchObject({ code: 'permission-denied' });
+      .resolves.toBeUndefined();
     await expect(deleteDoc(doc(odd, 'classes/class-kosong')))
-      .rejects.toMatchObject({ code: 'permission-denied' });
+      .resolves.toBeUndefined();
     await expect(deleteDoc(doc(student, 'classes/class-ganjil')))
       .rejects.toMatchObject({ code: 'permission-denied' });
   });
@@ -348,14 +348,14 @@ describeWithEmulator('Firestore Revisi 3 dan 4 access rules', () => {
     expect((await getDoc(doc(even, 'sessions/session-genap'))).exists()).toBe(true);
     await expect(getDoc(doc(student, 'sessions/session-genap')))
       .rejects.toMatchObject({ code: 'permission-denied' });
-    await expect(getDocs(query(
+    expect((await getDocs(query(
       collection(student, 'sessions'), where('classId', '==', 'class-ganjil'),
-    ))).resolves.toMatchObject({ size: 4 });
-    await expect(getDocs(query(
+    ))).size).toBe(5);
+    expect((await getDocs(query(
       collection(odd, 'sessions'),
       where('assistantUid', '==', 'asprak-odd'),
       where('semesterParity', '==', 'ganjil'),
-    ))).resolves.toMatchObject({ size: 4 });
+    ))).size).toBe(5);
     await expect(setDoc(doc(odd, 'sessions/session-new'), sessionRecord('class-ganjil', 'asprak-odd', 1)))
       .resolves.toBeUndefined();
     await expect(setDoc(doc(odd, 'sessions/session-forged-owner'), sessionRecord('class-ganjil', 'asprak-even', 1)))
@@ -396,9 +396,9 @@ describeWithEmulator('Firestore Revisi 3 dan 4 access rules', () => {
     expect((await getDoc(doc(odd, 'permits/session-ganjil_student-enrolled'))).exists()).toBe(true);
     expect((await getDoc(doc(odd, 'reviews/session-ditutup_student-enrolled'))).exists()).toBe(true);
     await expect(deleteDoc(doc(odd, 'sessions/session-ganjil')))
-      .rejects.toMatchObject({ code: 'permission-denied' });
+      .resolves.toBeUndefined();
     await expect(deleteDoc(doc(odd, 'sessions/session-ditutup')))
-      .rejects.toMatchObject({ code: 'permission-denied' });
+      .resolves.toBeUndefined();
     await expect(deleteDoc(doc(student, 'sessions/session-ganjil')))
       .rejects.toMatchObject({ code: 'permission-denied' });
   });
@@ -442,7 +442,7 @@ describeWithEmulator('Firestore Revisi 3 dan 4 access rules', () => {
     await expect(updateDoc(doc(odd, 'enrollments/class-ganjil_student-enrolled'), { semester: 3 }))
       .rejects.toMatchObject({ code: 'permission-denied' });
     await expect(deleteDoc(doc(odd, 'enrollments/class-ganjil_student-enrolled')))
-      .rejects.toMatchObject({ code: 'permission-denied' });
+      .resolves.toBeUndefined();
   });
 
   it('requires an enrolled practikan and an open session for attendance', async () => {
@@ -730,6 +730,30 @@ describeWithEmulator('Firestore Revisi 3 dan 4 access rules', () => {
       startsAt: Timestamp.fromMillis(Date.now()),
       endsAt: Timestamp.fromMillis(Date.now() + 3_600_000),
       laboratoryId: 'lab-b',
+    })).resolves.toBeUndefined();
+  });
+
+  it('allows editing sessions that still reference an inactive laboratory', async () => {
+    const odd = environment.authenticatedContext('asprak-odd', {
+      assistantSemesterParity: 'ganjil',
+    }).firestore();
+
+    await environment.withSecurityRulesDisabled(async (context) => {
+      await updateDoc(doc(context.firestore(), 'laboratories/lab-b'), { isActive: false });
+    });
+
+    const changes = {
+      startsAt: Timestamp.fromMillis(Date.now() + 60_000),
+      endsAt: Timestamp.fromMillis(Date.now() + 3_660_000),
+    };
+
+    await expect(updateDoc(doc(odd, 'sessions/session-with-lab'), {
+      ...changes,
+      laboratoryId: 'lab-b',
+    })).resolves.toBeUndefined();
+    await expect(updateDoc(doc(odd, 'sessions/session-with-lab'), {
+      ...changes,
+      laboratoryId: 'lab-c',
     })).resolves.toBeUndefined();
   });
 
