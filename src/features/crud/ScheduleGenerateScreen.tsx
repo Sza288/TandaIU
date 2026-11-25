@@ -71,11 +71,11 @@ export default function ScheduleGenerateScreen() {
     };
   }, [id]);
 
+  const [extraMeetings, setExtraMeetings] = useState(0);
+  const jumlahPertemuan = (schedule?.jumlahPertemuan ?? 0) + extraMeetings;
   const meetingDates = useMemo(
-    () => (schedule
-      ? scheduleMeetingDates(schedule.jumlahPertemuan ?? 0, fromDate)
-      : []),
-    [schedule, fromDate],
+    () => (schedule ? scheduleMeetingDates(jumlahPertemuan, fromDate) : []),
+    [schedule, jumlahPertemuan, fromDate],
   );
 
   const selectedWeekday = weekdayOfDate(fromDate);
@@ -87,6 +87,11 @@ export default function ScheduleGenerateScreen() {
   const selectedLecturer = dosen.find((item) => item.id === lecturerId);
   const selectedLaboratory = laboratories.data.find((item) => item.id === laboratoryId);
   const activeLaboratories = laboratories.data.filter((item) => item.isActive !== false);
+  const scheduleLaboratory = schedule
+    ? laboratories.data.find((item) => item.id === schedule.laboratoryId)?.name
+      ?? schedule.room
+      ?? 'Laboratorium tidak diketahui'
+    : '';
 
   const toggleDate = (date: string) => {
     setExcluded((current) => {
@@ -95,6 +100,10 @@ export default function ScheduleGenerateScreen() {
       else next.add(date);
       return next;
     });
+  };
+
+  const addMeetingDate = () => {
+    setExtraMeetings((current) => current + 1);
   };
 
   const handleSubmit = async () => {
@@ -159,8 +168,6 @@ export default function ScheduleGenerateScreen() {
     );
   }
 
-  const jumlahPertemuan = schedule.jumlahPertemuan ?? 0;
-
   return (
     <FormScaffold
       title="Buat Sesi dari Jadwal"
@@ -169,26 +176,19 @@ export default function ScheduleGenerateScreen() {
         void handleSubmit();
       }}
       submitting={submitting}
-      submitDisabled={jumlahPertemuan === 0}
+      submitDisabled={selectedDates.length === 0}
       formError={formError}
     >
       <FormReadOnlyField
         label="Jadwal"
         value={`${getCourseName(schedule.courseId)} · ${DAY_LABELS[schedule.dayOfWeek] ?? '-'} ${schedule.startTime}-${schedule.endTime}`}
-        hint={`Ruang ${schedule.room}`}
+        hint={`Laboratorium ${scheduleLaboratory}`}
       />
 
-      {jumlahPertemuan === 0 ? (
-        <FormNote>
-          Jadwal ini belum memiliki jumlah pertemuan. Isi dahulu di form jadwal agar sesi dapat
-          dibuat.
-        </FormNote>
-      ) : (
-        <FormNote>
-          Jadwal menetapkan {jumlahPertemuan} pertemuan. Pilih tanggal mulai, lalu lepas tanggal
-          yang tidak dipakai (hari libur atau sesi pengganti).
-        </FormNote>
-      )}
+      <FormNote>
+        Pilih tanggal mulai, lalu lepas tanggal yang tidak dipakai. Tambahkan tanggal pertemuan jika
+        ingin membuat sesi lebih banyak dari jadwal ini.
+      </FormNote>
 
       <DateField
         label="Tanggal pertemuan pertama"
@@ -222,35 +222,44 @@ export default function ScheduleGenerateScreen() {
         onPress={() => setLaboratoryPickerVisible(true)}
       />
 
-      {meetingDates.length > 0 ? (
-        <View style={styles.dateSection}>
+      <View style={styles.dateSection}>
+        <View style={styles.dateSectionHeader}>
           <Text style={styles.dateTitle}>
             Tanggal pertemuan ({selectedDates.length}/{meetingDates.length} dipilih)
           </Text>
-          {meetingDates.map((date, index) => {
-            const active = !excluded.has(date);
-            return (
-              <Pressable
-                key={date}
-                accessibilityRole="checkbox"
-                accessibilityState={{ checked: active }}
-                onPress={() => toggleDate(date)}
-                style={[styles.dateRow, active ? styles.dateRowActive : null]}
-              >
-                <Ionicons
-                  name={active ? 'checkbox' : 'square-outline'}
-                  size={19}
-                  color={active ? colors.primary : colors.textMuted}
-                />
-                <Text style={styles.dateText}>
-                  Pertemuan {index + 1} · {date}
-                </Text>
-                {!active ? <Text style={styles.dateSkipped}>Dilewati</Text> : null}
-              </Pressable>
-            );
-          })}
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Tambah tanggal pertemuan"
+            onPress={addMeetingDate}
+            style={({ pressed }) => [styles.addDateButton, pressed && styles.pressed]}
+          >
+            <Ionicons name="add" size={14} color={colors.primaryDark} />
+            <Text style={styles.addDateText}>Tambah</Text>
+          </Pressable>
         </View>
-      ) : null}
+        {meetingDates.map((date, index) => {
+          const active = !excluded.has(date);
+          return (
+            <Pressable
+              key={date}
+              accessibilityRole="checkbox"
+              accessibilityState={{ checked: active }}
+              onPress={() => toggleDate(date)}
+              style={[styles.dateRow, active ? styles.dateRowActive : null]}
+            >
+              <Ionicons
+                name={active ? 'checkbox' : 'square-outline'}
+                size={19}
+                color={active ? colors.primary : colors.textMuted}
+              />
+              <Text style={styles.dateText}>
+                Pertemuan {index + 1} · {date}
+              </Text>
+              {!active ? <Text style={styles.dateSkipped}>Dilewati</Text> : null}
+            </Pressable>
+          );
+        })}
+      </View>
 
       <OptionPicker
         visible={lecturerPickerVisible}
@@ -313,12 +322,36 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
     ...shadows.card,
   },
+  dateSectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+    marginBottom: spacing.xs,
+  },
   dateTitle: {
+    flex: 1,
     color: colors.text,
     fontFamily: fonts.bold,
     fontSize: 12,
-    marginBottom: spacing.xs,
   },
+  addDateButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 6,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    backgroundColor: colors.primarySofter,
+  },
+  addDateText: {
+    color: colors.primaryDark,
+    fontFamily: fonts.bold,
+    fontSize: 11,
+  },
+  pressed: { opacity: 0.8 },
   dateRow: {
     minHeight: 40,
     flexDirection: 'row',

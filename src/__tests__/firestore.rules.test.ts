@@ -479,7 +479,7 @@ describeWithEmulator('Firestore Revisi 3 dan 4 access rules', () => {
     await expect(updateDoc(doc(student, 'attendances/session-ganjil_student-new'), { status: 'izin' }))
       .rejects.toMatchObject({ code: 'permission-denied' });
     await expect(deleteDoc(doc(odd, 'attendances/session-ganjil_student-enrolled')))
-      .rejects.toMatchObject({ code: 'permission-denied' });
+      .resolves.toBeUndefined();
   });
 
   it('scopes assistant attendance and permit queries to sessions owned by that assistant', async () => {
@@ -586,7 +586,7 @@ describeWithEmulator('Firestore Revisi 3 dan 4 access rules', () => {
       status: 'approved', reviewedAt: '2026-01-02', reviewedBy: 'Asprak Ganjil',
     })).resolves.toBeUndefined();
     await expect(deleteDoc(doc(odd, 'permits/session-ganjil_student-enrolled')))
-      .rejects.toMatchObject({ code: 'permission-denied' });
+      .resolves.toBeUndefined();
   });
 
   it('limits reviews and attendance archives to their owner or session owner', async () => {

@@ -14,6 +14,7 @@ import {
 } from '../../services/practicumService';
 import type { SessionStatus } from '../../types';
 import type { SessionInput } from '../../types/praktikum';
+import { getEffectiveSessionStatus } from '../../utils/session';
 import {
   COURSE_OPTIONS,
   LECTURER_OPTIONS,
@@ -75,6 +76,7 @@ export default function SessionFormScreen() {
   const [endTime, setEndTime] = useState('10:00');
   const [originalStartsAt, setOriginalStartsAt] = useState<string>();
   const [originalStatus, setOriginalStatus] = useState<SessionStatus>('terjadwal');
+  const [editBlocked, setEditBlocked] = useState(false);
   const [coursePickerVisible, setCoursePickerVisible] = useState(false);
   const [classPickerVisible, setClassPickerVisible] = useState(false);
   const [lecturerPickerVisible, setLecturerPickerVisible] = useState(false);
@@ -105,6 +107,10 @@ export default function SessionFormScreen() {
           setStartTime(startParts.time);
           setEndTime(endParts.time);
           setOriginalStatus(session.status);
+          if (getEffectiveSessionStatus(session) !== 'terjadwal') {
+            setEditBlocked(true);
+            setFormError('Sesi yang sudah berlangsung atau ditutup tidak dapat dipindahkan.');
+          }
         }
         setReady(true);
       })
@@ -140,14 +146,15 @@ export default function SessionFormScreen() {
   const selectedLaboratory = laboratories.data.find(
     (laboratory) => laboratory.id === laboratoryId,
   );
+  const selectedLaboratoryIsInactive = selectedLaboratory?.isActive === false;
 
   /**
-   * Laboratorium nonaktif tidak boleh dipakai untuk sesi baru maupun sesi yang
-   * sedang diedit, tetapi tetap ditampilkan bila sesi ini sudah memakainya agar
-   * pilihan lama tidak hilang diam-diam.
+   * Laboratorium nonaktif tidak boleh dipilih untuk sesi baru maupun sesi yang
+   * sedang diedit. Jika sesi lama masih terikat ke lab nonaktif, pengguna harus
+   * menggantinya dengan laboratorium aktif sebelum menyimpan.
    */
   const selectableLaboratories = laboratories.data.filter(
-    (laboratory) => laboratory.isActive !== false || laboratory.id === laboratoryId,
+    (laboratory) => laboratory.isActive !== false,
   );
 
   const laboratoryOptions = selectableLaboratories.map((laboratory) => ({
@@ -160,9 +167,11 @@ export default function SessionFormScreen() {
     ? 'Memuat daftar laboratorium...'
     : laboratories.error
       ? laboratories.error
-      : selectableLaboratories.length === 0
-        ? 'Belum ada laboratorium aktif. Tambahkan atau aktifkan laboratorium lebih dahulu agar sesi dapat dipakai untuk presensi.'
-        : 'Laboratorium menentukan lokasi dan radius presensi sesi ini.';
+      : selectedLaboratoryIsInactive
+        ? 'Laboratorium yang dipilih sedang nonaktif. Pilih laboratorium aktif untuk melanjutkan.'
+        : selectableLaboratories.length === 0
+          ? 'Belum ada laboratorium aktif. Tambahkan atau aktifkan laboratorium lebih dahulu agar sesi dapat dipakai untuk presensi.'
+          : 'Laboratorium menentukan lokasi dan radius presensi sesi ini.';
 
   const classHint = classes.loading
     ? 'Memuat daftar kelas...'
@@ -226,6 +235,7 @@ export default function SessionFormScreen() {
 
   const handleSubmit = async () => {
     setErrors({});
+    if (editBlocked) return;
     setFormError(null);
 
     if (!selectedClass) {
@@ -245,6 +255,11 @@ export default function SessionFormScreen() {
 
     if (!id && !selectedLaboratory) {
       setErrors({ laboratoryId: 'Laboratorium wajib dipilih.' });
+      return;
+    }
+
+    if (selectedLaboratory?.isActive === false) {
+      setErrors({ laboratoryId: 'Laboratorium yang dipilih sedang nonaktif. Pilih laboratorium aktif.' });
       return;
     }
 
@@ -303,6 +318,7 @@ export default function SessionFormScreen() {
         void handleSubmit();
       }}
       submitting={submitting}
+      submitDisabled={editBlocked}
       formError={formError}
     >
       {isEdit ? (
@@ -377,6 +393,13 @@ export default function SessionFormScreen() {
         disabled={laboratories.loading}
         onPress={() => setLaboratoryPickerVisible(true)}
       />
+
+      {selectedLaboratoryIsInactive ? (
+        <FormNote>
+          Laboratorium yang dipakai sesi ini sedang dinonaktifkan. Pilih laboratorium aktif lain
+          sebelum menyimpan perubahan.
+        </FormNote>
+      ) : null}
 
       <DateField
         label="Tanggal"

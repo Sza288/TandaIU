@@ -7,7 +7,7 @@ import { PracticumSession, Role } from '../types';
 import { colors, fonts, radius, shadows, spacing } from '../theme';
 import { formatDateShort, formatTime, formatTimeRange } from '../utils/format';
 import { getCourseById } from '../utils/academic';
-import { getLabLabel, getMeetingNumber } from '../utils/session';
+import { getEffectiveSessionStatus, getLabLabel, getMeetingNumber } from '../utils/session';
 
 function detailLabelFor(role: Role | null) {
   if (role === 'asisten') return 'Lihat Detail';
@@ -18,10 +18,12 @@ function detailLabelFor(role: Role | null) {
 type Props = {
   session: PracticumSession;
   role: Role | null;
+  sessions?: PracticumSession[];
 };
 
-export default function SessionCard({ session, role }: Props) {
-  const isClosed = session.status === 'ditutup';
+export default function SessionCard({ session, role, sessions }: Props) {
+  const effectiveStatus = getEffectiveSessionStatus(session);
+  const isClosed = effectiveStatus === 'ditutup';
   const course = getCourseById(session.courseId);
 
   return (
@@ -40,11 +42,11 @@ export default function SessionCard({ session, role }: Props) {
           <Text style={styles.lab}>{getLabLabel(session)}</Text>
           <Text style={styles.title}>{session.practicumName}</Text>
         </View>
-        <StatusBadge status={session.status} />
+        <StatusBadge status={effectiveStatus} />
       </View>
 
       <Text style={styles.meeting}>
-        {course ? `Semester ${course.semester} · ` : ''}Pertemuan {getMeetingNumber(session)}
+        {course ? `Semester ${course.semester} · ` : ''}Pertemuan {getMeetingNumber(session, sessions)}
       </Text>
 
       <View style={styles.dateTimeRow}>
