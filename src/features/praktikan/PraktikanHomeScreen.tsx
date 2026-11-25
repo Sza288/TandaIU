@@ -304,9 +304,16 @@ function OpenSessionCard({
       <View style={styles.sessionFooter}>
         <View style={styles.sessionStatus}>
           <Text style={styles.pendingText}>Belum presensi</Text>
-          <Text style={[styles.countdownText, isUrgent ? styles.countdownUrgent : null]}>
-            {countdown}
-          </Text>
+          <View style={[styles.countdownChip, isUrgent ? styles.countdownChipUrgent : null]}>
+            <Ionicons
+              name="time-outline"
+              size={13}
+              color={isUrgent ? colors.danger : colors.warning}
+            />
+            <Text style={[styles.countdownText, isUrgent ? styles.countdownUrgent : null]}>
+              {countdown}
+            </Text>
+          </View>
         </View>
         <View style={styles.sessionAction}>
           <Text style={styles.sessionActionText}>Lihat Sesi</Text>
@@ -557,21 +564,36 @@ const styles = StyleSheet.create({
   },
   sessionStatus: {
     flexShrink: 1,
-    gap: 2,
+    gap: 4,
   },
   pendingText: {
     color: colors.warning,
     fontFamily: fonts.bold,
     fontSize: 11,
   },
+  countdownChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    borderColor: colors.warning,
+    backgroundColor: colors.warningBg,
+  },
+  countdownChipUrgent: {
+    borderColor: colors.danger,
+    backgroundColor: colors.dangerBg,
+  },
   countdownText: {
-    color: colors.textSecondary,
-    fontFamily: fonts.regular,
+    color: colors.warning,
+    fontFamily: fonts.bold,
     fontSize: 11,
   },
   countdownUrgent: {
     color: colors.danger,
-    fontFamily: fonts.bold,
   },
   sessionAction: {
     flexDirection: 'row',
