@@ -67,7 +67,7 @@ export function getPermitErrorMessage(error: unknown): string {
 
   switch (firebaseErrorCode(error)) {
     case 'permission-denied':
-      return 'Firestore menolak aksi ini. Pastikan akunmu punya peran yang sesuai.';
+      return 'Firestore menolak aksi ini. Pastikan akunmu terdaftar di kelas dan sesi masih terjadwal/dibuka serta belum lewat waktunya.';
     case 'unavailable':
     case 'deadline-exceeded':
     case 'network-request-failed':

@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -28,6 +28,7 @@ import {
 import { colors, fonts, radius, shadows, spacing } from '../../theme';
 import type { PracticumSession } from '../../types';
 import { formatDateLong, formatTime, formatTimeRange } from '../../utils/format';
+import { getEffectiveSessionStatus, isSessionEnded } from '../../utils/session';
 
 const statusRank: Record<PracticumSession['status'], number> = {
   dibuka: 0,
@@ -65,6 +66,12 @@ export default function PraktikanAttendanceScreen() {
   const [selectedSession, setSelectedSession] = useState<PracticumSession | null>(null);
   const [submittingSessionId, setSubmittingSessionId] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<Feedback | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(timer);
+  }, []);
 
   const attendanceBySession = useMemo(() => {
     const map = new Map<string, AttendanceRecord>();
@@ -136,6 +143,14 @@ export default function PraktikanAttendanceScreen() {
       return;
     }
     const session = selectedSession;
+    if (isSessionEnded(session, Date.now())) {
+      setSelectedSession(null);
+      setFeedback({
+        tone: 'error',
+        message: 'Waktu presensi sesi ini sudah berakhir.',
+      });
+      return;
+    }
     setSelectedSession(null);
     setSubmittingSessionId(session.id);
 
@@ -275,16 +290,20 @@ export default function PraktikanAttendanceScreen() {
             {visibleSessions.map((session) => {
               const attendance = attendanceBySession.get(session.id);
               const alreadyCheckedIn = attendance !== undefined;
-              const isOpen = session.status === 'dibuka';
+              const ended = isSessionEnded(session, now);
+              const effectiveStatus = getEffectiveSessionStatus(session, now);
+              const isOpen = effectiveStatus === 'dibuka';
               const disabled = alreadyCheckedIn || !isOpen || submittingSessionId !== null;
 
               const buttonLabel = alreadyCheckedIn
                 ? 'Sudah Presensi'
                 : isOpen
                   ? 'Presensi Sekarang'
-                  : session.status === 'terjadwal'
-                    ? 'Belum Dibuka'
-                    : 'Sesi Ditutup';
+                  : session.status === 'dibuka' && ended
+                    ? 'Waktu Presensi Berakhir'
+                    : effectiveStatus === 'terjadwal'
+                      ? 'Belum Dibuka'
+                      : 'Sesi Ditutup';
 
               return (
                 <View key={session.id} style={styles.sessionCard}>
@@ -298,7 +317,7 @@ export default function PraktikanAttendanceScreen() {
                       </Text>
                       <Text style={styles.sessionMeta}>Kelas {session.className}</Text>
                     </View>
-                    <StatusBadge status={session.status} />
+                    <StatusBadge status={effectiveStatus} />
                   </View>
 
                   <View style={styles.metaRow}>
@@ -352,13 +371,17 @@ export default function PraktikanAttendanceScreen() {
                     </Text>
                   </Pressable>
 
-                  {!alreadyCheckedIn && session.status === 'terjadwal' ? (
+                  {!alreadyCheckedIn && effectiveStatus === 'terjadwal' ? (
                     <Text style={styles.actionHint}>
                       Tombol aktif setelah asisten membuka sesi.
                     </Text>
-                  ) : !alreadyCheckedIn && session.status === 'ditutup' ? (
+                  ) : !alreadyCheckedIn && effectiveStatus === 'ditutup' ? (
                     <Text style={styles.actionHint}>
-                      Sesi sudah ditutup, presensi tidak dapat dilakukan.
+                      {session.status === 'dibuka' && ended
+                        ? 'Waktu presensi sesi ini sudah berakhir (WIB).'
+                        : ended
+                          ? 'Jadwal sesi sudah berakhir, presensi tidak dapat dilakukan.'
+                          : 'Sesi sudah ditutup, presensi tidak dapat dilakukan.'}
                     </Text>
                   ) : null}
                 </View>

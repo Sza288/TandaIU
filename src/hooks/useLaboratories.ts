@@ -36,10 +36,15 @@ export function useLaboratories(): UseLaboratoriesResult {
       (snapshot) => {
         setData(
           snapshot.docs
-            .map((document) => ({
-              id: document.id,
-              ...(document.data() as Omit<LaboratoryDoc, 'id'>),
-            }))
+            .map((document) => {
+              const data = document.data() as Omit<LaboratoryDoc, 'id'>;
+              return {
+                ...data,
+                id: document.id,
+                // Dokumen lama belum punya isActive; perlakukan sebagai aktif.
+                isActive: data.isActive !== false,
+              };
+            })
             .sort((a, b) => a.name.localeCompare(b.name)),
         );
         setError(null);
