@@ -175,8 +175,10 @@ service cloud.firestore {
           'name', 'latitude', 'longitude', 'radius', 'lantai', 'createdAt', 'updatedAt'
         ])
         && data.keys().hasOnly([
-          'name', 'latitude', 'longitude', 'radius', 'lantai', 'createdAt', 'updatedAt'
+          'name', 'latitude', 'longitude', 'radius', 'lantai', 'isActive',
+          'createdAt', 'updatedAt'
         ])
+        && ((!data.keys().hasAny(['isActive'])) || data.isActive is bool)
         && data.name is string
         && data.name.size() > 0
         && (data.latitude is float || data.latitude is int)
@@ -198,7 +200,11 @@ service cloud.firestore {
     function assistantOwnsSession(sessionId) {
       let sessionPath = /databases/$(database)/documents/sessions/$(sessionId);
       return isAssistant()
-        && assistantOwnsSessionData(get(sessionPath).data);
+        && exists(sessionPath)
+        && sessionMatchesClass(get(sessionPath).data)
+        && get(sessionPath).data.assistantUid == request.auth.uid
+        && get(sessionPath).data.semesterParity == request.auth.token.assistantSemesterParity
+        && assistantOwnsClass(get(sessionPath).data.classId);
     }
 
     function assistantOwnsSessionData(session) {
@@ -530,7 +536,7 @@ service cloud.firestore {
         && request.resource.data.semesterParity == resource.data.semesterParity
         && request.resource.data.courseId == resource.data.courseId
         && request.resource.data.createdAt == resource.data.createdAt;
-      allow delete: if false;
+      allow delete: if assistantOwnsClass(classId);
     }
 
     match /schedules/{scheduleId} {
@@ -557,7 +563,6 @@ service cloud.firestore {
           && validSession(resource.data)
           && praktikanEnrolledInClass(resource.data.classId))
         || (isAssistant()
-          && validSession(resource.data)
           && resource.data.assistantUid == request.auth.uid
           && resource.data.semesterParity == request.auth.token.assistantSemesterParity);
       allow list: if (isPraktikan()
@@ -570,10 +575,15 @@ service cloud.firestore {
         && request.resource.data.status == 'terjadwal'
         && request.resource.data.startsAt is timestamp
         && request.resource.data.endsAt is timestamp;
-      allow update: if sessionRecordInAssistantScope(resource.data)
+      allow update: if isAssistant()
+        && resource.data.assistantUid == request.auth.uid
+        && resource.data.semesterParity == request.auth.token.assistantSemesterParity
+        && sessionRecordInAssistantScope(request.resource.data)
+        && request.resource.data.startsAt is timestamp
+        && request.resource.data.endsAt is timestamp
         && (validScheduledSessionClientUpdate(resource.data, request.resource.data)
           || validSessionStatusTransition(resource.data, request.resource.data));
-      allow delete: if false;
+      allow delete: if assistantOwnsSession(sessionId);
     }
 
     match /laboratories/{laboratoryId} {
@@ -582,7 +592,7 @@ service cloud.firestore {
       allow update: if isAssistant()
         && validLaboratory(request.resource.data)
         && request.resource.data.createdAt == resource.data.createdAt;
-      allow delete: if isAssistant();
+      allow delete: if false;
     }
 
     match /enrollments/{enrollmentId} {
