@@ -63,7 +63,7 @@ export default function AssistantHistoryScreen() {
                   </View>
                   <View style={styles.cardCopy}>
                     <Text style={styles.cardEyebrow}>
-                      {course ? `Semester ${course.semester} · ` : ''}Pertemuan {getMeetingNumber(session)}
+                      {course ? `Semester ${course.semester} · ` : ''}Pertemuan {getMeetingNumber(session, sessions)}
                     </Text>
                     <Text style={styles.cardTitle}>{session.practicumName}</Text>
                     <Text style={styles.cardMeta}>Kelas {session.className}</Text>

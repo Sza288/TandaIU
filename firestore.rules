@@ -201,10 +201,7 @@ service cloud.firestore {
       let sessionPath = /databases/$(database)/documents/sessions/$(sessionId);
       return isAssistant()
         && exists(sessionPath)
-        && sessionMatchesClass(get(sessionPath).data)
-        && get(sessionPath).data.assistantUid == request.auth.uid
-        && get(sessionPath).data.semesterParity == request.auth.token.assistantSemesterParity
-        && assistantOwnsClass(get(sessionPath).data.classId);
+        && assistantOwnsSessionData(get(sessionPath).data);
     }
 
     function assistantOwnsSessionData(session) {
@@ -421,12 +418,12 @@ service cloud.firestore {
     function scheduleRecordInAssistantScope(data) {
       return isAssistant()
         && data.keys().hasAll([
-          'classId', 'courseId', 'dayOfWeek', 'startTime', 'endTime', 'room',
+          'classId', 'courseId', 'dayOfWeek', 'startTime', 'endTime',
           'semesterParity', 'assistantUid'
         ])
         && data.keys().hasOnly([
-          'classId', 'courseId', 'dayOfWeek', 'startTime', 'endTime', 'room',
-          'semesterParity', 'assistantUid', 'jumlahPertemuan'
+          'classId', 'courseId', 'dayOfWeek', 'startTime', 'endTime',
+          'semesterParity', 'assistantUid', 'laboratoryId', 'room', 'jumlahPertemuan'
         ])
         && data.classId is string
         && data.courseId is string
@@ -435,7 +432,10 @@ service cloud.firestore {
         && data.dayOfWeek <= 6
         && data.startTime is string
         && data.endTime is string
-        && data.room is string
+        && ((data.keys().hasAny(['laboratoryId'])
+            && data.laboratoryId is string
+            && exists(/databases/$(database)/documents/laboratories/$(data.laboratoryId)))
+          || (data.keys().hasAny(['room']) && data.room is string))
         && ((!data.keys().hasAny(['jumlahPertemuan']))
           || (data.jumlahPertemuan is int
             && data.jumlahPertemuan >= 1
@@ -575,7 +575,8 @@ service cloud.firestore {
         && request.resource.data.status == 'terjadwal'
         && request.resource.data.startsAt is timestamp
         && request.resource.data.endsAt is timestamp;
-      allow update: if isAssistant()
+      allow update: if sessionRecordInAssistantScope(resource.data)
+        && isAssistant()
         && resource.data.assistantUid == request.auth.uid
         && resource.data.semesterParity == request.auth.token.assistantSemesterParity
         && sessionRecordInAssistantScope(request.resource.data)
@@ -667,6 +668,9 @@ service cloud.firestore {
         && request.resource.data.createdAt is string
         && exists(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId))
         && validSessionForReference(get(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId)).data)
+        && get(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId)).data.status in ['terjadwal', 'dibuka']
+        && get(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId)).data.endsAt is timestamp
+        && get(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId)).data.endsAt > request.time
         && praktikanEnrolledInClass(get(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId)).data.classId);
       allow update: if assistantOwnsSession(resource.data.sessionId)
         && resource.data.status == 'pending'
@@ -675,7 +679,7 @@ service cloud.firestore {
         && (!request.resource.data.keys().hasAny(['reviewedBy'])
           || request.resource.data.reviewedBy == get(userPath(request.auth.uid)).data.name)
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'reviewedAt', 'reviewedBy']);
-      allow delete: if false;
+      allow delete: if assistantOwnsSession(resource.data.sessionId);
     }
 
     match /reviews/{reviewId} {
@@ -702,7 +706,8 @@ service cloud.firestore {
         && validSessionForReference(get(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId)).data)
         && get(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId)).data.status == 'ditutup'
         && praktikanEnrolledInClass(get(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId)).data.classId);
-      allow update, delete: if false;
+      allow update: if false;
+      allow delete: if assistantOwnsSession(resource.data.sessionId);
     }
 
     match /attendanceArchieve/{archiveId} {
@@ -734,6 +739,9 @@ service cloud.firestore {
         && attendanceEnrollmentExists(session.classId, session.courseId, session.semester);
     }
 
+    // Token perangkat untuk push notification (S3-SRS-13). Satu dokumen per
+    // instalasi; pemilik hanya boleh menulis token miliknya sendiri. Pengiriman
+    // notifikasi dilakukan backend (Admin SDK), yang tidak terkena aturan ini.
     match /deviceTokens/{installationId} {
       allow get: if isSignedIn() && resource.data.uid == request.auth.uid;
       allow list: if false;

@@ -2,6 +2,7 @@ import { useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
 
 import { useClasses } from '../../hooks/useClasses';
+import { useLaboratories } from '../../hooks/useLaboratories';
 import {
   createSchedule,
   getScheduleById,
@@ -36,13 +37,13 @@ type ScheduleField =
   | 'dayOfWeek'
   | 'startTime'
   | 'endTime'
-  | 'room'
+  | 'laboratoryId'
   | 'jumlahPertemuan';
 
 const SCHEDULE_FIELDS: { field: ScheduleField; prefix: string }[] = [
   { field: 'classId', prefix: 'Kelas' },
   { field: 'courseId', prefix: 'Mata kuliah' },
-  { field: 'room', prefix: 'Ruangan' },
+  { field: 'laboratoryId', prefix: 'Laboratorium' },
   { field: 'dayOfWeek', prefix: 'Hari' },
   { field: 'startTime', prefix: 'Waktu mulai' },
   { field: 'endTime', prefix: 'Waktu selesai' },
@@ -55,6 +56,7 @@ export default function ScheduleFormScreen() {
   const isEdit = Boolean(id);
 
   const classes = useClasses();
+  const laboratories = useLaboratories();
 
   const [ready, setReady] = useState(!id);
   const [classId, setClassId] = useState('');
@@ -62,9 +64,10 @@ export default function ScheduleFormScreen() {
   const [dayOfWeek, setDayOfWeek] = useState('1');
   const [startTime, setStartTime] = useState('');
   const [endTime, setEndTime] = useState('');
-  const [room, setRoom] = useState('');
+  const [laboratoryId, setLaboratoryId] = useState('');
   const [jumlahPertemuan, setJumlahPertemuan] = useState('14');
   const [classPickerVisible, setClassPickerVisible] = useState(false);
+  const [laboratoryPickerVisible, setLaboratoryPickerVisible] = useState(false);
   const [dayPickerVisible, setDayPickerVisible] = useState(false);
   const [errors, setErrors] = useState<Partial<Record<ScheduleField, string>>>({});
   const [formError, setFormError] = useState<string | null>(null);
@@ -85,7 +88,7 @@ export default function ScheduleFormScreen() {
           setDayOfWeek(String(schedule.dayOfWeek));
           setStartTime(schedule.startTime);
           setEndTime(schedule.endTime);
-          setRoom(schedule.room);
+          setLaboratoryId(schedule.laboratoryId ?? '');
           setJumlahPertemuan(schedule.jumlahPertemuan ? String(schedule.jumlahPertemuan) : '14');
         }
         setReady(true);
@@ -106,6 +109,18 @@ export default function ScheduleFormScreen() {
     label: `Kelas ${item.className}`,
     description: getCourseName(item.courseId),
   }));
+
+  const laboratoryOptions = laboratories.data
+    .filter((item) => item.isActive !== false || item.id === laboratoryId)
+    .map((item) => ({ value: item.id, label: item.name }));
+  const selectedLaboratory = laboratories.data.find((item) => item.id === laboratoryId);
+  const laboratoryHint = laboratories.loading
+    ? 'Memuat daftar laboratorium...'
+    : laboratories.error
+      ? laboratories.error
+      : laboratoryOptions.length === 0
+        ? 'Belum ada laboratorium aktif.'
+        : 'Laboratorium dipakai sebagai ruang praktikum pada jadwal ini.';
 
   const selectedClass = classes.data.find((item) => item.id === classId);
   const courseName = selectedClass
@@ -145,7 +160,7 @@ export default function ScheduleFormScreen() {
       dayOfWeek: toDayOfWeek(dayOfWeek),
       startTime: toClockTime(startTime),
       endTime: toClockTime(endTime),
-      room: room.trim(),
+      laboratoryId,
       jumlahPertemuan: Number(jumlahPertemuan),
     };
 
@@ -231,12 +246,14 @@ export default function ScheduleFormScreen() {
         hint="Harus setelah waktu mulai."
       />
 
-      <FormTextField
-        label="Ruangan"
-        value={room}
-        onChangeText={setRoom}
-        placeholder="Contoh: Lab Komputer 2"
-        error={errors.room}
+      <FormPickerField
+        label="Laboratorium"
+        value={selectedLaboratory?.name ?? ''}
+        placeholder="Pilih laboratorium"
+        error={errors.laboratoryId}
+        hint={laboratoryHint}
+        disabled={laboratories.loading}
+        onPress={() => setLaboratoryPickerVisible(true)}
       />
 
       <FormTextField
@@ -259,6 +276,19 @@ export default function ScheduleFormScreen() {
         emptyMessage="Belum ada kelas. Tambahkan kelas terlebih dahulu."
         onSelect={handleSelectClass}
         onClose={() => setClassPickerVisible(false)}
+      />
+
+      <OptionPicker
+        visible={laboratoryPickerVisible}
+        title="Pilih Laboratorium"
+        options={laboratoryOptions}
+        selectedValue={laboratoryId}
+        emptyMessage="Belum ada laboratorium aktif."
+        onSelect={(value) => {
+          setLaboratoryId(value);
+          setErrors((current) => ({ ...current, laboratoryId: undefined }));
+        }}
+        onClose={() => setLaboratoryPickerVisible(false)}
       />
 
       <OptionPicker

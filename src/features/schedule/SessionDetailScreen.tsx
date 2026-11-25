@@ -36,8 +36,9 @@ import {
 } from '../../services/attendanceService';
 import type { EnrollmentRecord } from '../../services/enrollmentService';
 import { useAuthSession } from '../auth/AuthSessionContext';
+import { manageHref } from '../crud/crud.utils';
 import { formatDateLong, formatTime } from '../../utils/format';
-import { getLabLabel, getMeetingNumber } from '../../utils/session';
+import { getEffectiveSessionStatus, getLabLabel, getMeetingNumber } from '../../utils/session';
 import { getCourseById } from '../../utils/academic';
 import { colors, fonts, radius, shadows, spacing } from '../../theme';
 import type { MutationResult } from '../../types';
@@ -135,6 +136,11 @@ export default function SessionDetailScreen() {
   const detailScrollRef = useRef<ScrollViewInstance | null>(null);
   const rosterOffset = useRef(0);
   const [statusCardSize, setStatusCardSize] = useState({ width: 0, height: 0 });
+  const [currentTime, setCurrentTime] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setCurrentTime(Date.now()), 30_000);
+    return () => clearInterval(timer);
+  }, []);
   const enrolledPraktikans: EnrollmentRecord[] = classEnrollmentResult.data;
   const enrolledIds = new Set(enrolledPraktikans.map((praktikan) => praktikan.praktikanId));
   const attendanceByPraktikan = useMemo(() => {
@@ -222,6 +228,23 @@ export default function SessionDetailScreen() {
   }, [diagKey]);
   const alreadyCheckedIn =
     activeAttendance !== undefined && activeAttendance.status !== 'dibatalkan';
+  const withinAttendanceWindow = Boolean(
+    session
+    && currentTime >= Date.parse(session.startsAt)
+    && currentTime < Date.parse(session.endsAt),
+  );
+  const attendanceWindowElapsed = Boolean(
+    session && currentTime >= Date.parse(session.endsAt),
+  );
+  const effectiveStatus = session ? getEffectiveSessionStatus(session, currentTime) : 'terjadwal';
+  const autoClosedSessionsRef = useRef(new Set<string>());
+
+  useEffect(() => {
+    if (!isAssistant || !session || session.status !== 'dibuka' || !attendanceWindowElapsed) return;
+    if (autoClosedSessionsRef.current.has(session.id)) return;
+    autoClosedSessionsRef.current.add(session.id);
+    void closeSession(session.id);
+  }, [attendanceWindowElapsed, isAssistant, session]);
   const enrollmentLoading = isAssistant
     ? classEnrollmentResult.loading
     : praktikanEnrollmentResult.loading;
@@ -435,7 +458,7 @@ export default function SessionDetailScreen() {
   const actionDisabled = !session
     || activeRole === null
     || submittingAction
-    || (isAssistant && session.status === 'ditutup')
+    || (isAssistant && (session.status === 'ditutup' || (session.status === 'terjadwal' && attendanceWindowElapsed)))
     || (!isAssistant && (
       !activePraktikanId
       || enrollmentLoading
@@ -444,14 +467,20 @@ export default function SessionDetailScreen() {
       || !isEnrolledPraktikan
       || alreadyCheckedIn
       || session.status !== 'dibuka'
+      || !withinAttendanceWindow
+      || effectiveStatus !== 'dibuka'
     ));
   const actionHint = activeRole === null
     ? 'Sesi autentikasi belum tersedia. Silakan masuk kembali.'
     : isAssistant
       ? session?.status === 'terjadwal'
-        ? 'Buka sesi saat praktikum dimulai.'
+        ? attendanceWindowElapsed
+          ? 'Jadwal sesi ini sudah berakhir (WIB) dan tidak dapat dibuka.'
+          : 'Buka sesi saat praktikum dimulai.'
         : session?.status === 'dibuka'
-          ? 'Tutup sesi setelah praktikum selesai.'
+          ? attendanceWindowElapsed
+            ? 'Waktu sesi sudah berakhir (WIB); sesi sedang ditutup otomatis.'
+            : 'Tutup sesi setelah praktikum selesai.'
           : 'Sesi ini sudah ditutup.'
       : !activePraktikanId
         ? 'Data enrollment akun belum tersedia untuk dihubungkan ke sesi.'
@@ -557,21 +586,21 @@ export default function SessionDetailScreen() {
                 </Svg>
               ) : null}
               <Ionicons
-                name={session.status === 'dibuka' ? 'checkmark-circle' : session.status === 'ditutup' ? 'lock-closed' : 'time'}
+                name={effectiveStatus === 'dibuka' ? 'checkmark-circle' : effectiveStatus === 'ditutup' ? 'lock-closed' : 'time'}
                 size={25}
                 color={colors.primaryDark}
               />
               <View style={styles.statusCopy}>
                 <Text style={styles.statusLabel}>Status Sesi</Text>
                 <Text style={styles.statusTitle}>
-                  {session.status === 'terjadwal'
+                  {effectiveStatus === 'terjadwal'
                     ? 'Terjadwal (Mendatang)'
-                    : session.status === 'dibuka'
+                    : effectiveStatus === 'dibuka'
                       ? 'Sedang Berlangsung'
                       : 'Sesi Ditutup'}
                 </Text>
               </View>
-              <StatusBadge status={session.status} />
+              <StatusBadge status={effectiveStatus} />
             </View>
 
             <View style={styles.sessionCard}>
@@ -581,7 +610,7 @@ export default function SessionDetailScreen() {
                   <Text style={styles.sessionTitle}>{session.practicumName}</Text>
                   <Text style={styles.sessionSubtitle}>
                     {sessionCourse ? `Semester ${sessionCourse.semester} · ` : ''}
-                    {getLabLabel(session)} · Pertemuan {getMeetingNumber(session)}
+                    {getLabLabel(session)} · Pertemuan {getMeetingNumber(session, sessionResult.data)}
                   </Text>
                 </View>
                 <View style={styles.sessionIcon}>
@@ -606,7 +635,7 @@ export default function SessionDetailScreen() {
                 <InfoRow
                   icon="people"
                   label="KELAS"
-                  value={`Kelas ${session.className} · Pertemuan ${getMeetingNumber(session)}`}
+                  value={`Kelas ${session.className} · Pertemuan ${getMeetingNumber(session, sessionResult.data)}`}
                 />
               </View>
             </View>
@@ -677,7 +706,7 @@ export default function SessionDetailScreen() {
                 </View>
 
                 <View style={styles.shareBlock}>
-                  {session.status === 'dibuka' ? (
+                  {effectiveStatus === 'dibuka' ? (
                     <>
                       <Text style={styles.shareLabel}>Link presensi praktikan</Text>
                       <Link
@@ -912,6 +941,22 @@ export default function SessionDetailScreen() {
               >
                 <Ionicons name="qr-code-outline" size={19} color={colors.primaryDark} />
                 <Text style={styles.qrScanButtonText}>Scan QR Asprak</Text>
+              </Pressable>
+            ) : null}
+            {isAssistant && effectiveStatus === 'terjadwal' ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Pindah Jadwal Sesi"
+                onPress={() =>
+                  router.push(manageHref('/assistant/manage/session-form', session.id))
+                }
+                style={({ pressed }) => [
+                  styles.moveScheduleButton,
+                  pressed ? styles.mainActionPressed : null,
+                ]}
+              >
+                <Ionicons name="calendar-outline" size={18} color={colors.primaryDark} />
+                <Text style={styles.moveScheduleText}>Pindah Jadwal Sesi</Text>
               </Pressable>
             ) : null}
           </View>
@@ -1475,6 +1520,24 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primarySofter,
   },
   qrScanButtonText: {
+    color: colors.primaryDark,
+    fontFamily: fonts.bold,
+    fontSize: 13,
+  },
+  moveScheduleButton: {
+    minHeight: 44,
+    marginTop: spacing.sm,
+    paddingHorizontal: spacing.md,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.primarySofter,
+    backgroundColor: colors.primarySofter,
+  },
+  moveScheduleText: {
     color: colors.primaryDark,
     fontFamily: fonts.bold,
     fontSize: 13,

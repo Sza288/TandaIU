@@ -573,7 +573,7 @@ describeWithEmulator('Firestore Revisi 3 dan 4 access rules', () => {
     await expect(updateDoc(doc(student, 'attendances/session-with-lab_student-new'), { status: 'izin' }))
       .rejects.toMatchObject({ code: 'permission-denied' });
     await expect(deleteDoc(doc(odd, 'attendances/session-ganjil_student-enrolled')))
-      .rejects.toMatchObject({ code: 'permission-denied' });
+      .resolves.toBeUndefined();
   });
 
   it('allows laboratory reads for app roles and denies client laboratory writes', async () => {
@@ -736,7 +736,7 @@ describeWithEmulator('Firestore Revisi 3 dan 4 access rules', () => {
     permitRecord('session-with-lab', 'student-enrolled', 'Mahasiswa Terdaftar')))
       .resolves.toBeUndefined();
     await expect(deleteDoc(doc(odd, 'permits/session-ganjil_student-enrolled')))
-      .rejects.toMatchObject({ code: 'permission-denied' });
+      .resolves.toBeUndefined();
   });
 
   it('limits reviews and attendance archives to their owner or session owner', async () => {
@@ -855,6 +855,8 @@ describeWithEmulator('Firestore Revisi 3 dan 4 access rules', () => {
     await expect(updateDoc(doc(odd, 'laboratories/lab-toggle'), { isActive: true }))
       .resolves.toBeUndefined();
 
+    // Documents written before the activation feature keep working without the
+    // field, because a missing isActive is treated as active.
     const legacy = laboratoryRecord('Lab Lama');
     delete (legacy as Record<string, unknown>).isActive;
     await expect(setDoc(doc(odd, 'laboratories/lab-legacy'), legacy))
@@ -878,6 +880,30 @@ describeWithEmulator('Firestore Revisi 3 dan 4 access rules', () => {
       startsAt: Timestamp.fromMillis(Date.now()),
       endsAt: Timestamp.fromMillis(Date.now() + 3_600_000),
       laboratoryId: 'lab-b',
+    })).resolves.toBeUndefined();
+  });
+
+  it('allows editing sessions that still reference an inactive laboratory', async () => {
+    const odd = environment.authenticatedContext('asprak-odd', {
+      assistantSemesterParity: 'ganjil',
+    }).firestore();
+
+    await environment.withSecurityRulesDisabled(async (context) => {
+      await updateDoc(doc(context.firestore(), 'laboratories/lab-b'), { isActive: false });
+    });
+
+    const changes = {
+      startsAt: Timestamp.fromMillis(Date.now() + 60_000),
+      endsAt: Timestamp.fromMillis(Date.now() + 3_660_000),
+    };
+
+    await expect(updateDoc(doc(odd, 'sessions/session-with-lab'), {
+      ...changes,
+      laboratoryId: 'lab-b',
+    })).resolves.toBeUndefined();
+    await expect(updateDoc(doc(odd, 'sessions/session-with-lab'), {
+      ...changes,
+      laboratoryId: 'lab-c',
     })).resolves.toBeUndefined();
   });
 

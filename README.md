@@ -118,6 +118,15 @@ Aturan singkat: kode non-rute (komponen, hook, util) disimpan **di luar** `src/a
 - Izin hanya dapat diajukan satu kali per pasangan sesi + praktikan (ID dokumen `permits/{sessionId}_{uid}`); pengajuan ulang untuk sesi yang sama ditolak.
 - Di luar ruang lingkup: bukti foto, ekspor laporan, notifikasi, dan administrasi jadwal lanjutan.
 
+### Aturan penghapusan data
+
+- **Sesi**: hanya sesi `terjadwal` yang bisa dihapus. Kelas dan jadwal induknya tidak ikut terhapus.
+- **Jadwal**: sesi `terjadwal` milik jadwal ikut dihapus, sedangkan sesi `ditutup` dipertahankan sebagai riwayat (referensi `scheduleId` dilepas agar sesi tetap valid). Penghapusan ditolak bila masih ada sesi `dibuka`.
+- **Kelas**: ditolak bila masih ada jadwal, sesi `terjadwal`, atau sesi `dibuka`. Bila lolos, kelas dihapus bersama sesi yang tersisa (riwayat `ditutup`) dan enrollment-nya agar tidak ada dokumen yatim.
+- Pengecekan "masih punya sesi" dan pengumpulan jadwal/sesi/enrollment untuk cascade dijalankan di service karena Firestore Rules tidak dapat menjalankan query koleksi; rules hanya memverifikasi bahwa asisten adalah pemilik kelas/sesi.
+- Asumsi: enrollment tidak lagi menghalangi penghapusan kelas, tetapi ikut dihapus bersama kelasnya.
+- Dokumen `attendances`, `permits`, dan `reviews` memakai ID `{sessionId}_{uid}`. Saat jadwal atau kelas dihapus, asisten pemilik sesi menghapus catatan turunannya bersama sesi; penghapusan langsung oleh praktikan tetap ditolak.
+
 ## Dokumentasi
 
 - [`SRS.md`](./SRS.md) — kebutuhan fungsional (FR), kebutuhan UI/NFR, skenario uji penerimaan (AT), pembagian tugas, dan jadwal sprint.

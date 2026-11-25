@@ -1206,3 +1206,37 @@ Bagian ini mencatat asumsi yang diambil untuk mengisi hal-hal yang belum ditentu
 26. **`expo-location` dipasang satu kali** dan dipakai bersama modul laboratorium (S3-SRS-05) dan modul presensi (S3-SRS-03). Pustaka ini memerlukan development build karena tidak tersedia pada Expo Go.
 27. Pemeriksaan rentang `latitude` dan `longitude` **tidak mendeteksi kesalahan penulisan** yang masih berada di dalam rentang, misalnya tertukarnya tanda negatif. Karena itu tombol pengambilan lokasi perangkat lebih diutamakan daripada pengetikan manual untuk memperoleh koordinat.
 28. Perubahan radius laboratorium **berlaku pada validasi presensi berikutnya** dan tidak mengubah data presensi yang sudah tercatat, sesuai S3-SRS-06 dan S3-SRS-07.
+
+---
+
+# LAMPIRAN — ASUMSI PENYELARASAN LOGIKA SPRINT 3
+
+Bagian ini merangkum keputusan yang diambil saat menyelaraskan implementasi laboratorium, kelas, jadwal, dan sesi. Asumsi di bawah mengikuti perilaku kode saat ini dan bukan kutipan persyaratan studi kasus; perubahan keputusan wajib dicatat di sini.
+
+## F. Status dan hak edit sesi
+
+29. **Status efektif sesi dihitung dari waktu selesai.** Fungsi `getEffectiveSessionStatus` memperlakukan sesi berstatus `terjadwal` yang `endsAt`-nya sudah lewat sebagai `ditutup` untuk keperluan tampilan dan hak edit. Perhitungan ini tidak menulis status baru ke Firestore; transisi tersimpan tetap `terjadwal` → `dibuka` → `ditutup` melalui aksi asisten.
+30. **Tombol pindah jadwal hanya tersedia untuk sesi efektif `terjadwal` milik asisten.** Tombol tidak ditampilkan pada sesi `dibuka`, `ditutup`, atau sesi `terjadwal` yang waktu selesainya sudah lewat, sehingga riwayat presensi dan izin tidak diubah secara tidak sengaja.
+31. **Form edit sesi menolak sesi non-`terjadwal`.** Jika halaman form dibuka langsung dengan `id` sesi yang status efektifnya bukan `terjadwal`, pesan kesalahan ditampilkan dan tombol simpan dinonaktifkan. Deep link tidak menjadi jalan pintas untuk memindahkan sesi riwayat.
+
+## G. Pemindahan sesi dan relasi jadwal
+
+32. **Form sesi tidak mengubah status.** Status hanya diubah oleh aksi buka/tutup sesi. Form hanya mengubah tanggal, jam, laboratorium, dan `scheduleId` yang diturunkan otomatis.
+33. **Identitas akademik sesi bersifat tetap saat dipindahkan.** Kelas, `courseId`, nama praktikum, dosen, semester, `semesterParity`, dan `assistantUid` tidak dapat diubah; field-field tersebut hanya ditampilkan sebagai informasi.
+34. **`scheduleId` tidak dipilih manual.** `resolveScheduleIdForSession` mencari jadwal milik asisten yang sama dengan parity sama yang memiliki `dayOfWeek` dan `startTime` persis sama dengan sesi. Jika tidak ada kecocokan, `scheduleId` dihapus dan sesi tidak muncul pada detail jadwal mana pun. Sesi yang dibuat untuk kelas atau parity asisten lain sengaja tidak ikut tampil pada jadwal asisten tersebut.
+
+## H. Penghapusan dan riwayat
+
+35. **Sesi `dibuka` atau `ditutup` tidak dihapus lewat aksi biasa.** Sesi `dibuka` harus ditutup terlebih dahulu; sesi `ditutup` disimpan sebagai riwayat dan tidak dapat dipindahkan maupun dihapus dari daftar kelola.
+36. **Hapus jadwal menghapus seluruh sesi yang terhubung.** `deleteSchedule` menghapus semua sesi dengan `scheduleId` yang bersangkutan beserta `attendances`, `permits`, `reviews`, dan `attendanceQrTokens`-nya. Karena Firestore Rules tidak dapat melakukan query ke subkoleksi, penghapusan dilakukan berurutan di layanan dan Rules mengizinkan penghapusan kepada asisten pemilik sesi.
+37. **Hapus kelas hanya boleh pada kondisi aman.** `deleteClass` menolak apabila kelas masih memiliki jadwal atau sesi `terjadwal`/`dibuka`. Sisa sesi `ditutup`, enrollment, dan data turunannya ikut dihapus bersama kelas karena dokumen induknya tidak lagi valid.
+38. **Presensi tidak dihapus dalam alur normal.** Pembatalan presensi mengubah `status` menjadi `dibatalkan`. Penghapusan `attendances`, `permits`, `reviews`, dan `attendanceQrTokens` hanya dipakai sebagai bagian dari cascade hapus sesi/jadwal/kelas oleh asisten pemilik, bukan sebagai aksi harian.
+39. **Aturan hapus asisten dikembalikan ke pemiliknya.** Rules mengizinkan `assistantOwnsClass(classId)` untuk kelas, `sessionRecordInAssistantScope(resource.data)` untuk jadwal dan sesi, serta `assistantOwnsSession(...)` untuk data turunan sesi. Perbaikan ini tidak mengubah logika `get`, `create`, atau `update` token QR.
+
+## I. Laboratorium dan pembuatan sesi
+
+40. **Status laboratorium memakai `isActive`.** Dokumen lama tanpa field `isActive` dianggap aktif. Laboratorium nonaktif tetap tersimpan, tetapi tidak dapat dipilih ketika membuat atau memindahkan sesi; sesi lama yang masih menunjuk laboratorium nonaktif harus dipindahkan ke laboratorium aktif sebelum disimpan.
+41. **Laboratorium tidak dihapus permanen dari antarmuka.** Aksi yang tersedia adalah nonaktifkan dan aktifkan kembali, karena penghapusan akan merusak referensi pada sesi serta riwayat presensi.
+42. **Perubahan data laboratorium tidak menulis ulang riwayat presensi.** Koordinat dan radius selalu dibaca dari dokumen laboratorium terbaru pada validasi presensi berikutnya, sedangkan `distanceMeters` pada presensi yang sudah tercatat dibekukan.
+43. **Tombol Tambah Sesi tetap tersedia di Kelola › Sesi.** Form baru selalu membuat sesi berstatus `terjadwal` dan mewajibkan laboratorium aktif. Tombol pindah jadwal di detail jadwal tidak menggantikan tombol tambah; keduanya melayani alur yang berbeda.
+44. **Layar form tidak memakai bottom navigation.** Form kelas, jadwal, sesi, dan laboratorium memakai header tersembunyi dengan tombol simpan pada FormScaffold agar fokus tetap pada input.

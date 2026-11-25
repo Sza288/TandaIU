@@ -248,11 +248,14 @@ export function confirmAction({
   title,
   message,
   confirmLabel = 'Hapus',
+  destructive = true,
   onConfirm,
 }: {
   title: string;
   message: string;
   confirmLabel?: string;
+  /** Aksi yang tidak menghapus data, misalnya mengaktifkan kembali, tampil netral. */
+  destructive?: boolean;
   onConfirm: () => void;
 }): void {
   if (Platform.OS === 'web') {
@@ -264,7 +267,23 @@ export function confirmAction({
 
   Alert.alert(title, message, [
     { text: 'Batal', style: 'cancel' },
-    { text: confirmLabel, style: 'destructive', onPress: onConfirm },
+    { text: confirmLabel, style: destructive ? 'destructive' : 'default', onPress: onConfirm },
   ]);
+}
+
+/**
+ * Pemberitahuan yang harus terlihat langsung di tengah layar, misalnya saat
+ * penghapusan ditolak. Banner di atas daftar mudah terlewat saat pengguna
+ * sedang berada di bawah.
+ */
+export function showMessage(title: string, message: string): void {
+  if (Platform.OS === 'web') {
+    if (typeof window !== 'undefined' && typeof window.alert === 'function') {
+      window.alert(`${title}\n\n${message}`);
+    }
+    return;
+  }
+
+  Alert.alert(title, message);
 }
 

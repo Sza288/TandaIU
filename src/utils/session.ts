@@ -1,15 +1,47 @@
-import { PracticumSession } from '../types';
+import { PracticumSession, SessionStatus } from '../types';
 
-/**
- * Kontrak PracticumSession (SRS bagian 6) tidak menyimpan nomor pertemuan,
- * jadi nomor pertemuan diturunkan secara stabil dari id sesi hanya untuk
- * tampilan demo.
- */
-export function getMeetingNumber(session: PracticumSession): number {
-  const digits = session.id.replace(/\D/g, '');
-  const value = Number(digits);
-  if (!Number.isFinite(value) || value <= 0) return 1;
-  return ((value - 1) % 6) + 1;
+type MeetingSession = {
+  id: string;
+  startsAt: string;
+  classId?: string;
+  courseId?: string;
+  className?: string;
+};
+
+export function isSessionEnded(
+  session: Pick<PracticumSession, 'endsAt'>,
+  now = Date.now(),
+): boolean {
+  const endsAtMs = Date.parse(session.endsAt);
+  return Number.isFinite(endsAtMs) && endsAtMs <= now;
+}
+
+export function getEffectiveSessionStatus(
+  session: Pick<PracticumSession, 'status' | 'endsAt'>,
+  now = Date.now(),
+): SessionStatus {
+  if (session.status === 'ditutup' || isSessionEnded(session, now)) {
+    return 'ditutup';
+  }
+  return session.status;
+}
+
+function meetingGroupKey(session: MeetingSession): string {
+  return session.classId || `${session.courseId ?? ''}::${session.className ?? ''}`;
+}
+
+export function getMeetingNumber(
+  session: PracticumSession,
+  sessions: PracticumSession[] = [session],
+): number {
+  const key = meetingGroupKey(session);
+  const ordered = sessions
+    .filter((item) => meetingGroupKey(item) === key)
+    .slice()
+    .sort((a, b) =>
+      Date.parse(a.startsAt) - Date.parse(b.startsAt) || a.id.localeCompare(b.id));
+  const index = ordered.findIndex((item) => item.id === session.id);
+  return index >= 0 ? index + 1 : 1;
 }
 
 export function getLabLabel(session: PracticumSession): string {
