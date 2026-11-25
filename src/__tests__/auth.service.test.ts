@@ -593,6 +593,9 @@ describe('logout', () => {
     expect(deleteUser).not.toHaveBeenCalled();
     expect(setDoc).not.toHaveBeenCalled();
     expect(jest.mocked(removeCurrentDeviceToken).mock.invocationCallOrder[0]).toBeLessThan(
+      jest.mocked(GoogleSignin.signOut).mock.invocationCallOrder[0],
+    );
+    expect(jest.mocked(removeCurrentDeviceToken).mock.invocationCallOrder[0]).toBeLessThan(
       jest.mocked(firebaseSignOut).mock.invocationCallOrder[0],
     );
   });
@@ -632,16 +635,20 @@ describe('logout', () => {
     await expect(signOut()).rejects.toMatchObject({ code: 'logout-failed' });
   });
 
-  it('aborts logout when device token removal fails', async () => {
+  it('completes logout even when device token removal fails', async () => {
     Object.assign(auth, { currentUser: user });
+    jest.spyOn(console, 'warn').mockImplementation(() => undefined);
     jest
       .mocked(removeCurrentDeviceToken)
       .mockResolvedValue({ ok: false, reason: 'token tidak dapat dihapus' });
 
-    await expect(signOut()).rejects.toMatchObject({
-      code: 'logout-failed',
-      message: expect.stringContaining('Gagal menghapus token notifikasi'),
-    });
-    expect(firebaseSignOut).not.toHaveBeenCalled();
+    await expect(signOut()).resolves.toBeUndefined();
+
+    expect(firebaseSignOut).toHaveBeenCalled();
+    expect(console.warn).not.toHaveBeenCalledWith(
+      expect.stringContaining('Periksa izin akunmu'),
+      expect.anything(),
+    );
+    jest.restoreAllMocks();
   });
 });

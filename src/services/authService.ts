@@ -473,6 +473,20 @@ export async function signOut(): Promise<void> {
       (provider) => provider.providerId === 'google.com',
     ) ?? false;
 
+    try {
+      const tokenRemoval = await removeCurrentDeviceToken();
+      if (!tokenRemoval.ok && __DEV__) {
+        console.warn('[auth] Device token removal failed during logout; continuing.');
+      }
+    } catch (error) {
+      if (__DEV__) {
+        console.warn(
+          '[auth] Device token removal threw during logout:',
+          firebaseErrorCode(error) ?? 'unknown-error',
+        );
+      }
+    }
+
     if (hasGoogleProvider && Platform.OS !== 'web' && Constants.appOwnership !== 'expo') {
       try {
         // Expo Go does not include this native module; load it only in a development build.
@@ -492,15 +506,6 @@ export async function signOut(): Promise<void> {
     }
 
     try {
-      const tokenRemoval = await removeCurrentDeviceToken();
-      if (!tokenRemoval.ok) {
-        throw new AuthServiceError(
-          'logout-failed',
-          tokenRemoval.reason === 'timeout'
-            ? 'Penghapusan token notifikasi timed out. Logout dibatalkan; coba lagi.'
-            : `Gagal menghapus token notifikasi: ${tokenRemoval.reason}. Logout dibatalkan; coba lagi.`,
-        );
-      }
       await firebaseSignOut(auth);
     } catch (error) {
       throw new AuthServiceError('logout-failed', getAuthErrorMessage(error));
