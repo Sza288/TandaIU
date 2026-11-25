@@ -1,9 +1,8 @@
 
-import * as Linking from 'expo-linking';
 import { Ionicons } from '@expo/vector-icons';
-import { router, useLocalSearchParams } from 'expo-router';
+import { Link, router, useLocalSearchParams, type ExternalPathString } from 'expo-router';
 import QRCode from 'react-native-qrcode-svg';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Component, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -32,10 +31,7 @@ import {
   cancelAttendance,
   checkIn,
   closeSession,
-  issueAttendanceQr,
   openSession,
-  revokeAttendanceQr,
-  type AttendanceQrResult,
   type AttendanceRecord,
 } from '../../services/attendanceService';
 import type { EnrollmentRecord } from '../../services/enrollmentService';
@@ -46,6 +42,7 @@ import { getCourseById } from '../../utils/academic';
 import { colors, fonts, radius, shadows, spacing } from '../../theme';
 import type { MutationResult } from '../../types';
 import { acquireDeviceLocation } from '../../utils/location';
+import { createAttendanceLink } from '../../utils/attendanceLink';
 
 type PendingSessionAction = 'open' | 'close' | 'checkin';
 
@@ -55,19 +52,23 @@ type ActionFeedback = {
   message: string;
 };
 
-function createAttendanceLink(sessionId: string): string {
-  const encodedId = encodeURIComponent(sessionId);
-  const route = `/schedule/${encodedId}`;
+class QrRenderBoundary extends Component<
+  { children: ReactNode; fallback: ReactNode },
+  { hasError: boolean }
+> {
+  state = { hasError: false };
 
-  if (Platform.OS === 'web' && typeof window !== 'undefined') {
-    const { hostname, origin } = window.location;
-    if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]') {
-      return `presensipraktikum:///schedule/${encodedId}`;
-    }
-    return new URL(route, origin).toString();
+  static getDerivedStateFromError() {
+    return { hasError: true };
   }
 
-  return Linking.createURL(`/schedule/${encodedId}`, { scheme: 'presensipraktikum' });
+  componentDidCatch(error: Error) {
+    console.error('[attendance-link] QR rendering failed', error);
+  }
+
+  render() {
+    return this.state.hasError ? this.props.fallback : this.props.children;
+  }
 }
 
 function InfoRow({
@@ -134,15 +135,6 @@ export default function SessionDetailScreen() {
   const detailScrollRef = useRef<ScrollViewInstance | null>(null);
   const rosterOffset = useRef(0);
   const [statusCardSize, setStatusCardSize] = useState({ width: 0, height: 0 });
-  const [issuedQr, setIssuedQr] = useState<
-    Extract<AttendanceQrResult, { ok: true }> | null
-  >(null);
-  const [qrBusy, setQrBusy] = useState(false);
-  const [qrError, setQrError] = useState<string | null>(null);
-  const [qrClock, setQrClock] = useState(0);
-  const qrRemainingSeconds = issuedQr
-    ? Math.max(0, Math.ceil((Date.parse(issuedQr.expiresAt) - qrClock) / 1000))
-    : 0;
   const enrolledPraktikans: EnrollmentRecord[] = classEnrollmentResult.data;
   const enrolledIds = new Set(enrolledPraktikans.map((praktikan) => praktikan.praktikanId));
   const attendanceByPraktikan = useMemo(() => {
@@ -246,12 +238,6 @@ export default function SessionDetailScreen() {
     isAssistant && profile?.uid && session?.assistantUid === profile.uid,
   );
 
-  useEffect(() => {
-    if (!issuedQr) return undefined;
-    const timer = setInterval(() => setQrClock(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, [issuedQr]);
-
   const handleBack = () => {
     if (router.canGoBack()) {
       router.back();
@@ -317,7 +303,6 @@ export default function SessionDetailScreen() {
       setSubmittingAction(true);
       const result = await closeSession(session.id);
       setSubmittingAction(false);
-      if (result.ok) setIssuedQr(null);
       showActionResult(result, 'Sesi ditutup', 'Sesi praktikum berhasil ditutup.');
       return;
     }
@@ -397,7 +382,7 @@ export default function SessionDetailScreen() {
           return;
         }
         if (typeof navigator.share === 'function') {
-          await navigator.share({ title: `Presensi ${session.practicumName}`, text: link });
+          await navigator.share({ title: `Presensi ${session.practicumName}`, url: link });
           return;
         }
         if (navigator.clipboard?.writeText) {
@@ -420,48 +405,6 @@ export default function SessionDetailScreen() {
       const message = error instanceof Error ? error.message : 'Terjadi kesalahan yang tidak diketahui.';
       Alert.alert('Link tidak dapat dibagikan', message);
     }
-  };
-
-  const handleIssueQr = async () => {
-    if (!session || session.status !== 'dibuka' || !isAssistant || qrBusy) return;
-    setQrBusy(true);
-    setQrError(null);
-    const result = await issueAttendanceQr(session.id);
-    setQrBusy(false);
-    if (!result.ok) {
-      setQrError(result.reason);
-      return;
-    }
-    setIssuedQr(result);
-    setQrClock(new Date().getTime());
-  };
-
-  const handleRevokeQr = () => {
-    if (!session || !issuedQr || qrBusy) return;
-    Alert.alert(
-      'Cabut QR presensi?',
-      'QR yang sedang ditampilkan tidak dapat digunakan lagi. Asisten dapat menerbitkan QR baru.',
-      [
-        { text: 'Batal', style: 'cancel' },
-        {
-          text: 'Cabut QR',
-          style: 'destructive',
-          onPress: () => {
-            void (async () => {
-              setQrBusy(true);
-              setQrError(null);
-              const result = await revokeAttendanceQr(session.id);
-              setQrBusy(false);
-              if (!result.ok) {
-                setQrError(result.reason ?? 'QR tidak dapat dicabut.');
-                return;
-              }
-              setIssuedQr(null);
-            })();
-          },
-        },
-      ],
-    );
   };
 
   const buttonLabel = isAssistant
@@ -736,8 +679,14 @@ export default function SessionDetailScreen() {
                 <View style={styles.shareBlock}>
                   {session.status === 'dibuka' ? (
                     <>
-                      <Text style={styles.shareLabel}>Link detail sesi</Text>
-                      <Text style={styles.shareLink} selectable>{attendanceLink}</Text>
+                      <Text style={styles.shareLabel}>Link presensi praktikan</Text>
+                      <Link
+                        href={attendanceLink as ExternalPathString}
+                        style={styles.shareLink}
+                        accessibilityLabel={`Buka presensi ${session.practicumName}`}
+                      >
+                        {attendanceLink}
+                      </Link>
                       <Pressable
                         onPress={() => void shareAttendanceLink()}
                         accessibilityRole="button"
@@ -748,76 +697,31 @@ export default function SessionDetailScreen() {
                         <Text style={styles.shareButtonText}>Bagikan Link</Text>
                       </Pressable>
                       <View style={styles.qrPanel}>
-                        <Text style={styles.shareLabel}>QR PRESENSI ASISTEN</Text>
+                        <Text style={styles.shareLabel}>QR LINK PRESENSI</Text>
                         <Text style={styles.qrSessionInfo}>
                           {session.practicumName} · Kelas {session.className}
                         </Text>
-                        {issuedQr && qrRemainingSeconds > 0 ? (
+                        {attendanceLink ? (
                           <View style={styles.qrContainer}>
-                            <QRCode value={issuedQr.qrPayload} size={200} />
+                            <QrRenderBoundary
+                              key={session.id}
+                              fallback={(
+                                <Text accessibilityLiveRegion="polite" style={styles.qrError}>
+                                  QR tidak dapat ditampilkan. Bagikan tautan HTTPS di atas.
+                                </Text>
+                              )}
+                            >
+                              <QRCode value={attendanceLink} size={200} />
+                            </QrRenderBoundary>
                             <Text style={styles.qrCaption}>
-                              Berlaku {Math.floor(qrRemainingSeconds / 60)}:
-                              {String(qrRemainingSeconds % 60).padStart(2, '0')} lagi
-                              {' · sampai '}
-                              {new Date(issuedQr.expiresAt).toLocaleTimeString('id-ID', {
-                                hour: '2-digit',
-                                minute: '2-digit',
-                                second: '2-digit',
-                              })}
+                              Pindai untuk membuka halaman presensi sesi ini.
                             </Text>
                           </View>
-                        ) : issuedQr ? (
-                          <Text style={styles.inactiveShareText}>
-                            QR kedaluwarsa. Perbarui untuk menerbitkan token baru.
-                          </Text>
                         ) : (
-                          <Text style={styles.inactiveShareText}>
-                            QR memiliki masa berlaku singkat dan terikat pada sesi ini.
+                          <Text accessibilityLiveRegion="polite" style={styles.qrError}>
+                            Link HTTPS tidak dapat dibuat. Periksa konfigurasi Firebase Hosting.
                           </Text>
                         )}
-                        <Pressable
-                          accessibilityRole="button"
-                          disabled={qrBusy}
-                          onPress={() => void handleIssueQr()}
-                          style={({ pressed }) => [
-                            styles.shareButton,
-                            styles.qrButton,
-                            qrBusy && styles.disabledButton,
-                            pressed && !qrBusy && styles.buttonPressed,
-                          ]}
-                        >
-                          {qrBusy ? (
-                            <ActivityIndicator size="small" color={colors.primaryDark} />
-                          ) : (
-                            <Ionicons name="qr-code-outline" size={18} color={colors.primaryDark} />
-                          )}
-                          <Text style={styles.qrButtonText}>
-                            {qrBusy
-                              ? 'Memproses...'
-                              : issuedQr
-                                ? 'Perbarui QR'
-                                : 'Buat QR Presensi'}
-                          </Text>
-                        </Pressable>
-                        {issuedQr ? (
-                          <Pressable
-                            accessibilityRole="button"
-                            disabled={qrBusy}
-                            onPress={handleRevokeQr}
-                            style={({ pressed }) => [
-                              styles.revokeQrButton,
-                              qrBusy && styles.disabledButton,
-                              pressed && !qrBusy && styles.buttonPressed,
-                            ]}
-                          >
-                            <Text style={styles.revokeQrText}>Cabut QR</Text>
-                          </Pressable>
-                        ) : null}
-                        {qrError ? (
-                          <Text accessibilityLiveRegion="polite" style={styles.qrError}>
-                            {qrError}
-                          </Text>
-                        ) : null}
                       </View>
                     </>
                   ) : (
@@ -1333,6 +1237,7 @@ const styles = StyleSheet.create({
     color: colors.primaryDark,
     fontFamily: fonts.regular,
     fontSize: 11,
+    textDecorationLine: 'underline',
     lineHeight: 16,
   },
   shareButton: {
@@ -1362,16 +1267,6 @@ const styles = StyleSheet.create({
     fontFamily: fonts.semiBold,
     fontSize: 13,
   },
-  qrButton: {
-    borderWidth: 1,
-    borderColor: colors.primarySoft,
-    backgroundColor: colors.surface,
-  },
-  qrButtonText: {
-    color: colors.primaryDark,
-    fontFamily: fonts.bold,
-    fontSize: 13,
-  },
   qrContainer: {
     alignItems: 'center',
     gap: spacing.sm,
@@ -1382,19 +1277,6 @@ const styles = StyleSheet.create({
     fontFamily: fonts.regular,
     fontSize: 12,
     textAlign: 'center',
-  },
-  revokeQrButton: {
-    minHeight: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: spacing.xs,
-    borderRadius: radius.md,
-    backgroundColor: colors.dangerBg,
-  },
-  revokeQrText: {
-    color: colors.danger,
-    fontFamily: fonts.bold,
-    fontSize: 12,
   },
   qrError: {
     marginTop: spacing.xs,
