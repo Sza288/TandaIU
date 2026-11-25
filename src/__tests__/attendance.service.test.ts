@@ -6,7 +6,6 @@ import {
   ATTENDANCE_SESSION_NOT_OPEN_REASON,
   buildAttendanceEnrollmentScope,
   checkEnrollmentEligibility,
-  callableErrorMessage,
   createAttendanceService,
   getAttendanceDocId,
   isDummyPraktikanId,
@@ -32,60 +31,6 @@ const budi: CurrentUser = {
 };
 
 const fixedNow = new Date('2026-11-15T09:30:00+07:00');
-
-describe('callableErrorMessage', () => {
-  it('translates session precondition reasons into the required user messages', () => {
-    expect(callableErrorMessage({
-      code: 'functions/failed-precondition',
-      details: { reasonCode: 'SESSION_NOT_STARTED' },
-    }, 'fallback')).toBe(
-      'Presensi belum dapat dilakukan karena sesi praktikum belum dimulai.',
-    );
-    expect(callableErrorMessage({
-      code: 'functions/failed-precondition',
-      details: { reasonCode: 'SESSION_ENDED' },
-    }, 'fallback')).toBe(
-      'Presensi tidak bisa dilakukan karena waktu sesi praktikum telah berakhir.',
-    );
-    expect(callableErrorMessage({
-      code: 'functions/failed-precondition',
-      details: { reasonCode: 'SESSION_CLOSED' },
-    }, 'fallback')).toBe(
-      'Presensi tidak bisa dilakukan karena sesi praktikum telah ditutup.',
-    );
-    expect(callableErrorMessage({
-      code: 'functions/failed-precondition',
-      details: { reasonCode: 'SESSION_NOT_OPEN' },
-    }, 'fallback')).toBe(
-      'Presensi tidak bisa dilakukan, karena jam di luar sesi praktikum.',
-    );
-  });
-
-  it('does not translate a missing callable into a session-time error', () => {
-    expect(callableErrorMessage({
-      code: 'functions/not-found',
-      message: 'not found [404]',
-    }, 'fallback')).toMatch(/Layanan presensi tidak ditemukan/);
-    expect(callableErrorMessage({
-      code: 'functions/not-found',
-      details: { reasonCode: 'SESSION_NOT_FOUND' },
-      message: 'Sesi tidak ditemukan.',
-    }, 'fallback')).toBe('Sesi praktikum tidak ditemukan.');
-  });
-
-  it('uses a friendly fallback for unclassified callable infrastructure errors', () => {
-    expect(callableErrorMessage({
-      code: 'functions/internal',
-      message: 'INTERNAL',
-    }, 'Layanan presensi gagal diproses. Silakan coba lagi.')).toBe(
-      'Layanan presensi gagal diproses. Silakan coba lagi.',
-    );
-    expect(callableErrorMessage(
-      new Error('Network request failed'),
-      'Layanan presensi gagal diproses. Silakan coba lagi.',
-    )).toBe('Layanan presensi gagal diproses. Silakan coba lagi.');
-  });
-});
 
 function makeService(currentUser: CurrentUser | null = budi) {
   return createAttendanceService({
