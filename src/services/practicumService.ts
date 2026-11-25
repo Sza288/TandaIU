@@ -651,8 +651,19 @@ export async function getScheduleById(
 }
 
 export async function getAllSchedules(): Promise<ScheduleDoc[]> {
+  const user = auth.currentUser;
+  if (!user) throw new Error('Akun Asprak tidak valid.');
+  const token = await user.getIdTokenResult();
+  const parity = token.claims.assistantSemesterParity;
+  if (parity !== 'ganjil' && parity !== 'genap') {
+    throw new Error('Penugasan semester akun Asprak belum dikonfigurasi.');
+  }
   return runFirestore(async () => {
-    const snapshot = await getDocs(collection(db, COLLECTIONS.schedules));
+    const snapshot = await getDocs(query(
+      collection(db, COLLECTIONS.schedules),
+      where('assistantUid', '==', user.uid),
+      where('semesterParity', '==', parity),
+    ));
     return snapshot.docs.map((document) => ({
       id: document.id,
       ...(document.data() as Omit<ScheduleDoc, 'id'>),
