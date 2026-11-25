@@ -139,6 +139,39 @@ test('menghapus token hanya untuk dua kode error yang ditentukan', async () => {
   assert.equal(summary.failureCount, 3);
 });
 
+test('token invalid milik uid yang sama dihapus tanpa menggagalkan token valid', async () => {
+  const records: DeviceTokenRecord[] = [
+    { id: 'invalid-doc', uid: 'u1', token: 'mock-invalid-u1' },
+    { id: 'valid-doc', uid: 'u1', token: 'mock-token-u1' },
+  ];
+  const mocks = createMocks(records, (messages) => ({
+    responses: messages.map((item) => (
+      item.token.startsWith('mock-invalid-')
+        ? { success: false, error: { code: 'messaging/registration-token-not-registered' } }
+        : { success: true }
+    )),
+  }));
+
+  const summary = await sendNotificationToUids({
+    uids: ['u1'],
+    title: 'Sesi dibuka',
+    body: 'Praktikum sudah dibuka.',
+    data,
+    sender: mocks.sender,
+    tokenStore: mocks.tokenStore,
+    logger: mocks.logger,
+  });
+
+  assert.deepEqual(mocks.removed, ['invalid-doc']);
+  assert.deepEqual(mocks.sentMessages.map((item) => item.token), ['mock-invalid-u1', 'mock-token-u1']);
+  assert.equal(summary.sentCount, 1);
+  assert.equal(summary.failureCount, 1);
+  assert.deepEqual(
+    records.filter((record) => !mocks.removed.includes(record.id)).map((record) => record.token),
+    ['mock-token-u1'],
+  );
+});
+
 test('error pengiriman yang dilempar dicatat tanpa menghapus token', async () => {
   const records: DeviceTokenRecord[] = [{ id: 'd1', uid: 'u1', token: 't1' }];
   const mocks = createMocks(records, () => {

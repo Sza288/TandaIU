@@ -8,7 +8,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "npm run build && node --test lib/test/payload.test.js lib/test/messages.test.js lib/test/recipients.test.js lib/test/sendTokens.test.js lib/test/sessionOpened.test.js lib/test/scheduleChanged.test.js lib/test/permitResult.test.js"
+    "test": "npm run build && node --test lib/test/payload.test.js lib/test/messages.test.js lib/test/recipients.test.js lib/test/sendTokens.test.js lib/test/admin.test.js lib/test/sessionOpened.test.js lib/test/scheduleChanged.test.js lib/test/permitResult.test.js"
   },
   "dependencies": {
     "firebase-admin": "^14.5.1",
