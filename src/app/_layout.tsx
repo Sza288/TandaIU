@@ -55,6 +55,10 @@ export default function RootLayout() {
             />
             <Stack.Screen name="schedule/[id]" options={{ title: 'Detail Sesi' }} />
             <Stack.Screen
+              name="praktikan/attendance"
+              options={{ headerShown: false }}
+            />
+            <Stack.Screen
               name="assistant/riwayat"
               options={{ title: 'Riwayat Presensi', headerShown: false }}
             />

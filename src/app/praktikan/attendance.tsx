@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
@@ -17,6 +17,7 @@ import StatusBadge from '../../components/StatusBadge';
 import { useAuthSession } from '../../features/auth/AuthSessionContext';
 import { usePraktikanAttendance } from '../../hooks/useAttendanceRecords';
 import { useEnrollments } from '../../hooks/useEnrollments';
+import { useLaboratories } from '../../hooks/useLaboratories';
 import { useSessions } from '../../hooks/useSessions';
 import type { CurrentUser } from '../../lib/currentSession';
 import {
@@ -43,6 +44,10 @@ type Feedback = {
 };
 
 export default function PraktikanAttendanceScreen() {
+  const params = useLocalSearchParams<{ sessionId?: string | string[] }>();
+  const linkedSessionId = Array.isArray(params.sessionId)
+    ? params.sessionId[0]
+    : params.sessionId;
   const authSession = useAuthSession();
   const profile = authSession?.status === 'authenticated' ? authSession.profile : null;
   const currentUser = useMemo<CurrentUser | null>(() => {
@@ -58,6 +63,7 @@ export default function PraktikanAttendanceScreen() {
     return null;
   }, [profile]);
   const sessionResult = useSessions();
+  const laboratoryResult = useLaboratories();
   const enrollmentResult = useEnrollments(
     currentUser ? { praktikanId: currentUser.uid } : undefined,
   );
@@ -88,21 +94,43 @@ export default function PraktikanAttendanceScreen() {
     () => buildAttendanceEnrollmentScope(enrolledSessions.map((session) => session.id)),
     [enrolledSessions],
   );
+  const laboratoriesById = useMemo(
+    () => new Map(laboratoryResult.data.map((laboratory) => [laboratory.id, laboratory])),
+    [laboratoryResult.data],
+  );
 
   const hasEnrollment = enrollmentResult.data.length > 0;
-
   const visibleSessions = useMemo(
-    () =>
-      [...enrolledSessions].sort((a, b) => {
+    () => {
+      const sorted = [...enrolledSessions].sort((a, b) => {
+        if (a.id === linkedSessionId) return -1;
+        if (b.id === linkedSessionId) return 1;
         const byStatus = statusRank[a.status] - statusRank[b.status];
         if (byStatus !== 0) return byStatus;
         return Date.parse(a.startsAt) - Date.parse(b.startsAt);
-      }),
-    [enrolledSessions],
+      });
+      return sorted;
+    },
+    [enrolledSessions, linkedSessionId],
   );
 
-  const loading = sessionResult.loading || enrollmentResult.loading || attendanceResult.loading;
+  const loading = sessionResult.loading
+    || laboratoryResult.loading
+    || enrollmentResult.loading
+    || attendanceResult.loading;
   const error = sessionResult.error ?? enrollmentResult.error ?? attendanceResult.error;
+  const linkedSession = linkedSessionId
+    ? enrolledSessions.find((session) => session.id === linkedSessionId)
+    : undefined;
+  const linkedSessionUnavailable = Boolean(
+    linkedSessionId && !loading && !error && !linkedSession,
+  );
+  const displayedFeedback = feedback ?? (linkedSessionUnavailable
+    ? {
+      tone: 'error' as const,
+      message: 'Sesi pada link tidak ditemukan di enrollment akun praktikan ini.',
+    }
+    : null);
 
   const retryData = () => {
     sessionResult.retry();
@@ -208,26 +236,28 @@ export default function PraktikanAttendanceScreen() {
           </View>
         </View>
 
-        {feedback ? (
+        {displayedFeedback ? (
           <View
             style={[
               styles.feedback,
-              feedback.tone === 'error' ? styles.feedbackError : styles.feedbackSuccess,
+              displayedFeedback.tone === 'error' ? styles.feedbackError : styles.feedbackSuccess,
             ]}
             accessibilityLiveRegion="polite"
           >
             <Ionicons
-              name={feedback.tone === 'success' ? 'checkmark-circle' : 'alert-circle'}
+              name={displayedFeedback.tone === 'success' ? 'checkmark-circle' : 'alert-circle'}
               size={17}
-              color={feedback.tone === 'success' ? colors.success : colors.danger}
+              color={displayedFeedback.tone === 'success' ? colors.success : colors.danger}
             />
             <Text
               style={[
                 styles.feedbackText,
-                feedback.tone === 'error' ? styles.feedbackTextError : styles.feedbackTextSuccess,
+                displayedFeedback.tone === 'error'
+                  ? styles.feedbackTextError
+                  : styles.feedbackTextSuccess,
               ]}
             >
-              {feedback.message}
+              {displayedFeedback.message}
             </Text>
             <Pressable
               accessibilityRole="button"
@@ -260,7 +290,7 @@ export default function PraktikanAttendanceScreen() {
         ) : loading ? (
           <View style={styles.stateCard}>
             <ActivityIndicator color={colors.primary} />
-            <Text style={styles.stateText}>Memuat sesi dan data pendaftaran...</Text>
+            <Text style={styles.stateText}>Memuat sesi, laboratorium, dan data pendaftaran...</Text>
           </View>
         ) : error ? (
           <View style={styles.stateCard}>
@@ -296,13 +326,29 @@ export default function PraktikanAttendanceScreen() {
         ) : (
           <View style={styles.list}>
             {visibleSessions.map((session) => {
+              const laboratory = session.laboratoryId
+                ? laboratoriesById.get(session.laboratoryId)
+                : undefined;
+              const laboratoryUnavailable = !session.laboratoryId
+                ? 'Sesi ini belum terhubung ke laboratorium; presensi tidak dapat dilakukan.'
+                : laboratoryResult.error
+                  ? 'Informasi laboratorium tidak dapat dimuat; lokasi tetap akan divalidasi oleh server.'
+                  : !laboratory
+                    ? 'Data laboratorium sesi ini tidak ditemukan; presensi tidak dapat dilakukan.'
+                    : null;
+              const missingLaboratory = !session.laboratoryId
+                || (!laboratoryResult.error && !laboratory);
               const attendance = attendanceBySession.get(session.id);
               const alreadyCheckedIn =
                 attendance !== undefined && attendance.status !== 'dibatalkan';
               const isCancelled = attendance?.status === 'dibatalkan';
               const isOpen = session.status === 'dibuka';
               const disabled =
-                alreadyCheckedIn || isCancelled || !isOpen || submittingSessionId !== null;
+                alreadyCheckedIn
+                || isCancelled
+                || !isOpen
+                || submittingSessionId !== null
+                || missingLaboratory;
 
               const buttonLabel = alreadyCheckedIn
                 ? 'Sudah Presensi'
@@ -341,6 +387,23 @@ export default function PraktikanAttendanceScreen() {
                       </Text>
                     </View>
                   </View>
+                  <View style={styles.metaRow}>
+                    <View style={styles.metaItem}>
+                      <Ionicons name="location-outline" size={13} color={colors.primary} />
+                      <Text style={styles.metaText} numberOfLines={1}>
+                        {laboratory?.name ?? 'Laboratorium tidak tersedia'}
+                      </Text>
+                    </View>
+                    <View style={styles.metaItem}>
+                      <Ionicons name="navigate-outline" size={13} color={colors.primary} />
+                      <Text style={styles.metaText}>
+                        Radius presensi: {laboratory ? `${laboratory.radius} m` : '—'}
+                      </Text>
+                    </View>
+                  </View>
+                  {laboratoryUnavailable ? (
+                    <Text style={styles.actionHint}>{laboratoryUnavailable}</Text>
+                  ) : null}
 
                   {attendance ? (
                     <View style={[styles.checkedInBanner, isCancelled && styles.cancelledBanner]}>
@@ -390,7 +453,7 @@ export default function PraktikanAttendanceScreen() {
                     </Text>
                   </Pressable>
 
-                  {isOpen && !alreadyCheckedIn && !isCancelled ? (
+                  {isOpen && !missingLaboratory && !alreadyCheckedIn && !isCancelled ? (
                     <Pressable
                       accessibilityRole="button"
                       accessibilityLabel={`Scan QR Asprak untuk ${session.practicumName}`}
