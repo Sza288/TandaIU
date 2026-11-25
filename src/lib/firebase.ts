@@ -28,6 +28,32 @@ const firebaseConfig = {
   appId: process.env.EXPO_PUBLIC_FIREBASE_APP_ID,
 };
 
+const emulatorFlag = process.env.EXPO_PUBLIC_USE_FIREBASE_EMULATOR;
+const productionFirebaseProjectId = 'presensi-praktikum-80d68';
+if (emulatorFlag && emulatorFlag !== 'true' && emulatorFlag !== 'false') {
+  throw new Error('EXPO_PUBLIC_USE_FIREBASE_EMULATOR harus bernilai true atau false.');
+}
+
+if (emulatorFlag === 'false' && firebaseConfig.projectId !== productionFirebaseProjectId) {
+  throw new Error(
+    `Firebase Emulator nonaktif, tetapi EXPO_PUBLIC_FIREBASE_PROJECT_ID harus ${productionFirebaseProjectId}.`,
+  );
+}
+
+if (!__DEV__) {
+  if (emulatorFlag === 'true') {
+    throw new Error('Firebase Emulator tidak boleh digunakan pada production build.');
+  }
+  if (firebaseConfig.projectId !== productionFirebaseProjectId) {
+    throw new Error('Production build harus menggunakan Firebase project kelompok TandaIU.');
+  }
+  if (!firebaseConfig.apiKey || !firebaseConfig.appId) {
+    throw new Error(
+      'Production membutuhkan EXPO_PUBLIC_FIREBASE_API_KEY, EXPO_PUBLIC_FIREBASE_APP_ID, dan EXPO_PUBLIC_FIREBASE_PROJECT_ID.',
+    );
+  }
+}
+
 const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 export const auth =
   Platform.OS === 'web'
@@ -37,11 +63,6 @@ export const auth =
       });
 export const db = getFirestore(app);
 export const functions = getFunctions(app, 'us-central1');
-
-const emulatorFlag = process.env.EXPO_PUBLIC_USE_FIREBASE_EMULATOR;
-if (emulatorFlag && emulatorFlag !== 'true' && emulatorFlag !== 'false') {
-  throw new Error('EXPO_PUBLIC_USE_FIREBASE_EMULATOR harus bernilai true atau false.');
-}
 
 if (emulatorFlag === 'true') {
   if (!__DEV__) {
