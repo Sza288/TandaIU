@@ -1248,8 +1248,8 @@ Setiap FR berikut memiliki satu PIC utama dan dapat berkembang memakai shared co
 #### S4-SRS-02 — Single insert laboratorium
 - **PIC:** Nabila
 - **Aktor:** Aslab.
-- **Deskripsi:** Menambah satu laboratorium beserta nama, lantai, lokasi, radius, dan identitas scope.
-- **Kriteria penerimaan:** Validasi format/range/duplikat, konfirmasi penyimpanan, data baru muncul realtime.
+- **Deskripsi:** Menambah satu laboratorium beserta nama, lantai, lokasi, radius, dan array mata kuliah `courseIds`.
+- **Kriteria penerimaan:** Validasi format/range/duplikat, konfirmasi penyimpanan, data baru muncul realtime; satu laboratorium dapat terhubung ke beberapa mata kuliah melalui `courseIds`.
 - **UI:** `S4-UI-02`
 - **Dependency:** laboratorium contract.
 - **AT:** S4-AT-03.
@@ -1266,8 +1266,8 @@ Setiap FR berikut memiliki satu PIC utama dan dapat berkembang memakai shared co
 #### S4-SRS-04 — Bulk insert laboratorium berdasarkan satu mata kuliah
 - **PIC:** Nabila
 - **Aktor:** Aslab.
-- **Deskripsi:** Alur terpisah mengunggah CSV/Excel untuk satu mata kuliah; template berisi nama laboratorium, lantai, latitude, longitude, radius, gracePeriodMinutes, courseId.
-- **Kriteria penerimaan:** Template dapat diunduh; parsing, review scrollable, status per baris, edit/isi field kosong, terima/tolak per baris, notifikasi duplikat/invalid, konfirmasi massal, dan penyimpanan baris diterima satu per satu/tanpa menunggu baris lain.
+- **Deskripsi:** Alur terpisah mengunggah CSV/Excel untuk satu mata kuliah; template berisi nama laboratorium, lantai, latitude, longitude, radius, gracePeriodMinutes, dan `courseId` konteks upload.
+- **Kriteria penerimaan:** Template dapat diunduh; parsing, review scrollable, status per baris, edit/isi field kosong, terima/tolak per baris, notifikasi duplikat/invalid, konfirmasi massal, dan penyimpanan baris diterima satu per satu/tanpa menunggu baris lain. `courseId` upload ditambahkan tanpa duplikasi ke array `laboratories/{laboratoryId}.courseIds`, dengan mempertahankan relasi mata kuliah yang sudah ada.
 - **UI:** `S4-UI-04`
 - **Dependency:** laboratorium contract dan course catalog.
 - **AT:** S4-AT-05.
@@ -1294,7 +1294,7 @@ Setiap FR berikut memiliki satu PIC utama dan dapat berkembang memakai shared co
 - **PIC:** Nabila
 - **Aktor:** Aslab.
 - **Deskripsi:** Menampilkan jumlah laboratorium, praktikan, status setiap laboratorium, nama/lokasi, waktu, jadwal berlangsung dan akan datang.
-- **Kriteria penerimaan:** Semua agregat berasal dari koleksi Firestore aktual; realtime; filter hari/minggu/bulan juga tersedia pada history Khanza.
+- **Kriteria penerimaan:** Semua agregat berasal dari koleksi Firestore aktual; realtime; filter mata kuliah mengikutsertakan laboratorium yang `courseIds`-nya memuat mata kuliah terpilih tanpa menghitung satu laboratorium lebih dari sekali; filter hari/minggu/bulan juga tersedia pada history Khanza.
 - **UI:** `S4-UI-07`
 - **Dependency:** jadwal/sesi/enrollment.
 - **AT:** S4-AT-08.
@@ -1302,8 +1302,8 @@ Setiap FR berikut memiliki satu PIC utama dan dapat berkembang memakai shared co
 #### S4-SRS-08 — Real-time scope dan data validasi dashboard
 - **PIC:** Nabila
 - **Aktor:** Aslab.
-- **Deskripsi:** Menentukan query scope Aslab, relasi laboratory→schedule→session→class→enrollment, dan penanganan pembaruan realtime.
-- **Kriteria penerimaan:** Data lintas laboratorium tidak dapat dibaca bila di luar scope; listener berhenti saat layar tidak aktif; keadaan loading/empty/error tersedia.
+- **Deskripsi:** Menentukan query scope Aslab, relasi laboratory→schedule→session→class→enrollment, filter mata kuliah melalui `laboratories.courseIds`, dan penanganan pembaruan realtime.
+- **Kriteria penerimaan:** Data lintas laboratorium tidak dapat dibaca bila di luar scope; filter course hanya mencakup laboratorium yang `courseIds`-nya memuat `courseId` terpilih; listener berhenti saat layar tidak aktif; keadaan loading/empty/error tersedia.
 - **UI:** `S4-UI-07`
 - **Dependency:** role, jadwal, sesi, enrollment.
 - **AT:** S4-AT-09.
@@ -1313,8 +1313,8 @@ Setiap FR berikut memiliki satu PIC utama dan dapat berkembang memakai shared co
 - **Aktor:** Aslab.
 - **Deskripsi:** Nabila memiliki tanggung jawab end-to-end atas UI, logic, validasi, permission, dan pengujian setup enrollment. Aslab mendaftarkan mahasiswa sebagai peserta pada jadwal praktikum tertentu. Ini berbeda dari distribusi laboratorium: distribusi mengelola keanggotaan mahasiswa/Asprak di laboratorium, sedangkan enrollment menghubungkan mahasiswa dengan jadwal/kelas praktikum.
 - **Batas akses:** Setup enrollment hanya tersedia bagi role `aslab` melalui guard dan otorisasi backend/Firestore Rules. Role lama `asisten`/`assistant`, Asprak, dan Praktikan tidak dapat membuat, mengubah, atau menghapus enrollment.
-- **Kontrak:** Record enrollment mempertahankan relasi yang dapat dipakai sesi, dengan `praktikanId`, `classId`, `courseId`, `scheduleIds`, `semester`, `semesterParity`, `laboratoryId`, `active`, `createdAt`, dan `updatedAt`. Schedule harus berada pada `classId`/`courseId` yang sama. ID enrollment yang konsisten dengan kontrak aplikasi adalah `{classId}_{uid}`; penambahan jadwal harus atomik dan unik per pasangan `{scheduleId}_{uid}` pada `scheduleIds`, sehingga mahasiswa tidak terdaftar ganda pada jadwal yang sama. Sesi memakai `classId` dan `scheduleId` untuk memperoleh roster yang tepat.
-- **Alur:** Aslab memilih mata kuliah dan kelas/jadwal, mencari mahasiswa melalui interface baca directory yang disediakan Khanza, memeriksa semester/parity dan laboratorium, lalu menyimpan atau mencabut enrollment. Roster sesi hanya mengambil enrollment aktif yang cocok dengan classId dan scheduleId sesi. Perubahan enrollment tidak mengubah distribusi laboratorium secara otomatis, dan perubahan distribusi laboratorium tidak mengubah enrollment jadwal tanpa aksi enrollment eksplisit Aslab.
+- **Kontrak:** Record enrollment mempertahankan relasi yang dapat dipakai sesi, dengan `praktikanId`, `classId`, `courseId`, `scheduleIds`, `semester`, `semesterParity`, `active`, `createdAt`, dan `updatedAt`. `praktikanId` berisi Firebase UID mahasiswa. Schedule harus berada pada `classId`/`courseId` yang sama. ID enrollment yang konsisten dengan kontrak aplikasi adalah `{classId}_{uid}`; penambahan jadwal harus atomik dan unik per pasangan `{scheduleId}_{uid}` pada `scheduleIds`, sehingga mahasiswa tidak terdaftar ganda pada jadwal yang sama. Lokasi jadwal bersumber dari `schedules/{scheduleId}.laboratoryId`, bukan dari `laboratoryMembers` atau salinan `laboratoryId` pada enrollment. Sesi baru wajib memiliki `scheduleId`; sesi legacy boleh tidak memilikinya.
+- **Alur roster:** Jika sesi memiliki `scheduleId`, roster mengambil enrollment aktif yang cocok pada kedua field `scheduleId` dan `classId`. Untuk sesi legacy tanpa `scheduleId`, reader mengambil kandidat aktif berdasarkan `classId`, lalu memvalidasi jadwal target secara unik dari data sesi/jadwal dan menyaring enrollment berdasarkan `scheduleIds`. Enrollment legacy tanpa `scheduleIds` hanya dapat disertakan jika kelas memiliki satu jadwal yang berlaku atau relasinya sudah dipetakan secara eksplisit; jika roster aman tidak dapat ditentukan, tandai untuk pemeriksaan/pemetaan manual dan jangan mengembalikan seluruh mahasiswa kelas. Perubahan enrollment tidak mengubah distribusi laboratorium secara otomatis, dan perubahan distribusi laboratorium tidak mengubah enrollment jadwal tanpa aksi enrollment eksplisit Aslab.
 - **Kriteria penerimaan:** Aslab dapat mendaftarkan mahasiswa ke jadwal praktikum yang tersedia; enrollment terhubung ke mahasiswa dan jadwal/kelas yang benar; role selain Aslab ditolak pada UI maupun backend; mahasiswa yang sama tidak dapat didaftarkan dua kali pada jadwal yang sama; Olive memperoleh roster peserta sesi melalui interface baca enrollment Nabila; penambahan/pemindahan keanggotaan laboratorium tidak mengubah enrollment; penarikan enrollment tidak menghapus riwayat presensi atau enrollment sesi yang telah selesai.
 - **UI:** `S4-UI-07A`
 - **Dependency:** role/scope contract yang dibekukan di awal sprint; interface baca mahasiswa milik Khanza; class/schedule/session contract yang dibaca tanpa menunggu implementasi Olive.
@@ -1400,7 +1400,7 @@ Setiap FR berikut memiliki satu PIC utama dan dapat berkembang memakai shared co
 - **PIC:** Olive
 - **Aktor:** Asprak.
 - **Deskripsi:** Memantau presensi realtime, membatalkan data yang salah bila kewenangan mengizinkan, dan mengelola keputusan izin.
-- **Kriteria penerimaan:** Status hadir/tidak hadir/izin dibedakan; pembatalan tidak membuat tagihan otomatis ganda; perubahan disinkronkan realtime; Asprak tidak mengubah distribusi anggota.
+- **Kriteria penerimaan:** Status presensi `hadir`, `izin` (excused absence), dan `dibatalkan` dibedakan; peserta tanpa catatan presensi ditampilkan sebagai tidak hadir; keputusan izin tetap dibaca dari `permits/{sessionId}_{uid}.status`; pembatalan tidak membuat tagihan otomatis ganda; perubahan disinkronkan realtime; Asprak tidak mengubah distribusi anggota.
 - **UI:** `S4-UI-16`
 - **Dependency:** attendance/permit contract.
 - **AT:** S4-AT-18.
@@ -1417,8 +1417,8 @@ Setiap FR berikut memiliki satu PIC utama dan dapat berkembang memakai shared co
 #### S4-SRS-19 — Tagihan denda idempotent
 - **PIC:** Olive
 - **Aktor:** Sistem.
-- **Deskripsi:** Membuat satu bill per kejadian keterlambatan dengan UID praktikan, sessionId, attendanceId, nominal tetap, dan status.
-- **Kriteria penerimaan:** Dokumen deterministik atau transaction guard mencegah duplikat; presensi ganda tidak membuat bill ganda; pembayaran tidak mengubah attendance.
+- **Deskripsi:** Membuat satu bill per kejadian keterlambatan dengan UID praktikan, sessionId, attendanceId, nominal tetap sebagai integer Rupiah (`currency=IDR`), dan status.
+- **Kriteria penerimaan:** Dokumen `fines/{sessionId}_{uid}` menjadi satu-satunya ID bill untuk attendance `attendances/{sessionId}_{uid}`; amount adalah integer dan currency `IDR`; transaksi backend mencegah create duplikat; presensi ganda tidak membuat bill ganda; pembayaran tidak mengubah attendance.
 - **UI:** `S4-UI-18`
 - **Dependency:** fine/transaction contract.
 - **AT:** S4-AT-20.
@@ -1426,8 +1426,8 @@ Setiap FR berikut memiliki satu PIC utama dan dapat berkembang memakai shared co
 #### S4-SRS-20 — Penanganan izin disetujui
 - **PIC:** Olive
 - **Aktor:** Asprak, sistem.
-- **Deskripsi:** Izin disetujui menyimpan excused absence tanpa mengubah status hadir dan tanpa membuat bill keterlambatan.
-- **Kriteria penerimaan:** Keputusan izin terpisah dari status hadir/pembayaran; izin disetujui tidak menghasilkan denda meski presensi terlambat; izin ditolak tetap mengikuti aturan keterlambatan.
+- **Deskripsi:** Izin disetujui dicatat pada dokumen permit dan attendance terkait menggunakan status `izin` (excused absence), tanpa mengubahnya menjadi `hadir` dan tanpa membuat bill keterlambatan.
+- **Kriteria penerimaan:** `permits.status=approved` dan `attendances.status=izin` tetap terpisah dari status pembayaran; izin disetujui sebelum pembuatan bill tidak menghasilkan denda; bill yang belum dibayar dan tidak memiliki transaksi aktif dibatalkan (`FineStatus=cancelled`); status transaksi gateway tidak diubah oleh keputusan izin. Jika sudah ada transaksi gateway `pending` atau pembayaran terverifikasi `success`, status dan rekonsiliasi/refund tidak boleh ditebak client dan mengikuti keputusan teknis/operasional yang belum ditetapkan pada SRS ini. Izin ditolak tetap mengikuti aturan keterlambatan.
 - **UI:** `S4-UI-19`
 - **Dependency:** permit/fine contract.
 - **AT:** S4-AT-21.
@@ -1437,8 +1437,8 @@ Setiap FR berikut memiliki satu PIC utama dan dapat berkembang memakai shared co
 #### S4-SRS-21 — Daftar dan rincian tagihan
 - **PIC:** Jura
 - **Aktor:** Praktikan.
-- **Deskripsi:** Menampilkan daftar dan rincian tagihan milik praktikan beserta sesi, tanggal, nominal, dan status.
-- **Kriteria penerimaan:** Hanya data milik UID aktif; history tersedia offline setelah dibuka; nominal berasal dari backend.
+- **Deskripsi:** Menampilkan daftar dan rincian tagihan milik praktikan beserta sesi, tanggal, nominal, dan `FineStatus`.
+- **Kriteria penerimaan:** Hanya data milik UID aktif; history tersedia offline setelah dibuka; nominal dan `FineStatus` berasal dari backend; status payment transaction ditampilkan sebagai status terpisah bila ada transaksi.
 - **UI:** `S4-UI-20`
 - **Dependency:** fine contract.
 - **AT:** S4-AT-22.
@@ -1447,7 +1447,7 @@ Setiap FR berikut memiliki satu PIC utama dan dapat berkembang memakai shared co
 - **PIC:** Jura
 - **Aktor:** Praktikan, backend, Midtrans.
 - **Deskripsi:** Client memanggil endpoint backend untuk membuat transaksi; backend memanggil Midtrans Sandbox dan mengembalikan redirect/token.
-- **Kriteria penerimaan:** Server key tidak ada di React Native; client tidak menentukan status berhasil; bill dapat memiliki satu transaksi aktif.
+- **Kriteria penerimaan:** Server key tidak ada di React Native; client tidak menentukan status berhasil; bill dapat memiliki satu transaksi aktif; `payments.amount` adalah integer Rupiah dengan `currency=IDR` dan sama dengan fine terkait.
 - **UI:** `S4-UI-21`
 - **Dependency:** backend dan fine contract.
 - **AT:** S4-AT-23.
@@ -1455,8 +1455,8 @@ Setiap FR berikut memiliki satu PIC utama dan dapat berkembang memakai shared co
 #### S4-SRS-23 — Status pembayaran, webhook, dan verifikasi
 - **PIC:** Jura
 - **Aktor:** Midtrans, backend.
-- **Deskripsi:** Memproses pending/success/failed/pending-action serta callback berulang secara aman.
-- **Kriteria penerimaan:** Signature webhook diverifikasi; callback berulang tidak menduplikasi transaksi sukses; status bill hanya diperbarui oleh hasil terverifikasi; payment UI disinkronkan realtime atau setelah refresh.
+- **Deskripsi:** Memproses status transaksi `PaymentStatus` (`pending`, `success`, `failed`, `expired`, `cancelled`) serta callback berulang secara aman. `payment_action_required` adalah event/UI state untuk transaksi yang masih `pending`, bukan nilai status baru.
+- **Kriteria penerimaan:** Signature webhook diverifikasi; callback berulang tidak menduplikasi transaksi sukses; status payment dan `FineStatus` berubah hanya sesuai hasil backend terverifikasi dan transisi pada Aturan Bisnis; payment UI disinkronkan realtime atau setelah refresh.
 - **UI:** `S4-UI-22`
 - **Dependency:** Midtrans backend contract.
 - **AT:** S4-AT-24.
@@ -1465,7 +1465,7 @@ Setiap FR berikut memiliki satu PIC utama dan dapat berkembang memakai shared co
 - **PIC:** Jura
 - **Aktor:** Praktikan.
 - **Deskripsi:** Menyimpan entitas payment transaction terpisah dari fine bill dan menampilkan riwayat persisten.
-- **Kriteria penerimaan:** Informasi sesi, tanggal tagihan, nominal, waktu transaksi, status tersedia setelah app ditutup/dibuka kembali.
+- **Kriteria penerimaan:** Informasi sesi, tanggal tagihan, nominal, waktu transaksi, `PaymentStatus`, dan status bill `FineStatus` tersedia secara terpisah setelah app ditutup/dibuka kembali.
 - **UI:** `S4-UI-23`
 - **Dependency:** fine/payment contract.
 - **AT:** S4-AT-25.
@@ -1504,14 +1504,21 @@ Setiap FR berikut memiliki satu PIC utama dan dapat berkembang memakai shared co
 3. Presensi setelah batas grace dianggap terlambat.
 4. Presensi setelah sesi ditutup ditolak.
 5. Presensi ganda memakai ID deterministik `{sessionId}_{uid}`.
-6. Izin disetujui menyimpan `excused=true`/keputusan izin terpisah dan tidak mengubah attendance menjadi hadir.
+6. Izin disetujui disimpan sebagai `permits.status=approved`; catatan attendance terkait berstatus `izin` (excused absence), bukan `hadir`. Tidak ada boolean `excused` terpisah pada attendance. Peserta tanpa record attendance merupakan tidak hadir, bukan nilai tersimpan `AttendanceStatus`.
 7. Izin disetujui tidak menghasilkan bill keterlambatan.
-8. Setiap keterlambatan menghasilkan paling banyak satu bill memakai `{sessionId}_{uid}` atau attendance bill key yang deterministik.
+8. Setiap keterlambatan menghasilkan paling banyak satu bill dengan canonical ID `fines/{sessionId}_{uid}`, sama dengan ID attendance pemicunya. Transaction backend memeriksa keberadaan bill sebelum membuatnya.
 9. Pembayaran tidak mengubah status attendance; status bill dan transaction dipisahkan.
-10. Transaksi pending dapat diperbarui oleh webhook atau verificaton polling, tetapi hanya backend yang menetapkan success/failed.
+10. Payment transaction dan Fine memiliki state terpisah. Hanya backend yang menetapkan state transaksi dari verifikasi Midtrans/webhook; client tidak dapat mengubah status bill atau transaksi.
 11. Distribusi laboratorium adalah keanggotaan praktikan/Asprak dalam laboratorium; enrollment adalah keikutsertaan mahasiswa pada jadwal praktikum tertentu. Keduanya memiliki alur, kontrak, dan otorisasi terpisah.
 12. Transfer praktikan/Asprak tidak menulis ulang jadwal/sesi/enrollment dan tidak mengubah riwayat. Enrollment hanya berubah melalui aksi eksplisit pada modul Aslab, dengan validasi jadwal.
 13. Realtime UI menggunakan listener Firestore pada dokumen/scope yang sudah diverifikasi.
+14. `FineStatus` menyatakan keadaan bill, bukan keadaan satu transaksi gateway: `unpaid` = belum ada pembayaran aktif; `pending` = ada transaksi aktif menunggu hasil/tindakan; `paid` = backend telah memverifikasi sukses; `failed` = percobaan terakhir terminal gagal/kedaluwarsa/dibatalkan dan bill tetap dapat dibayar ulang; `cancelled` = bill tidak lagi dapat ditagih.
+15. `PaymentStatus` menyatakan keadaan satu transaksi: `pending` = menunggu proses gateway atau tindakan pengguna; `success` = sukses terverifikasi backend; `failed` = gateway/backend memverifikasi gagal; `expired` = transaksi kedaluwarsa; `cancelled` = transaksi dibatalkan dan statusnya telah diverifikasi.
+16. Hasil transaksi memetakan `PaymentStatus=pending` ke `FineStatus=pending`, `success` terverifikasi ke `paid`, dan terminal `failed|expired|cancelled` ke `failed` selama bill tetap payable. Jika bill sudah `cancelled` karena izin, callback tidak boleh mengaktifkannya kembali.
+17. Transisi bill: `unpaid → pending → paid|failed`; `failed → pending` pada percobaan baru; `unpaid|failed → cancelled` hanya jika bill dibatalkan sebelum pembayaran terverifikasi sukses. Status `paid` tidak diturunkan oleh callback berulang. Transisi transaksi: `pending → success|failed|expired|cancelled`; callback duplikat tidak membuat transaksi baru atau mengulang perubahan akhir.
+18. Relasi mata kuliah laboratorium disimpan pada `laboratories.courseIds` sebagai array ID mata kuliah; satu laboratorium dapat melayani beberapa mata kuliah. Impor satu mata kuliah menambahkan ID tersebut ke array tanpa mengganti relasi lain; filter dashboard mencocokkan `courseId` terpilih dengan anggota `courseIds`.
+19. Nominal denda dan transaksi disimpan sebagai integer Rupiah dengan `currency="IDR"`. `payments.amount` dan `payments.currency` harus sama persis dengan fine terkait; nominal tidak disimpan sebagai desimal.
+20. Sesi baru wajib menyimpan `scheduleId`; sesi legacy boleh tidak memilikinya. Roster sesi dengan `scheduleId` dicari menggunakan pasangan `scheduleId` dan `classId`. Untuk sesi legacy, kandidat diambil berdasarkan `classId` lalu disaring hanya setelah jadwal target dapat ditentukan unik dari data sesi/jadwal yang otoritatif; `classId` saja tidak membuktikan keanggotaan pada jadwal tertentu. Enrollment dengan `scheduleIds` harus memuat jadwal target; enrollment tanpa `scheduleIds` hanya disertakan jika kelas memiliki satu jadwal yang berlaku atau relasinya telah dipetakan eksplisit. Jika validasi tidak dapat memastikan roster, tandai untuk pemeriksaan/pemetaan manual dan jangan gunakan seluruh enrollment kelas sebagai fallback.
 
 ## 8. Kontrak data serta model Firestore
 
@@ -1522,27 +1529,33 @@ Kolom wajib mendahului field opsional agar migration dan rules dapat dibaca kons
 | Koleksi | ID/shape utama | Relasi |
 |---|---|---|
 | `users/{uid}` | role, name, email, studentCode, active | Dipakai autentikasi/profile |
-| `laboratories/{laboratoryId}` | name, lantai, latitude, longitude, radius, gracePeriodMinutes, courseIds, active, scopeIds, timestamps | Laboratorium |
-| `laboratoryAssignments/{laboratoryId}_{uid}` | uid, role `aslab`, laboratoryId, grantedAt, revokedAt | Role/scope Aslab |
-| `asprakAssignments/{laboratoryId}_{uid}` | uid, laboratoryId, classIds, scheduleIds, active | Tugas Asprak |
-| `laboratoryMembers/{laboratoryId}_{uid}` | uid, role `praktikan`/`asprak`, laboratoryId, active, timestamps | Distribusi keanggotaan laboratorium saja; tidak menyimpan enrollment/jadwal |
-| `studentDirectory/{uid}` | name, studentCode, semester, parity | Sumber identitas praktikan |
-| `enrollments/{classId}_{uid}` | praktikanId, classId, courseId, scheduleIds, semester, semesterParity, laboratoryId, active, createdAt, updatedAt | Kontrak enrollment Aslab; `scheduleIds` dibatasi pada schedule kelas yang sama; ID deterministik dan transaksi mencegah enrollment ganda |
+| `laboratories/{laboratoryId}` | name, lantai, latitude, longitude, radius, gracePeriodMinutes, courseIds: string[], isActive, createdAt, updatedAt | `courseIds` berisi ID mata kuliah; satu lab dapat melayani beberapa mata kuliah. `latitude`/`longitude` koordinat desimal; `radius` dalam meter; `gracePeriodMinutes` dalam menit; status memakai `isActive` |
+| `laboratoryAssignments/{laboratoryId}_{uid}` | uid, role `aslab`, laboratoryId, grantedAt, revokedAt | Satu-satunya sumber scope Aslab; scope tidak diduplikasi sebagai `scopeIds` pada laboratory |
+| `asprakAssignments/{laboratoryId}_{uid}` | uid, laboratoryId, classIds, scheduleIds, active | Sumber penugasan kerja Asprak; `classIds`/`scheduleIds` menentukan kelas dan jadwal yang boleh dikelola, bukan keanggotaan laboratorium |
+| `laboratoryMembers/{laboratoryId}_{uid}` | uid, role `praktikan`/`asprak`, laboratoryId, active, timestamps | Sumber keanggotaan laboratorium saja; tidak memberikan hak mengelola kelas/jadwal dan bukan sumber enrollment |
+| `studentDirectory/{uid}` | name, studentCode, semester, semesterParity | Sumber identitas praktikan; `uid` adalah ID dokumen |
+| `enrollments/{classId}_{uid}` | praktikanId, classId, courseId, scheduleIds, semester, semesterParity, active, createdAt, updatedAt | Kontrak enrollment Aslab; `praktikanId` menyimpan UID; `scheduleIds` dibatasi pada schedule kelas yang sama; ID deterministik dan transaksi mencegah enrollment ganda |
 | `classes/{classId}` | courseId, className, semester, semesterParity, assistantUid | Kelas lama tetap dipakai |
-| `schedules/{scheduleId}` | classId, courseId, dayOfWeek, start/end, laboratoryId | Jadwal |
-| `sessions/{sessionId}` | classId, laboratoryId, assistantUid, startsAt, endsAt, status | Sesi |
-| `attendances/{sessionId}_{uid}` | sessionId, praktikanId, attendedAt, status, attendanceMethod, lateStatus, graceDeadlineAt, excused, location fields | Presensi |
-| `permits/{sessionId}_{uid}` | praktikanId, sessionId, reason, status, decidedBy, decidedAt | Izin |
-| `fines/{sessionId}_{uid}` | uid, sessionId, attendanceId, amount, currency, status, createdAt, reason | Tagihan; ID deterministik |
-| `payments/{paymentId}` | fineId, uid, sessionId, gateway `midtrans`, gatewayOrderId, status, amount, createdAt, updatedAt | Transaksi |
+| `schedules/{scheduleId}` | classId, courseId, dayOfWeek, startTime, endTime, laboratoryId | Jadwal; `laboratoryId` menentukan lokasi jadwal |
+| `sessions/{sessionId}` | classId, scheduleId?, laboratoryId, assistantUid, startsAt, endsAt, status | Sesi baru wajib memiliki `scheduleId`; field opsional hanya untuk sesi legacy. Jika tersedia, pasangan `scheduleId`+`classId` menentukan roster; tanpa field ini berlaku fallback legacy tervalidasi pada kontrak roster |
+| `attendances/{sessionId}_{uid}` | sessionId, praktikanId, attendedAt, status: `AttendanceStatus`, attendanceMethod, lateStatus, graceDeadlineAt, latitude, longitude, distanceMeters, accuracyMeters, radiusMeters, laboratoryId, laboratoryName | Presensi; koordinat desimal; jarak, akurasi, dan radius dalam meter; `status=izin` adalah excused absence |
+| `permits/{sessionId}_{uid}` | praktikanId, sessionId, reason, status: `PermitStatus`, decidedBy, decidedAt | Izin; keputusan disimpan terpisah dari attendance dan payment |
+| `fines/{sessionId}_{uid}` | uid, sessionId, attendanceId, amount: integer, currency: `IDR`, status: `FineStatus`, createdAt, reason | Tagihan dalam Rupiah integer; `fineId` adalah ID dokumen deterministik `{sessionId}_{uid}`, satu bill per attendance |
+| `payments/{paymentId}` | fineId, uid, sessionId, gateway `midtrans`, gatewayOrderId, status: `PaymentStatus`, amount: integer, currency: `IDR`, createdAt, updatedAt | Transaksi gateway dalam Rupiah integer; `paymentId` adalah ID dokumen terpisah; amount/currency sama dengan fine terkait |
 | `deviceTokens/{installationId}` | uid, token, platform, updatedAt | Perangkat push |
+
+`laboratoryAssignments` menentukan scope pengelolaan Aslab; `asprakAssignments` menentukan penugasan Asprak pada kelas/jadwal; `laboratoryMembers` hanya menentukan siapa anggota laboratorium. UID dan laboratoryId dapat muncul pada membership dan assignment yang berbeda karena maknanya berbeda. Keanggotaan tidak memberikan izin mengelola jadwal, assignment tidak membuat enrollment, dan otorisasi tidak boleh menyimpulkan salah satunya dari collection lain.
+
+Field lokasi menggunakan `latitude`/`longitude` numerik dalam derajat koordinat; `laboratories.radius` dan `attendances.radiusMeters`, `distanceMeters`, `accuracyMeters` menggunakan meter; `gracePeriodMinutes` menggunakan menit. `attendances.latitude`/`longitude` adalah koordinat saat presensi, sedangkan `laboratories.latitude`/`longitude` adalah koordinat laboratorium. `fines.amount` dan `payments.amount` adalah integer Rupiah, dan kedua field `currency` bernilai `IDR`.
 
 ### Kontrak baca antarmodul untuk praktikan dan enrollment
 
 - **Interface identitas milik Khanza:** `PraktikanDirectoryReader.listEligiblePraktikans({ laboratoryId?, courseId?, semesterParity? })` mengembalikan daftar `{ uid, name, studentCode, semester, semesterParity }`. Interface bersifat baca-saja; tidak membuat membership maupun enrollment. Nabila boleh memakainya melalui interface atau mock dan tidak mengubah file implementasi distribusi Khanza.
-- **Interface enrollment milik Nabila:** `EnrollmentService.addStudentToSchedule({ praktikanUid, scheduleId })`, `removeStudentFromSchedule({ praktikanUid, scheduleId })`, dan `subscribeToScheduleRoster({ sessionId, scheduleId, classId }, onData, onError)`; hasil roster berisi `{ praktikanId, praktikanName, studentCode, classId, scheduleId }`. Semua mutasi hanya menerima actor Aslab yang terotorisasi.
-- Pada model saat ini, jadwal dan sesi terhubung melalui `classId` serta sesi menyimpan `scheduleId`; `enrollments/{classId}_{uid}` tetap menjadi dokumen kompatibel dengan pemeriksaan enrollment presensi. `scheduleIds` menjadi relasi jadwal aktif dalam enrollment. Tambah/hapus jadwal dilakukan dengan transaction, memastikan schedule memang milik class, dan mencegah duplikasi UID pada schedule yang sama.
-- Dokumen enrollment lama yang belum mempunyai `scheduleIds` tidak otomatis dianggap terdaftar pada semua jadwal kelas. Dokumen legacy harus dipetakan secara eksplisit oleh Aslab atau migration yang disetujui sebelum dimasukkan ke roster jadwal.
+- **Interface enrollment milik Nabila:** `EnrollmentService.addStudentToSchedule({ praktikanUid, scheduleId })`, `removeStudentFromSchedule({ praktikanUid, scheduleId })`, dan `subscribeToScheduleRoster({ sessionId, scheduleId?, classId }, onData, onError)`; `scheduleId` opsional hanya untuk kompatibilitas sesi legacy. Hasil roster berisi `{ praktikanId, praktikanName, studentCode, classId, scheduleId? }`. Semua mutasi hanya menerima actor Aslab yang terotorisasi.
+- Pada directory, `uid` adalah ID dokumen `studentDirectory/{uid}`. Input `praktikanUid` mengidentifikasi UID mahasiswa; saat disimpan field koleksi tetap `praktikanId` dan berisi UID yang sama. Output roster mempertahankan `praktikanId` agar sama dengan field pada enrollment dan attendance. `laboratoryId` dalam filter directory membatasi konteks keanggotaan saja; tidak membuat atau mengubah enrollment maupun jadwal.
+- Pada model saat ini, `enrollments/{classId}_{uid}` tetap menjadi dokumen kompatibel dengan pemeriksaan enrollment presensi. `scheduleIds` menjadi relasi jadwal aktif dalam enrollment. Tambah/hapus jadwal dilakukan dengan transaction, memastikan schedule memang milik class, dan mencegah duplikasi UID pada schedule yang sama.
+- Untuk sesi dengan `scheduleId`, reader wajib membatasi roster pada `classId` dan `scheduleId` yang cocok. Untuk sesi legacy tanpa `scheduleId`, reader mengambil kandidat aktif berdasarkan `classId`, lalu menggunakan relasi sesi/jadwal legacy yang otoritatif untuk menentukan jadwal target secara unik; kandidat dengan `scheduleIds` difilter ke jadwal tersebut. `classId` saja tidak cukup untuk menganggap semua enrollment sebagai roster. Jika jadwal target tidak dapat ditentukan unik, atau enrollment tanpa `scheduleIds` tidak dapat dipastikan, roster ditandai perlu pemeriksaan/pemetaan manual dan tidak boleh mengembalikan seluruh mahasiswa kelas.
+- Dokumen enrollment legacy yang belum mempunyai `scheduleIds` tidak otomatis dianggap terdaftar pada semua jadwal kelas; hanya relasi yang tidak ambigu atau telah dipetakan eksplisit yang dapat digunakan.
 - Distribusi laboratorium dan enrollment tidak saling menulis. `laboratoryMembers` bukan sumber roster jadwal; `enrollments` bukan sumber keanggotaan umum laboratorium. Perubahan lab hanya memengaruhi enrollment melalui tindakan eksplisit di setup Aslab dan validasi aturan yang disetujui.
 - Olive mengonsumsi hanya `subscribeToScheduleRoster` dari Nabila untuk peserta sesi; modul presensi tidak membaca atau mengubah keanggotaan laboratorium secara langsung.
 
@@ -1550,9 +1563,9 @@ Kolom wajib mendahului field opsional agar migration dan rules dapat dibaca kons
 
 - `Role`: `aslab | asprak | praktikan`. Nilai lama `asisten`/`assistant` diterima hanya sebagai compatibility selama migrasi.
 - `SessionStatus`: `terjadwal | dibuka | ditutup | dibatalkan` bila migration menyetujuinya; transisi utama tidak memperkenalkan status non-transisi tanpa persistency contract.
-- `AttendanceStatus`: `hadir | tidak_hadir | excused | dibatalkan`.
-- `FineStatus`: `unpaid | pending | paid | failed | cancelled`.
-- `PaymentStatus`: `pending | success | failed | expired | cancelled`.
+- `AttendanceStatus`: `hadir | izin | dibatalkan`. `izin` adalah nilai `attendances.status` saat permit berstatus `approved` dan berarti excused absence; peserta tanpa record attendance ditampilkan tidak hadir. Tidak ada field boolean `excused`.
+- `FineStatus`: `unpaid | pending | paid | failed | cancelled`. Makna dan transisinya mengikuti butir 14–16 Aturan Bisnis.
+- `PaymentStatus`: `pending | success | failed | expired | cancelled`. Makna dan transisinya mengikuti butir 14–16 Aturan Bisnis.
 - `PermitStatus`: `pending | approved | rejected`.
 - `ImportRowStatus`: `pending | valid | invalid | accepted | rejected`.
 
@@ -1572,23 +1585,26 @@ Firebase Spark-only tidak dianggap solusi backend Midtrans yang benar-benar berf
 
 | Endpoint | Auth | Respons |
 |---|---|---|
-| `createFinePayment({ fineId })` | Firebase ID token | `{paymentId, orderId, transactionToken, redirectUrl, status}` |
-| `verifyPayment({ paymentId })` | Firebase ID token, ownership | `{paymentId,status,amount,verifiedAt}` |
-| `midtransWebhook` | Signature+HTTP | receipt yang aman terhadap replay |
+| `createFinePayment({ fineId })` | Firebase ID token | `{paymentId, gatewayOrderId, transactionToken, redirectUrl, paymentStatus}` |
+| `verifyPayment({ paymentId })` | Firebase ID token, ownership | `{paymentId, paymentStatus, amount, currency, verifiedAt}` |
+| `midtransWebhook` | Signature+HTTP | receipt yang aman terhadap replay; backend mencari `payments/{paymentId}` melalui `gatewayOrderId` yang terdaftar, lalu memverifikasi pemilik `uid`, `fineId`, `sessionId`, dan nominal dari dokumen terkait |
 
-Webhook dan verify endpoint tidak boleh menerima status success hanya dari payload client. Signature dan/macam status Midtrans diverifikasi.
+`fineId` merujuk ke ID dokumen `fines/{fineId}` (canonical value `{sessionId}_{uid}`); istilah “invoice”, “bill”, dan “tagihan denda” pada UI merujuk fine yang sama, bukan entitas atau ID berbeda. `paymentId` adalah ID dokumen `payments/{paymentId}`; `gatewayOrderId` unik per payment dan menghubungkan record lokal dengan transaksi Midtrans. Webhook dan verify endpoint tidak boleh menerima status success hanya dari payload client. Status gateway diverifikasi backend, lalu hanya `payments.status` dan `fines.status` yang relevan diperbarui; attendance tidak berubah.
+
+Pada respons verify, `amount` adalah integer Rupiah dan `currency` selalu `IDR`; webhook memverifikasi nominal transaksi terhadap `payments.amount` dan `fines.amount` yang sama-sama integer `IDR`.
 
 ## 10. Kontrak notifikasi
 
-Payload wajib berisi `type`, `entityId`, dan role/target. Penambahan Sprint 4:
+Payload push berisi `type` dan ID entitas yang sesuai dengan event; tidak memakai field generik `entityId` dan tidak mempercayai `uid`/role dari payload client sebagai otorisasi. Backend menentukan recipient dari dokumen pemilik tagihan/transaksi (`fines.uid`/`payments.uid`); payload di perangkat tidak perlu mengulang UID.
 
-- `fine_created`: `fineId`, `sessionId`, tidak boleh berisi nominal bila navigasi tidak perlu.
-- `payment_success`: `paymentId`, `fineId`, `sessionId`.
-- `payment_failed` atau `payment_action_required`: `paymentId`, `fineId`, `reasonCode`.
+- `fine_created`: `{ type, fineId, sessionId }`; `fineId` adalah ID dokumen fines.
+- `payment_success`: `{ type, paymentId, fineId, sessionId }`; `paymentId` adalah ID dokumen payments dan `fineId` menunjuk bill terkait.
+- `payment_failed`: `{ type, paymentId, fineId, sessionId, reasonCode? }`; event untuk transaksi terminal gagal/kedaluwarsa.
+- `payment_action_required`: `{ type, paymentId, fineId, sessionId, reasonCode? }`; status gateway masih `pending` dan perlu tindakan pengguna, bukan status gagal.
 
-Existing payload Sprint 3 dipertahankan: `session_opened`, `schedule_changed`, `permit_result`.
+Payload Sprint 3 dipertahankan tanpa perubahan: `session_opened` membawa `sessionId`, `schedule_changed` membawa `scheduleId`, dan `permit_result` membawa `permitId`.
 
-Notifikasi dibangun backend dan dikirim ke UID pemilik, dengan dedup token. Device token dokumentasi saat ini hanya Android; iOS/web harus dideploy pada development build/infrastruktur yang sesuai dan tidak boleh dinyatakan berhasil hanya dari Expo Go.
+`reasonCode` adalah konteks opsional event notifikasi yang dibuat backend, bukan field pada `payments` atau `fines`. Notifikasi dibangun backend dan dikirim ke UID pemilik, dengan dedup token. Device token dokumentasi saat ini hanya Android; iOS/web harus dideploy pada development build/infrastruktur yang sesuai dan tidak boleh dinyatakan berhasil hanya dari Expo Go.
 
 ## 11. Kebutuhan UI/UX dan standar design system
 
@@ -1710,13 +1726,13 @@ Integrasi dilakukan bertahap:
 - **S4-AT-05:** tiga bulk flow memiliki template terpisah dan review row independen.
 - **S4-AT-06:** konfigurasi radius diterapkan pada presensi berikutnya.
 - **S4-AT-07:** presensi tepat pada batas grace tepat waktu; satu detik sesudah terlambat.
-- **S4-AT-08:** dashboard menampilkan angka realtime dari jadwal/sesi; tidak ada dummy.
+- **S4-AT-08:** dashboard menampilkan angka realtime dari jadwal/sesi; filter course menggunakan `laboratories.courseIds` dan satu laboratorium tidak terhitung ganda.
 - **S4-AT-09:** Aslab hanya melihat laboratorium dalam scope-nya.
 - **S4-AT-09A:** hanya role `aslab` dapat membuka/mengelola setup enrollment; Asprak, Praktikan, dan role lama `asisten`/`assistant` ditolak oleh UI guard dan backend.
-- **S4-AT-09B:** Aslab mendaftarkan mahasiswa yang tersedia ke jadwal praktikum; enrollment menghubungkan UID dan schedule yang benar melalui classId yang cocok, dan roster menerima record itu pada sesi terkait.
+- **S4-AT-09B:** Aslab mendaftarkan mahasiswa yang tersedia ke jadwal praktikum; enrollment menghubungkan UID dan schedule yang benar melalui classId yang cocok, dan roster menerima record itu pada sesi terkait. Sesi tanpa `scheduleId` memakai fallback legacy tervalidasi.
 - **S4-AT-09C:** ulangi pendaftaran UID yang sama pada schedule yang sama; transaction menolak duplikat/menjaga satu relasi schedule, sementara mahasiswa tetap dapat didaftarkan pada schedule lain yang valid.
 - **S4-AT-09D:** ubah distribusi mahasiswa antar-laboratorium tanpa aksi enrollment; scheduleIds enrollment dan roster jadwal tidak berubah. Olive dapat membaca roster yang benar melalui `EnrollmentReader` mock dan integrasi.
-- **S4-AT-09E:** enrollment legacy tanpa `scheduleIds` tidak otomatis muncul pada semua jadwal kelas; enrollment tersebut hanya masuk roster sesudah pemetaan eksplisit.
+- **S4-AT-09E:** sesi legacy tanpa `scheduleId` memakai kandidat `classId` hanya setelah jadwal target divalidasi unik; roster tidak mencampur mahasiswa dari jadwal lain. Bila tidak aman, roster ditandai untuk pemeriksaan/pemetaan manual dan tidak mengembalikan seluruh kelas. Enrollment tanpa `scheduleIds` hanya dapat disertakan jika kelas memiliki satu jadwal yang berlaku atau relasinya telah dipetakan.
 - **S4-AT-10:** insert praktikan valid dan duplikat ditolak.
 - **S4-AT-11:** bulk praktikan dapat menyimpan baris diterima secara independen.
 - **S4-AT-12:** bulk Asprak mengaitkan akun dan assignment dengan benar.
@@ -1728,9 +1744,9 @@ Integrasi dilakukan bertahap:
 - **S4-AT-18:** presensi ganda dan presensi setelah tutup ditolak.
 - **S4-AT-19:** keterlambatan dihitung dari startsAt+grace.
 - **S4-AT-20:** keterlambatan menghasilkan satu fine meskipun proses dipanggil berulang.
-- **S4-AT-21:** izin disetujui menjadi excused dan tidak membuat fine.
+- **S4-AT-21:** izin disetujui menghasilkan `attendances.status=izin` (excused absence); tidak ada fine baru, fine unpaid/failed tanpa transaksi aktif dibatalkan, dan status transaction tidak diubah oleh keputusan izin.
 - **S4-AT-22:** praktikan hanya melihat fine miliknya.
-- **S4-AT-23:** create payment hanya bisa dilakukan backend dan mengembalikan redirect token.
+- **S4-AT-23:** create payment hanya bisa dilakukan backend dan mengembalikan redirect token; nilai denda/transaksi berupa integer `IDR`.
 - **S4-AT-24:** webhook replay tidak membuat payment sukses ganda.
 - **S4-AT-25:** riwayat payment tetap tersedia setelah restart app.
 - **S4-AT-26:** carry-over notification lolos permission/token/logout/navigation test; remote hanya dinyatakan berhasil melalui development build/production target yang mendukungnya.
@@ -1741,17 +1757,17 @@ Integrasi dilakukan bertahap:
 
 | Test | PIC | Langkah terukur | Hasil yang diterima | Status |
 |---|---|---|---|---|
-| S4-AT-05a — tiga bulk terpisah | Nabila/Khanza | Buka laboratorium, praktikan, dan Asprak dari menu berbeda; unduh tiga template. | Nama file, header, alur review, dan validasi tidak bercampur. | Belum dilaksanakan |
+| S4-AT-05a — tiga bulk terpisah | Nabila/Khanza | Buka laboratorium, praktikan, dan Asprak dari menu berbeda; unduh tiga template. | Nama file, header, alur review, dan validasi tidak bercampur; impor lab menambahkan `courseId` ke `courseIds` tanpa mengganti relasi lama. | Belum dilaksanakan |
 | S4-AT-05b — review baris | Nabila/Khanza | Upload file valid+invalid+duplikat+field kosong; edit dan lengkapkan satu baris; terima satu dan tolak baris lain. | List tetap dapat discroll; status per baris berubah; baris diterima tersimpan tanpa menunggu baris lain. | Belum dilaksanakan |
 | S4-AT-09A — akses enrollment | Nabila | Coba buka setup dan panggil mutasi sebagai role Aslab, Asprak, Praktikan, dan role lama `asisten`/`assistant`. | Hanya Aslab scope-valid yang dapat memutasi; semua role lain ditolak di UI guard dan backend. | Belum dilaksanakan |
-| S4-AT-09B — relasi mahasiswa/jadwal | Nabila | Pilih mahasiswa dari `PraktikanDirectoryReader`, daftarkan ke schedule yang classId-nya cocok, lalu minta roster sesi memakai sessionId/scheduleId/classId. | Enrollment mengacu ke mahasiswa dan jadwal yang benar; hanya enrollment aktif terdaftar pada roster sesi. | Belum dilaksanakan |
+| S4-AT-09B — relasi mahasiswa/jadwal | Nabila | Pilih mahasiswa dari `PraktikanDirectoryReader`, daftarkan ke schedule yang classId-nya cocok, lalu minta roster sesi memakai sessionId/scheduleId/classId. | Enrollment mengacu ke mahasiswa dan jadwal yang benar; hanya enrollment aktif terdaftar pada roster sesi. Sesi baru selalu memiliki `scheduleId`. | Belum dilaksanakan |
 | S4-AT-09C — enrollment ganda | Nabila | Tambahkan UID yang sama dua kali ke schedule yang sama; ulangi untuk schedule berbeda dalam kelas yang valid. | Schedule pertama memiliki satu relasi UID; penambahan kedua idempotent/ditolak; schedule valid lain tidak dianggap duplikat. | Belum dilaksanakan |
 | S4-AT-09D — distribusi independen dan roster | Nabila/Khanza/Olive | Ambil roster mock; pindahkan anggota keanggotaan lab melalui service Khanza tanpa memanggil enrollment API; baca roster lagi melalui interface Nabila. | Roster schedule tetap sama; membership dan enrollment tetap terpisah; Olive hanya memakai reader enrollment. | Belum dilaksanakan |
-| S4-AT-09E — data enrollment legacy | Nabila | Baca enrollment lama tanpa `scheduleIds` sebagai roster dari dua schedule di class yang sama. | Tidak ada pemberian akses roster otomatis; hanya muncul sesudah mapping eksplisit. | Belum dilaksanakan |
+| S4-AT-09E — fallback roster legacy | Nabila/Olive | Minta roster untuk sesi lama tanpa `scheduleId` pada kelas dengan dua schedule; gunakan relasi legacy yang otoritatif untuk memvalidasi target, lalu ulangi saat tidak ada target unik. | Roster aman hanya berisi enrollment yang cocok dengan schedule target; mahasiswa schedule lain tidak tercampur. Enrollment tanpa `scheduleIds` hanya disertakan pada kelas dengan satu schedule yang berlaku atau setelah mapping eksplisit. Kasus ambigu ditandai manual, bukan mengembalikan seluruh kelas. | Belum dilaksanakan |
 | S4-AT-14 — transfer tanpa jadwal | Khanza | Pindahkan satu praktikan dan satu Asprak ke lab lain, lalu bandingkan schedule/session lama. | Laboratorium assignment berubah; scheduleId, sessionId, laboratorium riwayat lama, dan attendance lama tidak berubah. | Belum dilaksanakan |
 | S4-AT-07/19 — batas grace | Olive | Buat presensi pada tepat startsAt+grace dan satu detik sesudahnya. | Presensi pertama tepat waktu; presensi kedua terlambat dan dihitung sekali. | Belum dilaksanakan |
-| S4-AT-20 — invoice idempotent | Olive | Memanggil pembuatan tagihan dua kali untuk attendance yang sama. | Satu fine deterministik tetap ada; tidak ada dua invoice untuk satu kejadian. | Belum dilaksanakan |
-| S4-AT-21 — izin excused | Olive | Asprak menyetujui izin, buat aturan presensi terlambat pada sesi tersebut. | Attendance berstatus excused, tidak hadir, bukan hadir; fine tidak dibuat. | Belum dilaksanakan |
+| S4-AT-20 — invoice idempotent | Olive | Memanggil pembuatan tagihan dua kali untuk `attendances/{sessionId}_{uid}` yang sama, termasuk dua request bersamaan. | Hanya `fines/{sessionId}_{uid}` ada; `attendanceId` dan `sessionId` merujuk attendance/sesi yang sama; tidak ada bill kedua. | Belum dilaksanakan |
+| S4-AT-21 — izin excused | Olive | Setujui permit sebelum bill dibuat; ulangi ketika bill `unpaid` atau `failed` tanpa transaksi aktif; periksa kasus transaksi pending secara terpisah. | Status attendance `izin` (excused absence), bukan `hadir`; bill belum ada atau menjadi `cancelled`; transaksi gateway tidak diubah oleh aksi approve. Kasus pending/success ditandai perlu keputusan rekonsiliasi/refund sebelum finalisasi. | Belum dilaksanakan |
 | S4-AT-24 — webhook replay | Jura | Kirim callback sukses valid dua kali, lalu kirim status client palsu. | Payment sukses hanya tercatat sekali; bill tetap dibackend; status palsu ditolak. | Belum dilaksanakan |
 | S4-AT-25 — riwayat persist | Jura | Tutup aplikasi, buka ulang, login sebagai praktikan pemilik invoice. | Sesi, tanggal invoice, nominal, waktu transaksi, dan status tetap tersedia. | Belum dilaksanakan |
 | S4-AT-26 — remote notification | Jura | Uji pada Android development build dengan dua akun dan satu device masing-masing. | Hanya UID pemilik menerima payload; logout menghapus token; pesan tetap tidak memutus proses utama. | Belum dilaksanakan |
