@@ -1,5 +1,5 @@
 # SOFTWARE REQUIREMENTS SPECIFICATION (SRS)
-# TandaIU — Dokumen Terpadu Sprint 1, Sprint 2, dan Sprint 3
+# TandaIU — Dokumen Terpadu Sprint 1, Sprint 2, Sprint 3, dan Sprint 4
 
 **Status:** Dokumen gabungan dari baseline Sprint 1, dokumen Sprint 2, dan spesifikasi Sprint 3  
 **Tanggal penggabungan:** 20 November 2026
@@ -1150,7 +1150,657 @@ Fitur Sprint 3 dinyatakan selesai apabila:
 
 ---
 
-# BAGIAN IV — KETENTUAN UMUM DOKUMEN
+# BAGIAN IV — SPRINT 4
+
+**Fokus:** Aslab, distribusi anggota laboratorium, dashboard operasional Aslab, pengelolaan sesi Asprak, keterlambatan dan denda, Midtrans Sandbox, serta penyelesaian push notification.
+
+**Periode spesifikasi:** Sprint 4
+
+**Anggota PIC:** Nabila, Jura, Khanza, Olive
+
+## 1. Pendahuluan
+
+Sprint 4 memperluas aplikasi TandaIU dari pengelolaan asisten semester dan praktikan menjadi pemisahan tanggung jawab Aslab serta Asprak. Sprint ini menambahkan konfigurasi laboratorium lintas ruang, distribusi anggota, dashboard laboratorium, kalkulasi keterlambatan, tagihan denda, pembayaran Midtrans Sandbox, dan notifikasi pembayaran.
+
+Dokumen ini ditulis berdasarkan audit kode aktual. Dokumen lama Sprint 1–3 tetap menjadi riwayat kebutuhan dan tidak diubah oleh bagian ini.
+
+## 2. Tujuan dan ruang lingkup
+
+1. Menyediakan peran Aslab dengan kewenangan mengelola laboratorium dalam cakupannya.
+2. Memastikan role lama `asisten`/`assistant` dipetakan secara tegas ke Asprak atau Aslab.
+3. Menyediakan alur single dan bulk insert yang terpisah untuk laboratorium, praktikan, dan Asprak.
+4. Menyediakan dashboard realtime Aslab dari data jadwal dan sesi Firestore yang benar.
+5. Membatasi Asprak pada kelas, jadwal, sesi, presensi, dan izin yang ditugaskan.
+6. Menghitung keterlambatan, membuat tagihan idempotent, dan menjaga izin disetujui tidak menghasilkan denda.
+7. Mengintegrasikan Midtrans Sandbox melalui backend yang aman.
+8. Melengkapi carry-over push notification Sprint 3 dan menambahkan notifikasi tagihan serta pembayaran.
+
+Di luar ruang lingkup: perubahan model sentimen; perubahan permanen identitas akademik sesi; pemindahan jadwal saat anggota dipindah laboratorium; penyimpanan secret Midtrans di React Native.
+
+## 3. Aktor dan hak akses
+
+| Aktor | Hak akses Sprint 4 |
+|---|---|
+| Aslab | Mengelola akun/role Aslab dalam ruang lingkupnya, laboratorium, anggota, lokasi/radius/grace period, serta dashboard seluruh laboratorium yang dikelolanya. Tidak boleh memindahkan jadwal atau mengubah pelaksanaan sesi. |
+| Asprak | Melihat dan mengelola kelas, jadwal, sesi, presensi, dan izin yang ditugaskan kepadanya. Tidak dapat mendistribusikan anggota, memindahkan anggota antarlaboratorium, atau mengubah konfigurasi global laboratorium. |
+| Praktikan | Mengikuti kelas/laboratorium, melakukan presensi, mengajukan izin, melihat tagihan, melakukan pembayaran melalui backend, serta melihat riwayat transaksi miliknya. |
+| Backend terautentikasi | Memvalidasi role, kepemilikan ruang lingkup, transaksi Midtrans, webhook, idempotensi tagihan, dan pengiriman notifikasi. |
+
+### Pemetaan role lama
+
+| Kondisi akun saat ini | Role baru | Migrasi |
+|---|---|---|
+| Profil `users/{uid}.role = 'asisten'` atau `assistant` | Belum otomatis menjadi Aslab atau Asprak | Admin/aslab berwenang menetapkan role baru setelah pemeriksaan custom assignment. Akun lama dipertahankan selama proses migrasi sebagai role kompatibilitas, tetapi rute baru tidak boleh menganggapnya berhak penuh. |
+| Asisten pemilik kelas/sesi | Asprak pada kelas dan laboratorium yang ditugaskan | Isi data assignment (`assignedLaboratoryIds`, `assignedClassIds`, `assignedScheduleIds`) berdasarkan `assistantUid` lama. |
+| Asisten pengelola laboratorium lintas scope | Aslab atau tetap Asprak sesuai keputusan operasional | Tidak boleh migrasi otomatis berdasarkan nama role lama. Buat field assignment Aslab dan catat audit migrasi. |
+| `praktikan` | Praktikan | Tidak berubah. Kebutuhan enrollment dan studentCode tetap dipakai. |
+
+Implementasi kode dan data pengguna saat Sprint 4 tidak boleh dilakukan dengan cara langsung mengubah akun melalui dokumen ini. Migrasi harus memakai script/admin terpisah yang disetujui di sprint implementasi.
+
+## 4. Kondisi implementasi awal berdasarkan audit repository
+
+| Modul | Kondisi saat audit | Bukti/catatan |
+|---|---|---|
+| Auth dan role | Sebagian | `asisten` dan `assistant` dapat dipakai sebagai role lama; belum ada `aslab`/Asprak terpisah. `assistantSemesterParity` masih menjadi claim Asisten. |
+| Laboratorium | Sebagian | CRUD, lokasi/radius, lantai, aktif/nonaktif tersedia di `laboratoryService.ts`, `LaboratoryFormScreen.tsx`, dan `laboratories` rules. Belum ada scope Aslab, bulk import, grace period, atau assignment. |
+| Kelas, jadwal, sesi | Sebagian | CRUD, Firestore, dan realtime tersedia. Sesi memiliki `assistantUid`, laboratorium, jadwal, dan status. Belum ada model assignment Aslab/Asprak yang eksplisit. |
+| Enrollment | Sebagian | `enrollmentService.ts` dan `enrollments` mendukung pendaftaran praktikan ke kelas, tetapi arus distribusi laboratorium/bulk transfer belum tersedia. |
+| Presensi | Sebagian | Firebase callable functions memvalidasi identitas, status, enrollment, lokasi, QR, dan presensi ganda. Belum ada keterlambatan/denda/izin disetujui dalam tagihan. |
+| Izin | Sebagian | Izin, satu izin per sesi, review Asprak/Asisten tersedia. Belum ada relasi keputusan izin ke keputusan denda. |
+| Push notification | Sebagian | Android permission, token `deviceTokens`, refresh, logout removal, three backend triggers, navigation, dan unit test tersedia. iOS/web di luar implementasi Android saat ini. Kegagalan dan pengujian production perlu diverifikasi. |
+| Midtrans dan denda | Belum tersedia | Tidak ada koleksi, service, endpoint, webhook, atau dependency Midtrans pada repository. |
+| Backend Firebase | Sebagian | `functions/` berisi callable attendance functions dan Firestore triggers untuk notification; `firebase.json` mengonfigurasi Functions dan emulator. Functions tidak berjalan pada Firebase Spark. |
+
+### UI saat ini
+
+Tema saat ini memakai dua keluarga font: Comfortaa untuk wordmark dan Nunito Sans untuk teks. Untuk Sprint 4, aplikasi harus memakai **satu keluarga font sans-serif**, yaitu **Nunito Sans**, untuk seluruh elemen termasuk brand/wordmark. Project sudah memiliki Nunito Sans 400/600/700/800 dan tidak memerlukan dependency font baru. Comfortaa tidak dipakai kembali pada layar Sprint 4 maupun elemen brand baru. Arah perubahan mempertahankan identitas pink dan token warna yang ada, tetapi mengurangi layar generic berisi kartu berulang dan memakai hierarchy berbasis konteks: header ringkas, ringkasan operasional, tabel/list padat, form bertahap, status jelas, serta empty/loading/error/success yang konsisten.
+
+## 5. Pembagian tugas empat anggota
+
+| PIC | Breakdown beban (1/2/3/5/8) | Total | Alasan |
+|---|---|---:|---|
+| Nabila | Role/scope 5 + laboratorium 5 + bulk laboratorium 8 + konfigurasi 3 + enrollment 8 + dashboard overview 5 | 34 | Enrollment Aslab dan bulk lab mempunyai validasi, UI bertahap, dan integrasi Firestore paling kompleks setelah payment. |
+| Khanza | Praktikan single/bulk 8 + Asprak single/bulk 8 + transfer 5 + history/filter 8 + integrasi dashboard 5 | 34 | Empat jenis alur distribusi dan riwayat menuntut komponen reusable, validasi, serta data assignment. |
+| Olive | Daftar sesi 5 + buka/tutup 5 + presensi 8 + keterlambatan 5 + invoice 8 + izin excused 3 | 34 | Mengubah presensi dan izin menjadi data billing memerlukan transaction, aturan konsistensi, dan pengujian emulator. |
+| Jura | Payment UI/backend 8 + webhook/verifikasi 8 + riwayat 5 + push carry-over 8 + notifikasi baru 5 | 34 | Memiliki dependency backend eksternal dan membawa seluruh risiko token/server secret serta delivery remote. |
+
+Skala 1/2/3/5/8 dipakai berdasarkan kompleksitas UI, logic, backend, integrasi, dan pengujian. Total final keempat anggota sama 34 poin, sehingga selisih beban 0%.
+
+## 6. Kebutuhan fungsional per anggota
+
+Setiap FR berikut memiliki satu PIC utama dan dapat berkembang memakai shared contract tanpa mengubah kepemilikan file inti anggota lain.
+
+### 6.1 Nabila — Aslab, Laboratorium, dan Enrollment
+
+#### S4-SRS-01 — Role dan assignment Aslab
+- **PIC:** Nabila
+- **Aktor:** Aslab, sistem.
+- **Deskripsi:** Sistem menyediakan role `aslab` dan membedakan hak Aslab dari Asprak. Aslab hanya mengelola laboratorium/assignment dalam scope yang diberikan.
+- **Kriteria penerimaan:** Role lama tidak menjadi Aslab otomatis; role dan scope tervalidasi di backend/Rules; UI menyembunyikan aksi di luar scope.
+- **UI:** `S4-UI-01`
+- **Dependency:** kontrak role/assignment.
+- **AT:** S4-AT-01, S4-AT-02.
+
+#### S4-SRS-02 — Single insert laboratorium
+- **PIC:** Nabila
+- **Aktor:** Aslab.
+- **Deskripsi:** Menambah satu laboratorium beserta nama, lantai, lokasi, radius, dan identitas scope.
+- **Kriteria penerimaan:** Validasi format/range/duplikat, konfirmasi penyimpanan, data baru muncul realtime.
+- **UI:** `S4-UI-02`
+- **Dependency:** laboratorium contract.
+- **AT:** S4-AT-03.
+
+#### S4-SRS-03 — Kelola informasi dan status laboratorium
+- **PIC:** Nabila
+- **Aktor:** Aslab.
+- **Deskripsi:** Mengubah dan menonaktifkan laboratorium tanpa menghapus riwayat.
+- **Kriteria penerimaan:** Scope dan validasi backend ditegakkan; laboratorium nonaktif tidak dipakai sesi baru; riwayat tetap tersimpan.
+- **UI:** `S4-UI-03`
+- **Dependency:** laboratorium contract.
+- **AT:** S4-AT-04.
+
+#### S4-SRS-04 — Bulk insert laboratorium berdasarkan satu mata kuliah
+- **PIC:** Nabila
+- **Aktor:** Aslab.
+- **Deskripsi:** Alur terpisah mengunggah CSV/Excel untuk satu mata kuliah; template berisi nama laboratorium, lantai, latitude, longitude, radius, gracePeriodMinutes, courseId.
+- **Kriteria penerimaan:** Template dapat diunduh; parsing, review scrollable, status per baris, edit/isi field kosong, terima/tolak per baris, notifikasi duplikat/invalid, konfirmasi massal, dan penyimpanan baris diterima satu per satu/tanpa menunggu baris lain.
+- **UI:** `S4-UI-04`
+- **Dependency:** laboratorium contract dan course catalog.
+- **AT:** S4-AT-05.
+
+#### S4-SRS-05 — Konfigurasi lokasi, radius, dan cakupan presensi
+- **PIC:** Nabila
+- **Aktor:** Aslab.
+- **Deskripsi:** Mengatur koordinat, radius, lantai, lokasi yang menjadi cakupan presensi.
+- **Kriteria penerimaan:** Range valid; perubahan berlaku pada presensi berikutnya; presensi lama tidak berubah.
+- **UI:** `S4-UI-05`
+- **Dependency:** laboratorium contract.
+- **AT:** S4-AT-06.
+
+#### S4-SRS-06 — Grace period laboratorium/kebijakan praktikum
+- **PIC:** Nabila
+- **Aktor:** Aslab.
+- **Deskripsi:** Mengatur gracePeriodMinutes yang digunakan untuk menentukan tepat waktu atau terlambat.
+- **Kriteria penerimaan:** 0 atau bilangan bulat valid; tepat pada batas akhir grace dianggap tepat waktu; perubahan tidak mengubah data presensi lama.
+- **UI:** `S4-UI-06`
+- **Dependency:** session/fine contract.
+- **AT:** S4-AT-07.
+
+#### S4-SRS-07 — Dashboard overview Aslab
+- **PIC:** Nabila
+- **Aktor:** Aslab.
+- **Deskripsi:** Menampilkan jumlah laboratorium, praktikan, status setiap laboratorium, nama/lokasi, waktu, jadwal berlangsung dan akan datang.
+- **Kriteria penerimaan:** Semua agregat berasal dari koleksi Firestore aktual; realtime; filter hari/minggu/bulan juga tersedia pada history Khanza.
+- **UI:** `S4-UI-07`
+- **Dependency:** jadwal/sesi/enrollment.
+- **AT:** S4-AT-08.
+
+#### S4-SRS-08 — Real-time scope dan data validasi dashboard
+- **PIC:** Nabila
+- **Aktor:** Aslab.
+- **Deskripsi:** Menentukan query scope Aslab, relasi laboratory→schedule→session→class→enrollment, dan penanganan pembaruan realtime.
+- **Kriteria penerimaan:** Data lintas laboratorium tidak dapat dibaca bila di luar scope; listener berhenti saat layar tidak aktif; keadaan loading/empty/error tersedia.
+- **UI:** `S4-UI-07`
+- **Dependency:** role, jadwal, sesi, enrollment.
+- **AT:** S4-AT-09.
+
+#### S4-SRS-08A — Setup enrollment mahasiswa Aslab untuk jadwal/sesi baru
+- **PIC:** Nabila
+- **Aktor:** Aslab.
+- **Deskripsi:** Nabila memiliki tanggung jawab end-to-end atas UI, logic, validasi, permission, dan pengujian setup enrollment. Aslab mendaftarkan mahasiswa sebagai peserta pada jadwal praktikum tertentu. Ini berbeda dari distribusi laboratorium: distribusi mengelola keanggotaan mahasiswa/Asprak di laboratorium, sedangkan enrollment menghubungkan mahasiswa dengan jadwal/kelas praktikum.
+- **Batas akses:** Setup enrollment hanya tersedia bagi role `aslab` melalui guard dan otorisasi backend/Firestore Rules. Role lama `asisten`/`assistant`, Asprak, dan Praktikan tidak dapat membuat, mengubah, atau menghapus enrollment.
+- **Kontrak:** Record enrollment mempertahankan relasi yang dapat dipakai sesi, dengan `praktikanId`, `classId`, `courseId`, `scheduleIds`, `semester`, `semesterParity`, `laboratoryId`, `active`, `createdAt`, dan `updatedAt`. Schedule harus berada pada `classId`/`courseId` yang sama. ID enrollment yang konsisten dengan kontrak aplikasi adalah `{classId}_{uid}`; penambahan jadwal harus atomik dan unik per pasangan `{scheduleId}_{uid}` pada `scheduleIds`, sehingga mahasiswa tidak terdaftar ganda pada jadwal yang sama. Sesi memakai `classId` dan `scheduleId` untuk memperoleh roster yang tepat.
+- **Alur:** Aslab memilih mata kuliah dan kelas/jadwal, mencari mahasiswa melalui interface baca directory yang disediakan Khanza, memeriksa semester/parity dan laboratorium, lalu menyimpan atau mencabut enrollment. Roster sesi hanya mengambil enrollment aktif yang cocok dengan classId dan scheduleId sesi. Perubahan enrollment tidak mengubah distribusi laboratorium secara otomatis, dan perubahan distribusi laboratorium tidak mengubah enrollment jadwal tanpa aksi enrollment eksplisit Aslab.
+- **Kriteria penerimaan:** Aslab dapat mendaftarkan mahasiswa ke jadwal praktikum yang tersedia; enrollment terhubung ke mahasiswa dan jadwal/kelas yang benar; role selain Aslab ditolak pada UI maupun backend; mahasiswa yang sama tidak dapat didaftarkan dua kali pada jadwal yang sama; Olive memperoleh roster peserta sesi melalui interface baca enrollment Nabila; penambahan/pemindahan keanggotaan laboratorium tidak mengubah enrollment; penarikan enrollment tidak menghapus riwayat presensi atau enrollment sesi yang telah selesai.
+- **UI:** `S4-UI-07A`
+- **Dependency:** role/scope contract yang dibekukan di awal sprint; interface baca mahasiswa milik Khanza; class/schedule/session contract yang dibaca tanpa menunggu implementasi Olive.
+- **AT:** S4-AT-09A (izin role), S4-AT-09B (create dan relasi jadwal), S4-AT-09C (duplikasi), S4-AT-09D (roster Olive dan independensi dari transfer lab), S4-AT-09E (data legacy).
+
+### 6.2 Khanza — Distribusi Anggota dan Dashboard History
+
+#### S4-SRS-09 — Single insert praktikan
+- **PIC:** Khanza
+- **Aktor:** Aslab.
+- **Deskripsi:** Menambahkan satu praktikan sebagai anggota laboratorium tertentu. Fitur ini mengelola keanggotaan laboratorium saja dan bukan pendaftaran peserta jadwal praktikum.
+- **Kriteria penerimaan:** UID/studentCode unik; validasi identitas; keanggotaan ganda pada laboratorium yang sama ditolak; pembuatan keanggotaan tidak membuat atau mengubah enrollment.
+- **UI:** `S4-UI-08`
+- **Dependency:** interface baca identitas mahasiswa yang dapat dikonsumsi Nabila; tidak ada dependency implementasi pada modul enrollment.
+- **AT:** S4-AT-10.
+
+#### S4-SRS-10 — Bulk insert praktikan
+- **PIC:** Khanza
+- **Aktor:** Aslab.
+- **Deskripsi:** Alur bulk terpisah untuk menambahkan praktikan sebagai anggota laboratorium memakai template `studentCode,name,email,semester,laboratoryId`; file ini tidak memuat `classId` atau enrollment.
+- **Kriteria penerimaan:** Download, review scrollable, status per baris, edit/isi kosong, terima/tolak individu, duplikat/invalid diberitahukan, konfirmasi sebelum simpan; penyimpanan hanya mengubah membership laboratorium dan tidak membuat atau mengubah enrollment.
+- **UI:** `S4-UI-09`
+- **Dependency:** interface baca identitas mahasiswa; tidak ada dependency implementasi pada modul enrollment.
+- **AT:** S4-AT-11.
+
+#### S4-SRS-11 — Single insert Asprak
+- **PIC:** Khanza
+- **Aktor:** Aslab.
+- **Deskripsi:** Menugaskan satu akun Asprak ke satu atau lebih laboratorium/kelas yang valid.
+- **Kriteria penerimaan:** Akun role lama diverifikasi/migrasi dinyatakan; scope assignment tersimpan; tidak ada distribusi praktikan dari Asprak.
+- **UI:** `S4-UI-10`
+- **Dependency:** role/assignment contract.
+- **AT:** S4-AT-12.
+
+#### S4-SRS-12 — Bulk insert Asprak
+- **PIC:** Khanza
+- **Aktor:** Aslab.
+- **Deskripsi:** Alur bulk terpisah memakai template `email,name,semesterParity,laboratoryId,classId`.
+- **Kriteria penerimaan:** Sama dengan proses bulk: template, review, status per baris, edit/isi, terima/tolak, duplikat/invalid, konfirmasi.
+- **UI:** `S4-UI-11`
+- **Dependency:** role/assignment contract.
+- **AT:** S4-AT-13.
+
+#### S4-SRS-13 — Transfer praktikan dan Asprak
+- **PIC:** Khanza
+- **Aktor:** Aslab.
+- **Deskripsi:** Memindahkan satu atau banyak praktikan/Asprak sebagai anggota dari laboratorium asal ke tujuan, dengan riwayat assignment yang dipisah dari riwayat enrollment jadwal dan sesi.
+- **Kriteria penerimaan:** Konfirmasi dan actor; anggota praktikan dan Asprak ditangani dengan role validation yang sesuai; jadwal, sesi, enrollment, dan riwayat sesi lama tidak ditulis ulang. Transfer laboratorium tidak otomatis mendaftarkan atau menghapus mahasiswa dari jadwal praktikum.
+- **UI:** `S4-UI-12`
+- **Dependency:** assignment/transfer contract.
+- **AT:** S4-AT-14.
+
+#### S4-SRS-14 — Dashboard history dan riwayat keuangan
+- **PIC:** Khanza
+- **Aktor:** Aslab.
+- **Deskripsi:** Menyediakan filter hari/minggu/bulan untuk riwayat aktivitas laboratorium dan riwayat keuangan denda.
+- **Kriteria penerimaan:** Query rentang tanggal diterapkan pada jadwal/sesi/transaksi; total denda, status pembayaran, praktikan, sesi, dan laboratorium ditampilkan; data denda hanya berasal dari Firestore.
+- **UI:** `S4-UI-13`
+- **Dependency:** session/fine/payment contract.
+- **AT:** S4-AT-15.
+
+### 6.3 Olive — Pengelolaan Sesi Asprak dan Denda
+
+#### S4-SRS-15 — Daftar kelas, jadwal, dan sesi Asprak
+- **PIC:** Olive
+- **Aktor:** Asprak.
+- **Deskripsi:** Menampilkan hanya kelas, jadwal, dan sesi yang ditugaskan.
+- **Kriteria penerimaan:** Scope divalidasi Firestore/backend; Asprak tidak melihat distribusi di luar assignment.
+- **UI:** `S4-UI-14`
+- **Dependency:** Asprak assignment contract.
+- **AT:** S4-AT-16.
+
+#### S4-SRS-16 — Buka dan tutup sesi
+- **PIC:** Olive
+- **Aktor:** Asprak.
+- **Deskripsi:** Membuka sesi saat praktikum dimulai dan menutup setelah selesai melalui transisi terjadwal→dibuka→ditutup.
+- **Kriteria penerimaan:** Hanya Asprak pemilik/ditugaskan yang dapat membuka/menutup; sesi realtime; penutupan menolak check-in baru.
+- **UI:** `S4-UI-15`
+- **Dependency:** status/session contract.
+- **AT:** S4-AT-17.
+
+#### S4-SRS-17 — Monitoring dan pengelolaan presensi
+- **PIC:** Olive
+- **Aktor:** Asprak.
+- **Deskripsi:** Memantau presensi realtime, membatalkan data yang salah bila kewenangan mengizinkan, dan mengelola keputusan izin.
+- **Kriteria penerimaan:** Status hadir/tidak hadir/izin dibedakan; pembatalan tidak membuat tagihan otomatis ganda; perubahan disinkronkan realtime; Asprak tidak mengubah distribusi anggota.
+- **UI:** `S4-UI-16`
+- **Dependency:** attendance/permit contract.
+- **AT:** S4-AT-18.
+
+#### S4-SRS-18 — Perhitungan keterlambatan
+- **PIC:** Olive
+- **Aktor:** Sistem, Asprak.
+- **Deskripsi:** Membandingkan waktu presensi terhadap waktu mulai sesi ditambah gracePeriodMinutes.
+- **Kriteria penerimaan:** Presensi pada atau sebelum batas grace dianggap tepat waktu; presensi setelah batas dicatat terlambat; presensi setelah sesi ditutup ditolak.
+- **UI:** `S4-UI-17`
+- **Dependency:** grace period dan sesi.
+- **AT:** S4-AT-19.
+
+#### S4-SRS-19 — Tagihan denda idempotent
+- **PIC:** Olive
+- **Aktor:** Sistem.
+- **Deskripsi:** Membuat satu bill per kejadian keterlambatan dengan UID praktikan, sessionId, attendanceId, nominal tetap, dan status.
+- **Kriteria penerimaan:** Dokumen deterministik atau transaction guard mencegah duplikat; presensi ganda tidak membuat bill ganda; pembayaran tidak mengubah attendance.
+- **UI:** `S4-UI-18`
+- **Dependency:** fine/transaction contract.
+- **AT:** S4-AT-20.
+
+#### S4-SRS-20 — Penanganan izin disetujui
+- **PIC:** Olive
+- **Aktor:** Asprak, sistem.
+- **Deskripsi:** Izin disetujui menyimpan excused absence tanpa mengubah status hadir dan tanpa membuat bill keterlambatan.
+- **Kriteria penerimaan:** Keputusan izin terpisah dari status hadir/pembayaran; izin disetujui tidak menghasilkan denda meski presensi terlambat; izin ditolak tetap mengikuti aturan keterlambatan.
+- **UI:** `S4-UI-19`
+- **Dependency:** permit/fine contract.
+- **AT:** S4-AT-21.
+
+### 6.4 Jura — Pembayaran Midtrans dan Push Notification
+
+#### S4-SRS-21 — Daftar dan rincian tagihan
+- **PIC:** Jura
+- **Aktor:** Praktikan.
+- **Deskripsi:** Menampilkan daftar dan rincian tagihan milik praktikan beserta sesi, tanggal, nominal, dan status.
+- **Kriteria penerimaan:** Hanya data milik UID aktif; history tersedia offline setelah dibuka; nominal berasal dari backend.
+- **UI:** `S4-UI-20`
+- **Dependency:** fine contract.
+- **AT:** S4-AT-22.
+
+#### S4-SRS-22 — Transaksi Midtrans melalui backend
+- **PIC:** Jura
+- **Aktor:** Praktikan, backend, Midtrans.
+- **Deskripsi:** Client memanggil endpoint backend untuk membuat transaksi; backend memanggil Midtrans Sandbox dan mengembalikan redirect/token.
+- **Kriteria penerimaan:** Server key tidak ada di React Native; client tidak menentukan status berhasil; bill dapat memiliki satu transaksi aktif.
+- **UI:** `S4-UI-21`
+- **Dependency:** backend dan fine contract.
+- **AT:** S4-AT-23.
+
+#### S4-SRS-23 — Status pembayaran, webhook, dan verifikasi
+- **PIC:** Jura
+- **Aktor:** Midtrans, backend.
+- **Deskripsi:** Memproses pending/success/failed/pending-action serta callback berulang secara aman.
+- **Kriteria penerimaan:** Signature webhook diverifikasi; callback berulang tidak menduplikasi transaksi sukses; status bill hanya diperbarui oleh hasil terverifikasi; payment UI disinkronkan realtime atau setelah refresh.
+- **UI:** `S4-UI-22`
+- **Dependency:** Midtrans backend contract.
+- **AT:** S4-AT-24.
+
+#### S4-SRS-24 — Riwayat transaksi dan pembayaran
+- **PIC:** Jura
+- **Aktor:** Praktikan.
+- **Deskripsi:** Menyimpan entitas payment transaction terpisah dari fine bill dan menampilkan riwayat persisten.
+- **Kriteria penerimaan:** Informasi sesi, tanggal tagihan, nominal, waktu transaksi, status tersedia setelah app ditutup/dibuka kembali.
+- **UI:** `S4-UI-23`
+- **Dependency:** fine/payment contract.
+- **AT:** S4-AT-25.
+
+#### S4-SRS-25 — Carry-over push notification Sprint 3
+- **PIC:** Jura
+- **Aktor:** Sistem, pengguna.
+- **Deskripsi:** Menyelesaikan izin notifikasi, registrasi token, refresh token, penghapusan saat logout, kegagalan jaringan, validasi penerima, navigasi, serta trigger pembukaan sesi/perubahan jadwal/keputusan izin.
+- **Kriteria penerimaan:** Fitur ditandai oleh bukti di audit: Android saat ini sebagian tersedia; trigger dan test tersedia; sisa implementasi production, iOS/web policy, dan observability ditutup atau didokumentasikan sebagai blocker terukur.
+- **UI:** `S4-UI-24`
+- **Dependency:** deviceTokens/backend notification.
+- **AT:** S4-AT-26.
+
+#### S4-SRS-26 — Notifikasi tagihan dan pembayaran
+- **PIC:** Jura
+- **Aktor:** Sistem, Praktikan.
+- **Deskripsi:** Mengirim notifikasi saat tagihan baru dibuat, pembayaran berhasil, dan pembayaran gagal/memerlukan tindakan lanjutan.
+- **Kriteria penerimaan:** Notifikasi berbasis backend dan UID pemilik bill; kegagalan notifikasi tidak mengubah status pembayaran; navigasi membuka tagihan/riwayat terkait.
+- **UI:** `S4-UI-25`
+- **Dependency:** fine/payment/deviceTokens.
+- **AT:** S4-AT-27.
+
+#### S4-SRS-27 — Security Midtrans dan notifikasi
+- **PIC:** Jura
+- **Aktor:** Backend.
+- **Deskripsi:** Memastikan secret, signature, replay, ownership, dan idempotensi diproses secara aman.
+- **Kriteria penerimaan:** Tidak ada key/secret app; webhook validasi signature; replay dedup; log tidak memuat secret; notifikasi tidak membocorkan data milik UID lain.
+- **UI:** `S4-UI-26`
+- **Dependency:** backend/shared contract.
+- **AT:** S4-AT-28.
+
+## 7. Aturan bisnis dan transisi status
+
+1. Transisi sesi tetap `terjadwal` → `dibuka` → `ditutup`. Batas presensi dihitung dari `startsAt`.
+2. Presensi sebelum atau tepat pada `startsAt + gracePeriodMinutes` dianggap tepat waktu.
+3. Presensi setelah batas grace dianggap terlambat.
+4. Presensi setelah sesi ditutup ditolak.
+5. Presensi ganda memakai ID deterministik `{sessionId}_{uid}`.
+6. Izin disetujui menyimpan `excused=true`/keputusan izin terpisah dan tidak mengubah attendance menjadi hadir.
+7. Izin disetujui tidak menghasilkan bill keterlambatan.
+8. Setiap keterlambatan menghasilkan paling banyak satu bill memakai `{sessionId}_{uid}` atau attendance bill key yang deterministik.
+9. Pembayaran tidak mengubah status attendance; status bill dan transaction dipisahkan.
+10. Transaksi pending dapat diperbarui oleh webhook atau verificaton polling, tetapi hanya backend yang menetapkan success/failed.
+11. Distribusi laboratorium adalah keanggotaan praktikan/Asprak dalam laboratorium; enrollment adalah keikutsertaan mahasiswa pada jadwal praktikum tertentu. Keduanya memiliki alur, kontrak, dan otorisasi terpisah.
+12. Transfer praktikan/Asprak tidak menulis ulang jadwal/sesi/enrollment dan tidak mengubah riwayat. Enrollment hanya berubah melalui aksi eksplisit pada modul Aslab, dengan validasi jadwal.
+13. Realtime UI menggunakan listener Firestore pada dokumen/scope yang sudah diverifikasi.
+
+## 8. Kontrak data serta model Firestore
+
+Kolom wajib mendahului field opsional agar migration dan rules dapat dibaca konsisten.
+
+### Koleksi dan relasi
+
+| Koleksi | ID/shape utama | Relasi |
+|---|---|---|
+| `users/{uid}` | role, name, email, studentCode, active | Dipakai autentikasi/profile |
+| `laboratories/{laboratoryId}` | name, lantai, latitude, longitude, radius, gracePeriodMinutes, courseIds, active, scopeIds, timestamps | Laboratorium |
+| `laboratoryAssignments/{laboratoryId}_{uid}` | uid, role `aslab`, laboratoryId, grantedAt, revokedAt | Role/scope Aslab |
+| `asprakAssignments/{laboratoryId}_{uid}` | uid, laboratoryId, classIds, scheduleIds, active | Tugas Asprak |
+| `laboratoryMembers/{laboratoryId}_{uid}` | uid, role `praktikan`/`asprak`, laboratoryId, active, timestamps | Distribusi keanggotaan laboratorium saja; tidak menyimpan enrollment/jadwal |
+| `studentDirectory/{uid}` | name, studentCode, semester, parity | Sumber identitas praktikan |
+| `enrollments/{classId}_{uid}` | praktikanId, classId, courseId, scheduleIds, semester, semesterParity, laboratoryId, active, createdAt, updatedAt | Kontrak enrollment Aslab; `scheduleIds` dibatasi pada schedule kelas yang sama; ID deterministik dan transaksi mencegah enrollment ganda |
+| `classes/{classId}` | courseId, className, semester, semesterParity, assistantUid | Kelas lama tetap dipakai |
+| `schedules/{scheduleId}` | classId, courseId, dayOfWeek, start/end, laboratoryId | Jadwal |
+| `sessions/{sessionId}` | classId, laboratoryId, assistantUid, startsAt, endsAt, status | Sesi |
+| `attendances/{sessionId}_{uid}` | sessionId, praktikanId, attendedAt, status, attendanceMethod, lateStatus, graceDeadlineAt, excused, location fields | Presensi |
+| `permits/{sessionId}_{uid}` | praktikanId, sessionId, reason, status, decidedBy, decidedAt | Izin |
+| `fines/{sessionId}_{uid}` | uid, sessionId, attendanceId, amount, currency, status, createdAt, reason | Tagihan; ID deterministik |
+| `payments/{paymentId}` | fineId, uid, sessionId, gateway `midtrans`, gatewayOrderId, status, amount, createdAt, updatedAt | Transaksi |
+| `deviceTokens/{installationId}` | uid, token, platform, updatedAt | Perangkat push |
+
+### Kontrak baca antarmodul untuk praktikan dan enrollment
+
+- **Interface identitas milik Khanza:** `PraktikanDirectoryReader.listEligiblePraktikans({ laboratoryId?, courseId?, semesterParity? })` mengembalikan daftar `{ uid, name, studentCode, semester, semesterParity }`. Interface bersifat baca-saja; tidak membuat membership maupun enrollment. Nabila boleh memakainya melalui interface atau mock dan tidak mengubah file implementasi distribusi Khanza.
+- **Interface enrollment milik Nabila:** `EnrollmentService.addStudentToSchedule({ praktikanUid, scheduleId })`, `removeStudentFromSchedule({ praktikanUid, scheduleId })`, dan `subscribeToScheduleRoster({ sessionId, scheduleId, classId }, onData, onError)`; hasil roster berisi `{ praktikanId, praktikanName, studentCode, classId, scheduleId }`. Semua mutasi hanya menerima actor Aslab yang terotorisasi.
+- Pada model saat ini, jadwal dan sesi terhubung melalui `classId` serta sesi menyimpan `scheduleId`; `enrollments/{classId}_{uid}` tetap menjadi dokumen kompatibel dengan pemeriksaan enrollment presensi. `scheduleIds` menjadi relasi jadwal aktif dalam enrollment. Tambah/hapus jadwal dilakukan dengan transaction, memastikan schedule memang milik class, dan mencegah duplikasi UID pada schedule yang sama.
+- Dokumen enrollment lama yang belum mempunyai `scheduleIds` tidak otomatis dianggap terdaftar pada semua jadwal kelas. Dokumen legacy harus dipetakan secara eksplisit oleh Aslab atau migration yang disetujui sebelum dimasukkan ke roster jadwal.
+- Distribusi laboratorium dan enrollment tidak saling menulis. `laboratoryMembers` bukan sumber roster jadwal; `enrollments` bukan sumber keanggotaan umum laboratorium. Perubahan lab hanya memengaruhi enrollment melalui tindakan eksplisit di setup Aslab dan validasi aturan yang disetujui.
+- Olive mengonsumsi hanya `subscribeToScheduleRoster` dari Nabila untuk peserta sesi; modul presensi tidak membaca atau mengubah keanggotaan laboratorium secara langsung.
+
+### Shared enums
+
+- `Role`: `aslab | asprak | praktikan`. Nilai lama `asisten`/`assistant` diterima hanya sebagai compatibility selama migrasi.
+- `SessionStatus`: `terjadwal | dibuka | ditutup | dibatalkan` bila migration menyetujuinya; transisi utama tidak memperkenalkan status non-transisi tanpa persistency contract.
+- `AttendanceStatus`: `hadir | tidak_hadir | excused | dibatalkan`.
+- `FineStatus`: `unpaid | pending | paid | failed | cancelled`.
+- `PaymentStatus`: `pending | success | failed | expired | cancelled`.
+- `PermitStatus`: `pending | approved | rejected`.
+- `ImportRowStatus`: `pending | valid | invalid | accepted | rejected`.
+
+## 9. Kontrak backend dan Midtrans
+
+### Arsitektur yang direkomendasikan
+
+Backend utama harus berupa API terautentikasi dan webhook. Firebase Spark tidak menyediakan Cloud Functions; repository ini sudah memiliki `functions/` dan `firebase.json`, tetapi Functions deployment memerlukan project Blaze serta biaya/kuota sesuai penggunaan. Implementasi Midtrans tetap tidak boleh dilangsungkan dengan secret key langsung pada React Native.
+
+Pilihan A—direkomendasikan bila proyek dapat menggunakan Blaze: Firebase Callable/HTTPS Functions menjadi backend Midtrans, dengan Admin SDK dan webhook HTTP, kegagalan secret disimpan sebagai environment/secret managed. Pilihan ini memanfaatkan backend yang sudah ada dan tidak mengubah Firestore langsung dari client.
+
+Pilihan B—alternatif gratis terbatas: service/API Node hosting gratis/edukasi yang mendukung HTTPS dan environment secret. Alternatif ini memerlukan identitas pengguna Firebase yang diverifikasi, webhook, persistence, dan monitoring. Free tier dapat berhenti, sleep, memiliki limit, atau tidak menyediakan uptime/egress; oleh karena itu bukan pilihan aman tanpa batasan tertulis.
+
+Firebase Spark-only tidak dianggap solusi backend Midtrans yang benar-benar berfungsi secara gratis dan aman karena tidak menjalankan Functions dan tidak memiliki environment trusted. Sampai ada hosting berbayar/gratis yang disetujui, Midtrans adalah blocker teknis/dedicated backend decision.
+
+### Endpoint minimum
+
+| Endpoint | Auth | Respons |
+|---|---|---|
+| `createFinePayment({ fineId })` | Firebase ID token | `{paymentId, orderId, transactionToken, redirectUrl, status}` |
+| `verifyPayment({ paymentId })` | Firebase ID token, ownership | `{paymentId,status,amount,verifiedAt}` |
+| `midtransWebhook` | Signature+HTTP | receipt yang aman terhadap replay |
+
+Webhook dan verify endpoint tidak boleh menerima status success hanya dari payload client. Signature dan/macam status Midtrans diverifikasi.
+
+## 10. Kontrak notifikasi
+
+Payload wajib berisi `type`, `entityId`, dan role/target. Penambahan Sprint 4:
+
+- `fine_created`: `fineId`, `sessionId`, tidak boleh berisi nominal bila navigasi tidak perlu.
+- `payment_success`: `paymentId`, `fineId`, `sessionId`.
+- `payment_failed` atau `payment_action_required`: `paymentId`, `fineId`, `reasonCode`.
+
+Existing payload Sprint 3 dipertahankan: `session_opened`, `schedule_changed`, `permit_result`.
+
+Notifikasi dibangun backend dan dikirim ke UID pemilik, dengan dedup token. Device token dokumentasi saat ini hanya Android; iOS/web harus dideploy pada development build/infrastruktur yang sesuai dan tidak boleh dinyatakan berhasil hanya dari Expo Go.
+
+## 11. Kebutuhan UI/UX dan standar design system
+
+Standar bersama:
+
+- Gunakan **satu keluarga font sans-serif, Nunito Sans, untuk seluruh aplikasi** termasuk brand/wordmark. Comfortaa tidak dipakai pada brand, heading, body, ataupun wordmark Sprint 4.
+- Skala ukuran React Native/logical pixels: Brand 28/700; Display 32/700; Screen title 26/700; Section title 20/700; Subsection 18/600; Item title 16/600; Body 16/400; Secondary 14/400; Button 16/600; Form label 15/600; Input 16/400; Caption 13/400; Metadata 12/400. Tidak ada informasi penting di bawah 12.
+- Ukuran visual lama yang terlalu kecil harus dinaikkan pada layar terdampak Sprint 4. Semua teks harus mendukung font scaling perangkat dan tetap dapat dibaca pada ukuran Android yang berbeda.
+- Gunakan token `src/theme/index.ts`; jangan membuat warna/spacing ad hoc untuk modul.
+- Hierarchy: title singkat, context bar, ringkasan, action utama, detail sekunder.
+- Hindari kartu berulang dekoratif; gunakan list/table, section divider, badge status, dan action sheet.
+- Setiap modul memiliki loading skeleton/spinner, empty state, error dengan retry, success/undo bila relevan.
+- Form bulk harus memiliki tahap pilih template→upload→review→konfirmasi→hasil.
+- Tidak ada kontrol bulk yang menyetujui seluruh baris; menerima setiap baris harus independen.
+- Mobile-first; tabel lebar memakai scroll horizontal atau transform menjadi card/list.
+- Animasi sangat singkat dan menghormati reduced motion; tidak ada gradient/ikon acak.
+- Aksesibilitas: touch target ≥44 dp, contrast AA, label, accessible role, voice-over/descriptive error.
+
+| UI ID | Kebutuhan |
+|---|---|
+| S4-UI-01 | Header/scope dan manajemen role Aslab |
+| S4-UI-02 | Form single laboratorium |
+| S4-UI-03 | Detail/edit/status laboratorium |
+| S4-UI-04 | Wizard bulk laboratorium |
+| S4-UI-05 | Map/koordinat/radius/lokasi |
+| S4-UI-06 | Grace period setting |
+| S4-UI-07 | Dashboard overview Aslab |
+| S4-UI-07A | Setup enrollment Aslab untuk kelas, jadwal, dan sesi baru |
+| S4-UI-08 | Form single praktikan |
+| S4-UI-09 | Wizard bulk praktikan |
+| S4-UI-10 | Form single Asprak |
+| S4-UI-11 | Wizard bulk Asprak |
+| S4-UI-12 | Transfer praktikan/Asprak |
+| S4-UI-13 | Dashboard history/filter/financial |
+| S4-UI-14 | Daftar kelas/jadwal/sesi Asprak |
+| S4-UI-15 | Kontrol buka/tutup sesi |
+| S4-UI-16 | Monitoring presensi realtime |
+| S4-UI-17 | Status keterlambatan |
+| S4-UI-18 | Detail bill dan status keterlambatan |
+| S4-UI-19 | Review izin dengan excused absence |
+| S4-UI-20 | Daftar/rincian tagihan praktikan |
+| S4-UI-21 | Checkout Midtrans |
+| S4-UI-22 | Status pending/success/failed/action |
+| S4-UI-23 | Riwayat pembayaran |
+| S4-UI-24 | Notifikasi dan registration state |
+| S4-UI-25 | Notifikasi fine/payment |
+| S4-UI-26 | Error/security-safe state |
+
+## 12. Pembagian file dan batas kepemilikan modul
+
+Path berikut adalah path aktual atau area yang harus ditambahkan saat implementasi. Setiap file utama memiliki satu owner.
+
+| PIC | Area utama |
+|---|---|
+| Nabila | `src/features/crud/LaboratoryFormScreen.tsx`, `src/services/laboratoryService.ts`, `src/hooks/useLaboratories.ts`, `src/features/assistant/AssistantHomeScreen.tsx`, `src/app/assistant.tsx`, `src/app/assistant/manage/enrollments.tsx`, `src/features/enrollment/EnrollmentManagementScreen.tsx`, `src/services/enrollmentService.ts`, `src/hooks/useEnrollments.ts`; tanggung jawab enrollment mencakup UI, logic, validasi, permission, dan test |
+| Khanza | `src/data/praktikans.ts`, `src/features/assistant/AssistantHistoryScreen.tsx`; modul distribusi laboratorium yang terpisah dan baru direncanakan: `src/features/laboratoryDistribution/`, `src/services/laboratoryMembershipService.ts`, `src/hooks/useLaboratoryMembers.ts`, dan `src/app/assistant/manage/laboratory-members.tsx`. Tidak memiliki file atau logic setup enrollment |
+| Olive | `src/app/assistant/attendance/index.tsx`, `src/app/assistant/attendance/[sessionId].tsx`, `src/features/assistant/AssistantAttendanceSummary.tsx`, `src/features/assistant/ClassRecapScreen.tsx`, `src/features/assistant/RekapScreen.tsx`, `src/services/attendanceService.ts`, `src/hooks/useAttendanceRecords.ts`, `src/services/permitService.ts`, `src/features/permit/AssistantPermitsScreen.tsx`; memakai roster via interface baca enrollment Nabila |
+| Jura | `src/features/notification/`, `src/hooks/useNotificationNavigation.ts`, `src/hooks/useNotificationRegistration.ts`, `src/hooks/useNotificationStatus.ts`, `src/services/notificationService.ts`, `functions/src/sessionOpened.ts`, `functions/src/scheduleChanged.ts`, `functions/src/permitResult.ts`, serta module payment/backend baru yang terpisah dari attendance |
+
+File bersama berisiko conflict, hanya satu owner yang membuat perubahan final:
+
+- `src/types/praktikum.ts`, `src/types/index.ts`: Khanza sebagai pemilik pembaruan tipe shared, dengan review Nabila/Olive/Jura; anggota lain mengonsumsi kontrak tanpa mengubah tipe secara langsung.
+- `firestore.rules`: Nabila sebagai pemilik koordinator; Khanza/Olive/Jura menyampaikan kebutuhan rules dan test ke Nabila, tidak mengedit file ini langsung.
+- `src/app/_layout.tsx`: Jura sebagai pemilik integrasi navigation.
+- `src/theme/index.ts`: Nabila sebagai pemilik design token dengan review UI.
+- `src/lib/firebase.ts`: Jura sebagai pemilik konfigurasi backend client tanpa menyisipkan secret.
+- `functions/src/index.ts`: Jura satu-satunya pemilik entrypoint/export integrasi. Olive dan Jura mengembangkan handler pada module masing-masing yang terpisah; kontribusi ke entrypoint diserahkan sebagai perubahan terkoordinasi ke Jura, tidak diedit paralel.
+- `src/features/enrollment/EnrollmentManagementScreen.tsx`, `src/services/enrollmentService.ts`, `src/hooks/useEnrollments.ts`, dan `src/app/assistant/manage/enrollments.tsx`: Nabila satu-satunya pemilik; Khanza dan Olive hanya mengonsumsi kontrak/interface baca.
+- `src/features/laboratoryDistribution/`, `src/services/laboratoryMembershipService.ts`, `src/hooks/useLaboratoryMembers.ts`, dan `src/app/assistant/manage/laboratory-members.tsx`: Khanza satu-satunya pemilik; Nabila tidak mengubah implementasi distribusi.
+
+Tidak ada ownership ganda antar file. Daftar kepemilikan pada tabel ini mengalahkan deskripsi area folder yang lebih luas: pemilik fitur lain tidak memperoleh hak mengubah file milik anggota lain. File yang bertanda direncanakan belum ada dan hanya akan ditambahkan pada sprint implementasi di bawah folder modul yang terpisah tersebut.
+
+## 13. Strategi pengerjaan paralel
+
+Pada awal sprint:
+
+1. Empat anggota menyepakati role, koleksi, enum, payload endpoint, dan field dokumen.
+2. Khanza menjaga tipe shared dan menyediakan interface baca identitas/direktori praktikan dari modul distribusi; Nabila tidak mengubah implementasi distribusi tersebut.
+3. Nabila memiliki penuh modul enrollment dan menyediakan kontrak `EnrollmentReader` untuk roster baca Olive; implementasi Nabila memakai mock `PraktikanDirectoryReader` dari Khanza sampai adapter nyata tersedia.
+4. Olive mengembangkan UI sesi/presensi memakai mock sessions dan mock `EnrollmentReader`; tidak mengubah service, hook, atau layar enrollment Nabila.
+5. Jura mengembangkan payment UI dan backend contract melalui mock response + emulator; webhook boleh diuji sendiri dengan signed fixture.
+
+Integrasi dilakukan bertahap:
+
+1. Shared contract role/data/status, termasuk pemisahan membership laboratorium dan enrollment jadwal, disepakati pada awal sprint; tipe shared hanya dimodifikasi pemilik file yang ditetapkan.
+2. Nabila mengembangkan enrollment berdasarkan mock `PraktikanDirectoryReader`; Khanza mengembangkan membership/distribusi dengan interface baca identitas yang sudah disepakati. Masing-masing dapat mulai tanpa menunggu implementasi lain.
+3. Nabila menjadi pemilik tunggal enrollment; Khanza tidak mengubah atau mengimplementasikan enrollment. Nabila tidak mengubah file membership/distribusi milik Khanza.
+4. Olive memakai mock `EnrollmentReader` dengan kontrak tetap untuk roster sesi; integrasi Olive ke reader nyata Nabila dilakukan setelah kedua modul lulus test kontrak.
+5. Olive dapat mengembangkan sesi/presensi tanpa menunggu Midtrans; fine dibuat terhadap attendance dan permit memakai interface mock dari Jura.
+6. Jura dapat mengembangkan payment UI dan backend melalui mock `FineSummary` dan `PaymentResult`, tanpa menunggu layar final Olive.
+7. Notifikasi baru diuji terhadap fixture event invoice/payment; integrasi FCM dilakukan setelah backend trigger dan device token contract stabil.
+8. Pengujian integrasi hanya dimulai setelah unit module dan mock contract lulus. Urutan integrasi minimum: role→laboratorium/distribusi/enrollment→sesi/presensi→invoice→payment→notifikasi.
+9. Pengujian end-to-end terakhir memakai Firebase emulator untuk alur data dan Midtrans Sandbox untuk transaksi; remote push memerlukan development build atau build yang mendukung FCM.
+
+## 14. Dependency matrix
+
+| Fitur | Data contract | Implementasi dependency | Backend eksternal | Pengujian integrasi |
+|---|---|---|---|---|
+| Role/assignment | role, assignment | Khanza/Nabila; rules | Firebase Auth/Firestore | Auth emulators |
+| Laboratorium/grace | laboratories | Nabila | Firestore | laboratory/Rules tests |
+| Bulk laboratorium | import row | Nabila | Firestore | CSV/import unit |
+| Bulk praktikan/Asprak | directory read interface + laboratory membership/assignment | Khanza | Firestore | Rules/emulator; tidak membuat enrollment |
+| Setup enrollment Aslab | studentDirectory reader, class, schedule, session, enrollments | Nabila | Firestore | emulator enrollment + role guard; sumber direktori dimock atau read-only dari Khanza |
+| Roster sesi | EnrollmentReader dari enrollments dengan classId+scheduleId | Olive mengonsumsi; Nabila pemilik service | Firestore realtime | mock contract dahulu, emulator integrasi kemudian |
+| Transfer | assignment ledger/laboratoryMembers | Khanza | Firestore transaction | transfer/emulator; enrollment tidak berubah |
+| Dashboard overview | sessions/schedules/enrollments | Nabila | Firestore realtime | emulator/listener |
+| Dashboard history | sessions/fines/payments | Khanza | Firestore realtime | mock contract, emulator/listener |
+| Buka/tutup sesi | session/status | Olive | Callable functions | attendance emulators |
+| Keterlambatan/tagihan | attendance/fine | Olive | Functions/Firestore transaction | fine unit/emulator |
+| Midtrans | fine/payment | Jura | Midtrans Sandbox, hosting | mock webhook/sandbox |
+| Notifikasi baru | deviceTokens/payload | Jura | FCM/Firebase Functions | emulator/mock FCM, development build |
+
+## 15. Skenario uji penerimaan (AT)
+
+- **S4-AT-01:** akun lama `asisten` tidak langsung mendapatkan dashboard Aslab.
+- **S4-AT-02:** Aslab dapat mengelola scope-nya, Asprak tidak dapat mengubah laboratorium.
+- **S4-AT-03:** single insert laboratorium valid/duplikat/range ditampilkan dengan tepat.
+- **S4-AT-04:** edit/status laboratorium berhasil; laboratorium nonaktif tidak dipakai sesi baru.
+- **S4-AT-05:** tiga bulk flow memiliki template terpisah dan review row independen.
+- **S4-AT-06:** konfigurasi radius diterapkan pada presensi berikutnya.
+- **S4-AT-07:** presensi tepat pada batas grace tepat waktu; satu detik sesudah terlambat.
+- **S4-AT-08:** dashboard menampilkan angka realtime dari jadwal/sesi; tidak ada dummy.
+- **S4-AT-09:** Aslab hanya melihat laboratorium dalam scope-nya.
+- **S4-AT-09A:** hanya role `aslab` dapat membuka/mengelola setup enrollment; Asprak, Praktikan, dan role lama `asisten`/`assistant` ditolak oleh UI guard dan backend.
+- **S4-AT-09B:** Aslab mendaftarkan mahasiswa yang tersedia ke jadwal praktikum; enrollment menghubungkan UID dan schedule yang benar melalui classId yang cocok, dan roster menerima record itu pada sesi terkait.
+- **S4-AT-09C:** ulangi pendaftaran UID yang sama pada schedule yang sama; transaction menolak duplikat/menjaga satu relasi schedule, sementara mahasiswa tetap dapat didaftarkan pada schedule lain yang valid.
+- **S4-AT-09D:** ubah distribusi mahasiswa antar-laboratorium tanpa aksi enrollment; scheduleIds enrollment dan roster jadwal tidak berubah. Olive dapat membaca roster yang benar melalui `EnrollmentReader` mock dan integrasi.
+- **S4-AT-09E:** enrollment legacy tanpa `scheduleIds` tidak otomatis muncul pada semua jadwal kelas; enrollment tersebut hanya masuk roster sesudah pemetaan eksplisit.
+- **S4-AT-10:** insert praktikan valid dan duplikat ditolak.
+- **S4-AT-11:** bulk praktikan dapat menyimpan baris diterima secara independen.
+- **S4-AT-12:** bulk Asprak mengaitkan akun dan assignment dengan benar.
+- **S4-AT-13:** bulk Asprak menolak role/kelas di luar scope.
+- **S4-AT-14:** transfer praktikan/Asprak tidak mengubah jadwal/sesi lama.
+- **S4-AT-15:** filter hari/minggu/bulan dan riwayat keuangan akurat.
+- **S4-AT-16:** Asprak tidak melihat kelas di luar assignment.
+- **S4-AT-17:** buka/tutup sesi memicu status realtime.
+- **S4-AT-18:** presensi ganda dan presensi setelah tutup ditolak.
+- **S4-AT-19:** keterlambatan dihitung dari startsAt+grace.
+- **S4-AT-20:** keterlambatan menghasilkan satu fine meskipun proses dipanggil berulang.
+- **S4-AT-21:** izin disetujui menjadi excused dan tidak membuat fine.
+- **S4-AT-22:** praktikan hanya melihat fine miliknya.
+- **S4-AT-23:** create payment hanya bisa dilakukan backend dan mengembalikan redirect token.
+- **S4-AT-24:** webhook replay tidak membuat payment sukses ganda.
+- **S4-AT-25:** riwayat payment tetap tersedia setelah restart app.
+- **S4-AT-26:** carry-over notification lolos permission/token/logout/navigation test; remote hanya dinyatakan berhasil melalui development build/production target yang mendukungnya.
+- **S4-AT-27:** notifikasi fine/payment mencapai UID yang tepat.
+- **S4-AT-28:** secret dan payment status tidak dapat dimanipulasi oleh client.
+
+### Tabel test case detail
+
+| Test | PIC | Langkah terukur | Hasil yang diterima | Status |
+|---|---|---|---|---|
+| S4-AT-05a — tiga bulk terpisah | Nabila/Khanza | Buka laboratorium, praktikan, dan Asprak dari menu berbeda; unduh tiga template. | Nama file, header, alur review, dan validasi tidak bercampur. | Belum dilaksanakan |
+| S4-AT-05b — review baris | Nabila/Khanza | Upload file valid+invalid+duplikat+field kosong; edit dan lengkapkan satu baris; terima satu dan tolak baris lain. | List tetap dapat discroll; status per baris berubah; baris diterima tersimpan tanpa menunggu baris lain. | Belum dilaksanakan |
+| S4-AT-09A — akses enrollment | Nabila | Coba buka setup dan panggil mutasi sebagai role Aslab, Asprak, Praktikan, dan role lama `asisten`/`assistant`. | Hanya Aslab scope-valid yang dapat memutasi; semua role lain ditolak di UI guard dan backend. | Belum dilaksanakan |
+| S4-AT-09B — relasi mahasiswa/jadwal | Nabila | Pilih mahasiswa dari `PraktikanDirectoryReader`, daftarkan ke schedule yang classId-nya cocok, lalu minta roster sesi memakai sessionId/scheduleId/classId. | Enrollment mengacu ke mahasiswa dan jadwal yang benar; hanya enrollment aktif terdaftar pada roster sesi. | Belum dilaksanakan |
+| S4-AT-09C — enrollment ganda | Nabila | Tambahkan UID yang sama dua kali ke schedule yang sama; ulangi untuk schedule berbeda dalam kelas yang valid. | Schedule pertama memiliki satu relasi UID; penambahan kedua idempotent/ditolak; schedule valid lain tidak dianggap duplikat. | Belum dilaksanakan |
+| S4-AT-09D — distribusi independen dan roster | Nabila/Khanza/Olive | Ambil roster mock; pindahkan anggota keanggotaan lab melalui service Khanza tanpa memanggil enrollment API; baca roster lagi melalui interface Nabila. | Roster schedule tetap sama; membership dan enrollment tetap terpisah; Olive hanya memakai reader enrollment. | Belum dilaksanakan |
+| S4-AT-09E — data enrollment legacy | Nabila | Baca enrollment lama tanpa `scheduleIds` sebagai roster dari dua schedule di class yang sama. | Tidak ada pemberian akses roster otomatis; hanya muncul sesudah mapping eksplisit. | Belum dilaksanakan |
+| S4-AT-14 — transfer tanpa jadwal | Khanza | Pindahkan satu praktikan dan satu Asprak ke lab lain, lalu bandingkan schedule/session lama. | Laboratorium assignment berubah; scheduleId, sessionId, laboratorium riwayat lama, dan attendance lama tidak berubah. | Belum dilaksanakan |
+| S4-AT-07/19 — batas grace | Olive | Buat presensi pada tepat startsAt+grace dan satu detik sesudahnya. | Presensi pertama tepat waktu; presensi kedua terlambat dan dihitung sekali. | Belum dilaksanakan |
+| S4-AT-20 — invoice idempotent | Olive | Memanggil pembuatan tagihan dua kali untuk attendance yang sama. | Satu fine deterministik tetap ada; tidak ada dua invoice untuk satu kejadian. | Belum dilaksanakan |
+| S4-AT-21 — izin excused | Olive | Asprak menyetujui izin, buat aturan presensi terlambat pada sesi tersebut. | Attendance berstatus excused, tidak hadir, bukan hadir; fine tidak dibuat. | Belum dilaksanakan |
+| S4-AT-24 — webhook replay | Jura | Kirim callback sukses valid dua kali, lalu kirim status client palsu. | Payment sukses hanya tercatat sekali; bill tetap dibackend; status palsu ditolak. | Belum dilaksanakan |
+| S4-AT-25 — riwayat persist | Jura | Tutup aplikasi, buka ulang, login sebagai praktikan pemilik invoice. | Sesi, tanggal invoice, nominal, waktu transaksi, dan status tetap tersedia. | Belum dilaksanakan |
+| S4-AT-26 — remote notification | Jura | Uji pada Android development build dengan dua akun dan satu device masing-masing. | Hanya UID pemilik menerima payload; logout menghapus token; pesan tetap tidak memutus proses utama. | Belum dilaksanakan |
+| S4-UI-T1 — tipografi | Empat anggota | Periksa brand, heading, body, button, form, dan caption pada perangkat kecil/besar serta font scaling aktif. | Satu family Nunito Sans; ukuran memenuhi skala; tidak ada teks penting <12; tidak ada overflow. | Belum dilaksanakan |
+| S4-UI-T2 — aksi duplikatif | Empat anggota | Audit setiap layar baru/terdampak. | Satu aksi utama primer; aksi sekunder tidak duplikatif; state loading/empty/error/success tersedia. | Belum dilaksanakan |
+
+## 16. Security dan validasi
+
+- Role dan assignment Aslab/Asprak divalidasi melalui ID token/custom claim/profile di backend dan Firestore Rules.
+- Firestore Rules harus menolak pembuatan/ubah lab, enrollment, dan transfer di luar scope.
+- Praktikan hanya dapat membaca fine/payment miliknya.
+- Client tidak dapat menulis status payment success/failed atau menulis fine tanpa transaction guard.
+- Semua Midtrans secret hanya dikelola backend; React Native hanya menyimpan URL, token transaksi, dan payment ID.
+- Webhook diverifikasi, replay dedup, dan audit log disimpan tanpa secret.
+- Bulk import dibatasi ukuran, tipe, duplikat, dan row count; row yang diterima diproses independen.
+- Tidak ada manipulasi excused menjadi hadir.
+- Notifikasi harus memvalidasi recipient; kegagalan notifikasi tidak rollback mutasi utama.
+
+## 17. Definisi selesai Sprint 4
+
+Sprint dinyatakan selesai jika seluruh FR dan UI ID memiliki PIC, setiap acceptance criteria memiliki AT, tiga bulk flow terpisah tersedia, role dan scope teruji, payment backend dan webhook tervalidasi pada sandbox, carry-over Jura tercatat, dan tidak ada perubahan file di luar `SRS.md`.
+
+### Status requirement
+
+| Kelompok | FR | Status baseline | Ruang hasil |
+|---|---|---|---|
+| Aslab/laboratorium/enrollment/dashboard | S4-SRS-01–08A | Belum diimplementasikan pada bentuk role Aslab Sprint 4; laboratorium dasar, enrollment dasar, dan dashboard sebagian sudah ada. | Implemented/Blocked/Deferred; bukti file/test |
+| Distribusi dan history | S4-SRS-09–14 | Membership distribusi, bulk/transfer, role Asprak, dan history keuangan belum tersedia; enrollment class-level existing adalah domain Nabila, bukan Khanza. | Implemented/Blocked/Deferred; bukti file/test |
+| Sesi/presensi/denda/izin | S4-SRS-15–20 | Presensi/sesi/izin sebagian tersedia; keterlambatan dan invoice belum tersedia. | Implemented/Blocked/Deferred; bukti file/test |
+| Midtrans/payment | S4-SRS-21–24, 27 | Belum tersedia; arsitektur Blaze/free-tier hosting masih keputusan teknis. | Implemented/Blocked/Deferred; bukti endpoint/webhook/test |
+| Push dan notifikasi baru | S4-SRS-25–26 | Registrasi dan tiga trigger Sprint 3 sebagian tersedia; remote production dan notifikasi payment belum lengkap. | Implemented/Blocked/Deferred; bukti build/test |
+
+## 18. Catatan revisi Sprint 4
+
+- Role lama `asisten`/`assistant` tidak disamakan otomatis dengan Aslab atau Asprak.
+- Framework backend Midtrans mengikuti backend existing Firebase Functions bila project dibiayai Blaze; Firebase Spark dinyatakan tidak cukup.
+- Daftar, template, dan proses tiga bulk insert dipisahkan secara tegas.
+- Pembagian beban final setiap PIC adalah 34 poin pada skala 1/2/3/5/8.
+- Semua data hasil akhir dashboard dan history harus berasal dari Firestore; dummy tidak boleh menjadi hasil akhir.
+
+## 18A. Matriks keterlacakan Sprint 4
+
+| Kebutuhan kelompok | FR | UI | AT |
+|---|---|---|---|
+| Role, laboratorium, bulk lab, grace, enrollment, dashboard Aslab | S4-SRS-01–08A | S4-UI-01–07A | S4-AT-01–09E |
+| Distribusi anggota dan history | S4-SRS-09–14 | S4-UI-08–13 | S4-AT-10–15, S4-AT-09D |
+| Sesi Asprak dan denda | S4-SRS-15–20 | S4-UI-14–19 | S4-AT-16–21 |
+| Midtrans dan riwayat payment | S4-SRS-21–24 | S4-UI-20–23 | S4-AT-22–25 |
+| Push notification dan payment notification | S4-SRS-25–27 | S4-UI-24–26 | S4-AT-26–28 |
+
+---
+
+# BAGIAN V — KETENTUAN UMUM DOKUMEN
 
 1. Isi Sprint 1 dan Sprint 2 pada dokumen ini dipertahankan dari naskah sumber. Perbedaan format hanya berasal dari penempatan sebagai bagian dokumen terpadu; satu-satunya koreksi isi adalah NIM Nabila pada Sprint 1.
 2. Kebutuhan Sprint 3 ditambahkan sebagai perluasan, bukan pengganti kebutuhan sprint sebelumnya.
