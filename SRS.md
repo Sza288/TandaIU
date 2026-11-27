@@ -1,8 +1,8 @@
 # SOFTWARE REQUIREMENTS SPECIFICATION (SRS)
 # TandaIU — Dokumen Terpadu Sprint 1, Sprint 2, Sprint 3, dan Sprint 4
 
-**Status:** Dokumen gabungan dari baseline Sprint 1, dokumen Sprint 2, dan spesifikasi Sprint 3  
-**Tanggal penggabungan:** 20 November 2026
+**Status:** Dokumen gabungan dari baseline Sprint 1, dokumen Sprint 2, Sprint 3 dan spesifikasi Sprint 4  
+**Tanggal penggabungan:** 27 November 2026
 
 ## Panduan membaca dokumen
 
@@ -11,14 +11,18 @@ Dokumen ini menggabungkan tiga tahap pengembangan TandaIU. Setiap sprint ditampi
 - **Sprint 1** berisi baseline kebutuhan prototipe awal. Naskah sumber dipertahankan tanpa penulisan ulang.
 - **Sprint 2** berisi pengembangan autentikasi, CRUD praktikum, presensi realtime, serta pengajuan izin dan AI-sentimen. Naskah sumber dipertahankan tanpa penulisan ulang.
 - **Sprint 3** berisi pengembangan presensi berbasis lokasi, pengelolaan laboratorium, Maps, informasi aktivitas laboratorium, dan push notification.
+- **Sprint 3** berisi pengembangan manajemen laboratorium oleh Aslab, distribusi praktikan dan Asprak ke laboratorium, dashboard operasional Aslab, pengelolaan sesi oleh Asprak, kalkulasi keterlambatan dan denda, integrasi pembayaran melalui Midtrans Sandbox, serta penyelesaian push notification.
+
 
 ### Ketentuan kode kebutuhan
 
-Kode kebutuhan pada Sprint 1 dan Sprint 2 dipertahankan sesuai dokumen sumber. Karena penomoran `SRS-01` sampai `SRS-16` pada Sprint 2 sudah digunakan, kebutuhan baru Sprint 3 menggunakan awalan **S3-SRS** agar tidak tertukar. Kode dan isi kebutuhan Sprint 1 maupun Sprint 2 tidak diubah.
+Kode kebutuhan pada Sprint 1 dan Sprint 2 dipertahankan sesuai dokumen sumber. Karena penomoran SRS-01 sampai SRS-16 pada Sprint 2 sudah digunakan, kebutuhan baru Sprint 3 menggunakan awalan S3-SRS, sedangkan kebutuhan baru Sprint 4 menggunakan awalan S4-SRS agar tidak tertukar. Kode dan isi kebutuhan sprint sebelumnya tidak diubah.
 
 ### Hubungan antarsprint
 
-Sprint berikutnya mengembangkan sistem dari hasil sprint sebelumnya. Pernyataan batasan pada Sprint 1, misalnya penggunaan data lokal dan belum adanya autentikasi, merupakan batasan prototipe pada tahap tersebut. Batasan itu bukan larangan untuk mengembangkan Firebase, autentikasi, dan sinkronisasi pada Sprint 2. Demikian pula, fitur lokasi, Maps, dan notifikasi menjadi perluasan pada Sprint 3.
+Sprint berikutnya mengembangkan sistem dari hasil sprint sebelumnya. Pernyataan batasan pada Sprint 1, misalnya penggunaan data lokal dan belum adanya autentikasi, merupakan batasan prototipe pada tahap tersebut. Batasan itu bukan larangan untuk mengembangkan Firebase, autentikasi, dan sinkronisasi pada Sprint 2.
+
+Sprint 3 memperluas sistem melalui presensi berbasis lokasi, Maps, pengelolaan informasi laboratorium, dan push notification. Sprint 4 melanjutkan pengembangan tersebut dengan menambahkan pengelolaan laboratorium dan distribusi anggota, manajemen sesi, sistem denda, pembayaran, serta notifikasi pembayaran. Fitur dari sprint sebelumnya tetap menjadi bagian dari sistem dan harus dijaga kompatibilitasnya.
 
 ---
 
